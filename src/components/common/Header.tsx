@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GraduationCap, ShieldCheck, Sun, Moon, Database, Award, Lock } from 'lucide-react';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { dataService } from '../../services/dataService';
+import { GULogo } from './GULogo';
 
 interface HeaderProps {
   currentView?: 'student' | 'admin' | 'test' | 'result';
@@ -35,7 +36,8 @@ export const Header: React.FC<HeaderProps> = ({
   const activeAdminAuth = isAdminAuthenticated ?? isAdminLoggedIn ?? false;
 
   const [logoClicks, setLogoClicks] = useState(0);
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>('/logo.png');
+  const [imgError, setImgError] = useState(false);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(() => {
     return sessionStorage.getItem('gradeup_admin_unlocked') === 'true';
   });
@@ -44,6 +46,7 @@ export const Header: React.FC<HeaderProps> = ({
     dataService.getSettings().then(s => {
       if (s?.logo_url) {
         setLogoUrl(s.logo_url);
+        setImgError(false);
       }
     }).catch(err => console.warn('Failed to fetch settings in Header', err));
   }, [currentView]);
@@ -100,10 +103,15 @@ export const Header: React.FC<HeaderProps> = ({
             title="Gradeup Study Mock Tests"
           >
             <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform overflow-hidden">
-              {logoUrl ? (
-                <img src={logoUrl} alt="Project Logo" className="w-full h-full object-cover" />
+              {logoUrl && !imgError ? (
+                <img
+                  src={logoUrl}
+                  alt="Gradeup Study Logo"
+                  className="w-full h-full object-cover"
+                  onError={() => setImgError(true)}
+                />
               ) : (
-                <GraduationCap className="w-6 h-6 sm:w-7 sm:h-7" />
+                <GraduationCap className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
               )}
             </div>
             <div>

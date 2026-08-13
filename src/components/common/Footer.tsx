@@ -1,5 +1,5 @@
 import React from 'react';
-import { Youtube, Send, Instagram, MessageCircle, Heart } from 'lucide-react';
+import { GraduationCap, Youtube, Send, Instagram, MessageCircle, Heart } from 'lucide-react';
 
 export const Footer: React.FC = () => {
   return (
@@ -9,9 +9,14 @@ export const Footer: React.FC = () => {
           
           {/* Column 1: Brand Info */}
           <div className="md:col-span-2">
-            <h3 className="text-xl font-bold text-white mb-2 tracking-tight">
-              GRADEUP <span className="text-blue-400">STUDY</span>
-            </h3>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
+                <GraduationCap className="w-6 h-6 text-white" />
+              </div>
+              <h3 className="text-xl font-bold text-white tracking-tight">
+                GRADEUP <span className="text-blue-400">STUDY</span>
+              </h3>
+            </div>
             <p className="text-sm text-slate-400 mb-4 max-w-md leading-relaxed">
               Your Trusted Partner During Preparation. Empowering competitive exam aspirants in Himachal Pradesh and across India with accurate, real-exam patterned online mock tests and detailed performance analytics.
             </p>

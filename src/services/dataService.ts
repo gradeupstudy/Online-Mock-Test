@@ -38,17 +38,33 @@ export const dataService = {
   // ADMIN SETTINGS
   // ------------------------------------
   getSettings: async (): Promise<AdminSettings> => {
+    let settings = DEMO_ADMIN_SETTINGS;
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
         const { data, error } = await supabase.from('admin_settings').select('*').limit(1).single();
-        if (!error && data) return data as AdminSettings;
+        if (!error && data) settings = data as AdminSettings;
       } catch (err) {
         console.warn('Supabase fetch settings failed', err);
       }
+    } else {
+      const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+      if (raw) {
+        try {
+          settings = { ...DEMO_ADMIN_SETTINGS, ...JSON.parse(raw) };
+        } catch {
+          settings = DEMO_ADMIN_SETTINGS;
+        }
+      }
     }
-    const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    return raw ? JSON.parse(raw) : DEMO_ADMIN_SETTINGS;
+
+    // Clear out unsplash image URLs if present
+    if (settings.logo_url && settings.logo_url.includes('unsplash.com')) {
+      settings.logo_url = '/logo.png';
+      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+    }
+
+    return settings;
   },
 
   updateSettings: async (settings: Partial<AdminSettings>): Promise<AdminSettings> => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Save, Globe, Mail, Phone, Youtube, Send, Instagram, ShieldCheck, Check, Key, Lock, UserCheck, Image as ImageIcon, Upload, Trash2 } from 'lucide-react';
+import { Settings, Save, Globe, Mail, Phone, Youtube, Send, Instagram, ShieldCheck, Check, Key, Lock, UserCheck, Image as ImageIcon, GraduationCap } from 'lucide-react';
 import { AdminSettings } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase';
@@ -188,19 +188,15 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
 
           {/* PROJECT LOGO SECTION - DEFAULT FIXED LOGO */}
           <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 shadow-xs shrink-0 overflow-hidden">
-              <img
-                src="/logo.png"
-                alt="Gradeup Study Main Logo"
-                className="w-full h-full object-contain"
-              />
+            <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
+              <GraduationCap className="w-8 h-8 text-white" />
             </div>
             <div>
               <p className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
                 Main Project Logo
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                Official Gradeup Study GU Emblem active as project logo.
+                Official Gradeup Study default emblem active as project logo.
               </p>
             </div>
           </div>
