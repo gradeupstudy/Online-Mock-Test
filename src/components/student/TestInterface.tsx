@@ -80,7 +80,7 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
   // Load questions and restore saved local state
   const loadQuestionsAndRestore = async () => {
     setLoading(true);
-    const qList = await dataService.getQuestions(test.id);
+    const qList = await dataService.getPublicQuestions(test.id);
     // Sort by question_number
     qList.sort((a, b) => a.question_number - b.question_number);
     setQuestions(qList);
@@ -197,75 +197,48 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
     }
   };
 
-  // Calculate scores & submit attempt
+  // Calculate scores & submit attempt via server-side scoring RPC
   const calculateAndSubmit = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
 
-    let totalScore = 0;
-    let correctCount = 0;
-    let wrongCount = 0;
-    let unattemptedCount = 0;
-
-    const detailedResponses: Attempt['responses'] = [];
-
-    questions.forEach((q) => {
-      const givenAns = selectedAnswers[q.id] || null;
-      let status: 'correct' | 'wrong' | 'unattempted' = 'unattempted';
-      let marksAwarded = 0;
-
-      if (givenAns) {
-        if (givenAns.toUpperCase() === q.correct_answer.toUpperCase()) {
-          status = 'correct';
-          correctCount++;
-          marksAwarded = test.marks_per_question;
-          totalScore += marksAwarded;
-        } else {
-          status = 'wrong';
-          wrongCount++;
-          marksAwarded = -test.negative_marking;
-          totalScore += marksAwarded;
-        }
-      } else {
-        unattemptedCount++;
-      }
-
-      detailedResponses.push({
-        question_id: q.id,
-        user_answer: givenAns,
-        correct_answer: q.correct_answer,
-        status,
-        marks_awarded: marksAwarded
-      });
-    });
-
-    const totalPossibleMarks = test.total_marks || (questions.length * test.marks_per_question);
-    // Ensure totalScore is formatted neatly
-    const finalScore = Math.max(0, Math.round(totalScore * 100) / 100);
-    const percentage = Math.max(0, Math.round((finalScore / (totalPossibleMarks || 1)) * 100));
     const timeTaken = (test.duration_minutes * 60) - timeLeftSeconds;
 
-    const newAttempt: Attempt = {
-      id: 'att-' + Date.now(),
+    // Create or find attempt record
+    let baseAttempt: Attempt = {
+      id: studentData.attempt_id || (crypto.randomUUID ? crypto.randomUUID() : 'att-' + Date.now()),
       test_id: test.id,
       student_name: studentData.student_name,
       student_mobile: studentData.student_mobile,
-      student_email: studentData.student_email,
+      student_email: studentData.student_email || null,
       student_state: studentData.student_state,
       student_district: studentData.student_district,
-      score: finalScore,
-      percentage,
-      correct_answers: correctCount,
-      wrong_answers: wrongCount,
-      unattempted_answers: unattemptedCount,
-      time_taken_seconds: timeTaken,
-      status: 'completed',
-      submitted_at: new Date().toISOString(),
-      responses: detailedResponses
+      status: 'in_progress',
+      score: 0,
+      percentage: 0,
+      correct_answers: 0,
+      wrong_answers: 0,
+      time_taken_seconds: timeTaken
     };
 
-    // Save to dataService
-    const savedAttempt = await dataService.saveAttempt(newAttempt);
+    if (!studentData.attempt_id) {
+      baseAttempt = await dataService.createAttempt(test, {
+        full_name: studentData.student_name,
+        mobile: studentData.student_mobile,
+        email: studentData.student_email,
+        state: studentData.student_state,
+        district: studentData.student_district
+      });
+    }
+
+    // Submit attempt to server RPC
+    const savedAttempt = await dataService.submitAttemptSecure(
+      test,
+      baseAttempt,
+      selectedAnswers,
+      timeTaken,
+      tabSwitchCount
+    );
 
     // Clear progress from localStorage
     const saveKey = `gradeup_progress_${test.id}_${studentData.student_mobile}`;

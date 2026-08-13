@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Award, CheckCircle, XCircle, Clock, BookOpen, Share2, Printer, Trophy, ArrowLeft, HelpCircle, Check, AlertCircle, FileText } from 'lucide-react';
-import { Attempt, Test, Question } from '../../types';
+import { Attempt, Test, Question, PublicLeaderboardEntry } from '../../types';
 import { dataService } from '../../services/dataService';
 
 interface TestResultProps {
@@ -12,7 +12,8 @@ interface TestResultProps {
 export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, onToast }) => {
   const [test, setTest] = useState<Test | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [leaderboard, setLeaderboard] = useState<Attempt[]>([]);
+  const [leaderboard, setLeaderboard] = useState<PublicLeaderboardEntry[]>([]);
+  const [myRank, setMyRank] = useState<number>(1);
   const [activeTab, setActiveTab] = useState<'solutions' | 'leaderboard' | 'summary'>('summary');
   const [solutionFilter, setSolutionFilter] = useState<'all' | 'correct' | 'wrong' | 'unattempted'>('all');
 
@@ -22,22 +23,15 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
 
   const loadResultData = async () => {
     const t = await dataService.getTestById(attempt.test_id);
-    const qList = await dataService.getQuestions(attempt.test_id);
-    const allAttempts = await dataService.getAttempts(attempt.test_id);
+    const qList = await dataService.getQuestions(attempt.test_id, true);
+    const topBoard = await dataService.getLeaderboard(attempt.test_id, 30);
+    const rank = await dataService.getStudentRank(attempt.test_id, attempt.id);
 
     setTest(t);
     setQuestions(qList);
-
-    // Sort leaderboard by score desc, time asc
-    const sorted = [...allAttempts].sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return a.time_taken_seconds - b.time_taken_seconds;
-    });
-
-    setLeaderboard(sorted);
+    setLeaderboard(topBoard);
+    setMyRank(rank || 1);
   };
-
-  const myRank = leaderboard.findIndex((a) => a.id === attempt.id) + 1;
 
   const handlePrint = () => {
     window.print();
@@ -336,15 +330,15 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {leaderboard.map((a, idx) => {
-                  const isMe = a.id === attempt.id;
+                {leaderboard.map((item) => {
+                  const isMe = item.attempt_id === attempt.id;
                   return (
-                    <tr key={a.id} className={isMe ? 'bg-blue-50 dark:bg-blue-950/80 font-bold' : ''}>
-                      <td className="p-3 font-black text-slate-500">#{idx + 1}</td>
-                      <td className="p-3 text-slate-900 dark:text-white font-bold">{a.student_name}</td>
-                      <td className="p-3 text-slate-500">{a.student_district}, {a.student_state}</td>
-                      <td className="p-3 text-emerald-600 font-black text-sm">{a.score} pts</td>
-                      <td className="p-3 text-slate-500">{Math.floor(a.time_taken_seconds / 60)}m {a.time_taken_seconds % 60}s</td>
+                    <tr key={item.attempt_id} className={isMe ? 'bg-blue-50 dark:bg-blue-950/80 font-bold' : ''}>
+                      <td className="p-3 font-black text-slate-500">#{item.rank}</td>
+                      <td className="p-3 text-slate-900 dark:text-white font-bold">{isMe ? attempt.student_name + ' (You)' : item.masked_name}</td>
+                      <td className="p-3 text-slate-500">{isMe ? `${attempt.student_district}, ${attempt.student_state}` : 'Verified Candidate'}</td>
+                      <td className="p-3 text-emerald-600 font-black text-sm">{item.score} pts</td>
+                      <td className="p-3 text-slate-500">{Math.floor(item.time_taken_seconds / 60)}m {item.time_taken_seconds % 60}s</td>
                     </tr>
                   );
                 })}

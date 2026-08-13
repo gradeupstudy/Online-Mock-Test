@@ -1,8 +1,7 @@
 -- ========================================================
--- GRADEUP STUDY MOCK TEST PLATFORM - SUPABASE SCHEMA SQL
+-- GRADEUP STUDY MOCK TEST PLATFORM - PRODUCTION SUPABASE SCHEMA
 -- ========================================================
 
--- Enable UUID extension if not enabled
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. TESTS TABLE
@@ -57,23 +56,23 @@ CREATE TABLE IF NOT EXISTS public.questions (
     negative_marks DECIMAL(5,2) DEFAULT 0.25,
     subject VARCHAR(100) DEFAULT 'General Studies',
     chapter VARCHAR(100) DEFAULT 'General',
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_test_question_number UNIQUE (test_id, question_number)
 );
 
--- 3. STUDENTS TABLE
+-- 3. STUDENTS TABLE (Email is optional)
 CREATE TABLE IF NOT EXISTS public.students (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     full_name VARCHAR(255) NOT NULL,
     mobile VARCHAR(15) NOT NULL,
-    email VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NULL,
     state VARCHAR(100) NOT NULL,
     district VARCHAR(100) NOT NULL,
     gender VARCHAR(20) NULL,
     age INTEGER NULL,
     exam_category VARCHAR(100) NULL,
     roll_number VARCHAR(50) NULL,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    CONSTRAINT unique_student_contact UNIQUE (mobile, email)
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- 4. ATTEMPTS TABLE
@@ -83,7 +82,7 @@ CREATE TABLE IF NOT EXISTS public.attempts (
     student_id UUID REFERENCES public.students(id) ON DELETE CASCADE,
     student_name VARCHAR(255) NOT NULL,
     student_mobile VARCHAR(15) NOT NULL,
-    student_email VARCHAR(255) NOT NULL,
+    student_email VARCHAR(255) NULL,
     student_state VARCHAR(100) NOT NULL,
     student_district VARCHAR(100) NOT NULL,
     start_time TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -111,10 +110,11 @@ CREATE TABLE IF NOT EXISTS public.answers (
     is_correct BOOLEAN DEFAULT false,
     marks_obtained DECIMAL(5,2) DEFAULT 0.00,
     is_marked_for_review BOOLEAN DEFAULT false,
-    answered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    answered_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+    CONSTRAINT unique_attempt_question UNIQUE (attempt_id, question_id)
 );
 
--- 6. SOCIAL_PLATFORMS TABLE
+-- 6. SOCIAL PLATFORMS TABLE
 CREATE TABLE IF NOT EXISTS public.social_platforms (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     platform_name VARCHAR(100) NOT NULL,
@@ -127,7 +127,7 @@ CREATE TABLE IF NOT EXISTS public.social_platforms (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 7. SOCIAL_VERIFICATIONS TABLE
+-- 7. SOCIAL VERIFICATIONS TABLE
 CREATE TABLE IF NOT EXISTS public.social_verifications (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     attempt_id UUID REFERENCES public.attempts(id) ON DELETE CASCADE,
@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS public.social_verifications (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- 8. ADMIN_SETTINGS TABLE
+-- 8. ADMIN SETTINGS TABLE
 CREATE TABLE IF NOT EXISTS public.admin_settings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     brand_name VARCHAR(255) DEFAULT 'Gradeup Study',
@@ -157,14 +157,262 @@ CREATE TABLE IF NOT EXISTS public.admin_settings (
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- INDEXES FOR SPEED AND QUERY OPTIMIZATION
+-- INDEXES
 CREATE INDEX IF NOT EXISTS idx_tests_slug ON public.tests(slug);
+CREATE INDEX IF NOT EXISTS idx_tests_test_code ON public.tests(test_code);
+CREATE INDEX IF NOT EXISTS idx_tests_is_published ON public.tests(is_published);
 CREATE INDEX IF NOT EXISTS idx_questions_test_id ON public.questions(test_id);
 CREATE INDEX IF NOT EXISTS idx_attempts_test_id ON public.attempts(test_id);
 CREATE INDEX IF NOT EXISTS idx_attempts_student_id ON public.attempts(student_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_status ON public.attempts(status);
+CREATE INDEX IF NOT EXISTS idx_attempts_submitted_at ON public.attempts(submitted_at);
 CREATE INDEX IF NOT EXISTS idx_answers_attempt_id ON public.answers(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_social_verifications_student_id ON public.social_verifications(student_id);
 
+-- ========================================================
+-- SECURITY RPC FUNCTIONS (CRITICAL REQS)
+-- ========================================================
+
+-- RPC 1: Fetch Questions WITHOUT sending correct_answer or explanation to student browser
+CREATE OR REPLACE FUNCTION public.get_public_test_questions(p_test_id UUID)
+RETURNS TABLE (
+    id UUID,
+    test_id UUID,
+    question_number INT,
+    question_text TEXT,
+    question_image TEXT,
+    option_a TEXT,
+    option_b TEXT,
+    option_c TEXT,
+    option_d TEXT,
+    marks DECIMAL(5,2),
+    negative_marks DECIMAL(5,2),
+    subject VARCHAR(100),
+    chapter VARCHAR(100)
+)
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+    SELECT 
+        q.id,
+        q.test_id,
+        q.question_number,
+        q.question_text,
+        q.question_image,
+        q.option_a,
+        q.option_b,
+        q.option_c,
+        q.option_d,
+        q.marks,
+        q.negative_marks,
+        q.subject,
+        q.chapter
+    FROM public.questions q
+    INNER JOIN public.tests t ON t.id = q.test_id
+    WHERE q.test_id = p_test_id AND t.is_published = true
+    ORDER BY q.question_number ASC;
+$$;
+
+-- RPC 2: Server-Side Scoring Function (Prevents Client Tampering)
+CREATE OR REPLACE FUNCTION public.submit_attempt_secure(
+    p_attempt_id UUID,
+    p_answers JSONB,
+    p_time_taken_seconds INT,
+    p_suspicious_count INT DEFAULT 0
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_attempt RECORD;
+    v_test RECORD;
+    v_q RECORD;
+    v_ans_obj JSONB;
+    v_selected VARCHAR(1);
+    v_question_id UUID;
+    v_correct_count INT := 0;
+    v_wrong_count INT := 0;
+    v_skipped_count INT := 0;
+    v_attempted_count INT := 0;
+    v_total_score DECIMAL(10,2) := 0.00;
+    v_max_marks DECIMAL(10,2) := 0.00;
+    v_percentage DECIMAL(5,2) := 0.00;
+    v_q_marks DECIMAL(5,2);
+    v_q_neg DECIMAL(5,2);
+    v_is_correct BOOLEAN;
+    v_marks_obtained DECIMAL(5,2);
+BEGIN
+    -- Check if attempt exists
+    SELECT * INTO v_attempt FROM public.attempts WHERE id = p_attempt_id;
+    IF v_attempt IS NULL THEN
+        RAISE EXCEPTION 'Attempt not found';
+    END IF;
+
+    -- If already completed/auto_submitted, return existing result without re-calculating (Duplicate Protection)
+    IF v_attempt.status IN ('completed', 'auto_submitted') THEN
+        RETURN jsonb_build_object(
+            'success', true,
+            'attempt_id', v_attempt.id,
+            'status', v_attempt.status,
+            'score', v_attempt.score,
+            'correct_answers', v_attempt.correct_answers,
+            'wrong_answers', v_attempt.wrong_answers,
+            'skipped_questions', v_attempt.skipped_questions,
+            'percentage', v_attempt.percentage,
+            'time_taken_seconds', v_attempt.time_taken_seconds,
+            'already_submitted', true
+        );
+    END IF;
+
+    -- Get test configuration
+    SELECT * INTO v_test FROM public.tests WHERE id = v_attempt.test_id;
+
+    -- Calculate scoring from official database questions
+    FOR v_q IN SELECT * FROM public.questions WHERE test_id = v_attempt.test_id ORDER BY question_number ASC LOOP
+        v_q_marks := COALESCE(v_q.marks, v_test.marks_per_question, 1.00);
+        v_q_neg := COALESCE(v_q.negative_marks, v_test.negative_marking, 0.25);
+        v_max_marks := v_max_marks + v_q_marks;
+
+        -- Find user response for this question in JSONB array
+        v_selected := NULL;
+        FOR v_ans_obj IN SELECT * FROM jsonb_array_elements(p_answers) LOOP
+            IF (v_ans_obj->>'question_id')::UUID = v_q.id THEN
+                v_selected := NULLIF(TRIM(v_ans_obj->>'selected_answer'), '');
+                EXIT;
+            END IF;
+        END LOOP;
+
+        IF v_selected IS NOT NULL AND v_selected IN ('A', 'B', 'C', 'D') THEN
+            v_attempted_count := v_attempted_count + 1;
+            IF v_selected = v_q.correct_answer THEN
+                v_correct_count := v_correct_count + 1;
+                v_is_correct := true;
+                v_marks_obtained := v_q_marks;
+                v_total_score := v_total_score + v_q_marks;
+            ELSE
+                v_wrong_count := v_wrong_count + 1;
+                v_is_correct := false;
+                v_marks_obtained := -1.0 * v_q_neg;
+                v_total_score := v_total_score - v_q_neg;
+            END IF;
+        ELSE
+            v_skipped_count := v_skipped_count + 1;
+            v_is_correct := false;
+            v_marks_obtained := 0.00;
+        END IF;
+
+        -- Insert or Update answer record
+        INSERT INTO public.answers (attempt_id, question_id, selected_answer, is_correct, marks_obtained, answered_at)
+        VALUES (p_attempt_id, v_q.id, v_selected, v_is_correct, v_marks_obtained, NOW())
+        ON CONFLICT (attempt_id, question_id) 
+        DO UPDATE SET 
+            selected_answer = EXCLUDED.selected_answer,
+            is_correct = EXCLUDED.is_correct,
+            marks_obtained = EXCLUDED.marks_obtained,
+            answered_at = NOW();
+    END LOOP;
+
+    -- Score must never be negative (default rule)
+    IF v_total_score < 0 THEN
+        v_total_score := 0.00;
+    END IF;
+
+    IF v_max_marks > 0 THEN
+        v_percentage := ROUND((v_total_score / v_max_marks) * 100.0, 2);
+    END IF;
+
+    -- Update attempt status atomically
+    UPDATE public.attempts SET
+        status = 'completed',
+        submitted_at = NOW(),
+        end_time = NOW(),
+        attempted_questions = v_attempted_count,
+        correct_answers = v_correct_count,
+        wrong_answers = v_wrong_count,
+        skipped_questions = v_skipped_count,
+        score = v_total_score,
+        percentage = v_percentage,
+        time_taken_seconds = p_time_taken_seconds,
+        suspicious_activity_count = p_suspicious_count
+    WHERE id = p_attempt_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'attempt_id', p_attempt_id,
+        'status', 'completed',
+        'score', v_total_score,
+        'max_marks', v_max_marks,
+        'correct_answers', v_correct_count,
+        'wrong_answers', v_wrong_count,
+        'skipped_questions', v_skipped_count,
+        'percentage', v_percentage,
+        'time_taken_seconds', p_time_taken_seconds,
+        'already_submitted', false
+    );
+END;
+$$;
+
+-- RPC 3: Public Leaderboard with Masked Names & Privacy
+CREATE OR REPLACE FUNCTION public.get_top_leaderboard(p_test_id UUID, p_limit INT DEFAULT 20)
+RETURNS TABLE (
+    rank BIGINT,
+    attempt_id UUID,
+    masked_name TEXT,
+    score DECIMAL(10,2),
+    correct_answers INT,
+    time_taken_seconds INT,
+    submitted_at TIMESTAMP WITH TIME ZONE
+)
+LANGUAGE sql
+SECURITY DEFINER
+AS $$
+    SELECT 
+        ROW_NUMBER() OVER (
+            ORDER BY a.score DESC, a.correct_answers DESC, a.time_taken_seconds ASC, a.submitted_at ASC
+        ) as rank,
+        a.id as attempt_id,
+        CASE 
+            WHEN LENGTH(a.student_name) > 3 THEN
+                SUBSTRING(a.student_name FROM 1 FOR 1) || REPEAT('*', GREATEST(1, LENGTH(SPLIT_PART(a.student_name, ' ', 1)) - 1)) || ' ' || SUBSTRING(COALESCE(SPLIT_PART(a.student_name, ' ', 2), '') FROM 1 FOR 1) || '.'
+            ELSE a.student_name
+        END as masked_name,
+        a.score,
+        a.correct_answers,
+        a.time_taken_seconds,
+        a.submitted_at
+    FROM public.attempts a
+    WHERE a.test_id = p_test_id AND a.status IN ('completed', 'auto_submitted')
+    ORDER BY a.score DESC, a.correct_answers DESC, a.time_taken_seconds ASC, a.submitted_at ASC
+    LIMIT p_limit;
+$$;
+
+-- RPC 4: Get Student Rank
+CREATE OR REPLACE FUNCTION public.get_student_rank(p_test_id UUID, p_attempt_id UUID)
+RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+    v_rank INT;
+BEGIN
+    WITH ranked AS (
+        SELECT 
+            id,
+            ROW_NUMBER() OVER (
+                ORDER BY score DESC, correct_answers DESC, time_taken_seconds ASC, submitted_at ASC
+            ) as r
+        FROM public.attempts
+        WHERE test_id = p_test_id AND status IN ('completed', 'auto_submitted')
+    )
+    SELECT r INTO v_rank FROM ranked WHERE id = p_attempt_id;
+    RETURN COALESCE(v_rank, 0);
+END;
+$$;
+
+-- ========================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
+-- ========================================================
 ALTER TABLE public.tests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.questions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
@@ -174,34 +422,36 @@ ALTER TABLE public.social_platforms ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.social_verifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admin_settings ENABLE ROW LEVEL SECURITY;
 
--- Anonymous users can read published tests
-CREATE POLICY "Public tests are viewable by anyone" ON public.tests
-    FOR SELECT USING (is_published = true OR auth.role() = 'authenticated');
+-- Tests Policy
+DROP POLICY IF EXISTS "Public tests viewable" ON public.tests;
+CREATE POLICY "Public tests viewable" ON public.tests FOR SELECT USING (is_published = true OR auth.role() = 'authenticated');
+CREATE POLICY "Admin write tests" ON public.tests FOR ALL USING (auth.role() = 'authenticated');
 
--- Anonymous users can read questions for published tests
-CREATE POLICY "Questions viewable for published tests" ON public.questions
-    FOR SELECT USING (
-        EXISTS (
-            SELECT 1 FROM public.tests 
-            WHERE tests.id = questions.test_id AND (tests.is_published = true OR auth.role() = 'authenticated')
-        )
-    );
+-- Questions Policy
+DROP POLICY IF EXISTS "Questions viewable for published tests" ON public.questions;
+CREATE POLICY "Questions viewable for published tests" ON public.questions FOR SELECT USING (
+    EXISTS (SELECT 1 FROM public.tests WHERE tests.id = questions.test_id AND tests.is_published = true)
+    OR auth.role() = 'authenticated'
+);
+CREATE POLICY "Admin write questions" ON public.questions FOR ALL USING (auth.role() = 'authenticated');
 
--- Allow students to register and create attempts
-CREATE POLICY "Anyone can register student" ON public.students FOR INSERT WITH CHECK (true);
-CREATE POLICY "Students can read own record" ON public.students FOR SELECT USING (true);
+-- Students Policy
+CREATE POLICY "Anyone register student" ON public.students FOR INSERT WITH CHECK (true);
+CREATE POLICY "Admin read students" ON public.students FOR SELECT USING (auth.role() = 'authenticated');
 
-CREATE POLICY "Anyone can create attempt" ON public.attempts FOR INSERT WITH CHECK (true);
-CREATE POLICY "Students can view attempts" ON public.attempts FOR SELECT USING (true);
-CREATE POLICY "Students can update attempt" ON public.attempts FOR UPDATE USING (true);
+-- Attempts Policy
+CREATE POLICY "Anyone start attempt" ON public.attempts FOR INSERT WITH CHECK (true);
+CREATE POLICY "Read attempt own or admin" ON public.attempts FOR SELECT USING (true);
+CREATE POLICY "Admin write attempts" ON public.attempts FOR ALL USING (auth.role() = 'authenticated');
 
-CREATE POLICY "Anyone can insert answers" ON public.answers FOR INSERT WITH CHECK (true);
-CREATE POLICY "Anyone can view answers for their attempt" ON public.answers FOR SELECT USING (true);
+-- Answers Policy
+CREATE POLICY "Anyone insert answer" ON public.answers FOR INSERT WITH CHECK (true);
+CREATE POLICY "Read answers own attempt" ON public.answers FOR SELECT USING (true);
+CREATE POLICY "Admin write answers" ON public.answers FOR ALL USING (auth.role() = 'authenticated');
 
-CREATE POLICY "Anyone can view active social platforms" ON public.social_platforms FOR SELECT USING (is_active = true OR auth.role() = 'authenticated');
+-- Social & Settings Policy
+CREATE POLICY "Anyone view active social" ON public.social_platforms FOR SELECT USING (is_active = true OR auth.role() = 'authenticated');
+CREATE POLICY "Admin manage social" ON public.social_platforms FOR ALL USING (auth.role() = 'authenticated');
 
--- Admin full privileges policy for authenticated users
-CREATE POLICY "Admin full access on tests" ON public.tests FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Admin full access on questions" ON public.questions FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Admin full access on social platforms" ON public.social_platforms FOR ALL USING (auth.role() = 'authenticated');
-CREATE POLICY "Admin full access on settings" ON public.admin_settings FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Anyone view settings" ON public.admin_settings FOR SELECT USING (true);
+CREATE POLICY "Admin manage settings" ON public.admin_settings FOR ALL USING (auth.role() = 'authenticated');

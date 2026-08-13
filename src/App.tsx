@@ -43,10 +43,8 @@ export default function App() {
     const savedTheme = localStorage.getItem('gradeup_theme');
     if (savedTheme === 'dark' || (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
       setIsDarkMode(true);
-      document.documentElement.classList.add('dark');
     } else {
       setIsDarkMode(false);
-      document.documentElement.classList.remove('dark');
     }
 
     // Check admin session
@@ -62,6 +60,16 @@ export default function App() {
     window.addEventListener('popstate', handleRouteFromUrl);
     return () => window.removeEventListener('popstate', handleRouteFromUrl);
   }, []);
+
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.style.colorScheme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
+    }
+  }, [isDarkMode]);
 
   const handleRouteFromUrl = async () => {
     const pathname = window.location.pathname; // e.g. "/test/demo" or "/admin"
@@ -239,6 +247,7 @@ export default function App() {
           darkMode={isDarkMode}
           isDarkMode={isDarkMode}
           onToggleDarkMode={toggleDarkMode}
+          onToast={showToast}
         />
       )}
 

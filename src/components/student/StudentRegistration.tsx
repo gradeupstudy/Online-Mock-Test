@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { User, Phone, Mail, MapPin, Building, ArrowRight, ShieldCheck, CheckCircle } from 'lucide-react';
 import { INDIAN_STATES_DISTRICTS } from '../../data/indianStatesDistricts';
 import { Test } from '../../types';
+import { dataService } from '../../services/dataService';
 
 export interface StudentRegistrationData {
+  attempt_id?: string;
   student_name: string;
   student_mobile: string;
   student_email: string;
@@ -48,7 +50,7 @@ export const StudentRegistration: React.FC<StudentRegistrationProps> = ({ test, 
     }));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!formData.student_name.trim()) {
@@ -61,7 +63,7 @@ export const StudentRegistration: React.FC<StudentRegistrationProps> = ({ test, 
       return;
     }
 
-    if (!formData.student_email.includes('@')) {
+    if (formData.student_email.trim() && !formData.student_email.includes('@')) {
       onToast?.('error', 'Please enter a valid email address');
       return;
     }
@@ -74,8 +76,20 @@ export const StudentRegistration: React.FC<StudentRegistrationProps> = ({ test, 
     // Save to localStorage for convenience
     localStorage.setItem('gradeup_student_info', JSON.stringify(formData));
 
+    // Register attempt in database
+    const attempt = await dataService.createAttempt(test, {
+      full_name: formData.student_name.trim(),
+      mobile: formData.student_mobile.trim(),
+      email: formData.student_email.trim() || null,
+      state: formData.student_state,
+      district: formData.student_district
+    });
+
     onToast?.('success', 'Registration verified! Starting exam...');
-    onStartExam(formData);
+    onStartExam({
+      ...formData,
+      attempt_id: attempt.id
+    });
   };
 
   const availableDistricts = INDIAN_STATES_DISTRICTS[formData.student_state] || [];
@@ -144,13 +158,12 @@ export const StudentRegistration: React.FC<StudentRegistrationProps> = ({ test, 
             {/* Email Address */}
             <div>
               <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                Email Address *
+                Email Address (Optional)
               </label>
               <div className="relative">
                 <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                 <input
                   type="email"
-                  required
                   placeholder="name@email.com"
                   value={formData.student_email}
                   onChange={(e) => setFormData({ ...formData, student_email: e.target.value })}

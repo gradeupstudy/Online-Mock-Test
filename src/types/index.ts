@@ -47,7 +47,7 @@ export interface Question {
   option_b: string;
   option_c: string;
   option_d: string;
-  correct_answer: 'A' | 'B' | 'C' | 'D' | string;
+  correct_answer?: 'A' | 'B' | 'C' | 'D' | string; // Optional on public student client!
   explanation?: string | null;
   marks: number;
   negative_marks: number;
@@ -61,7 +61,7 @@ export interface Student {
   id: string;
   full_name: string;
   mobile: string;
-  email: string;
+  email?: string | null;
   state: string;
   district: string;
   gender?: string;
@@ -76,7 +76,7 @@ export type AttemptStatus = 'in_progress' | 'completed' | 'auto_submitted' | 'ab
 export interface AttemptResponseItem {
   question_id: string;
   user_answer: string | null;
-  correct_answer: string;
+  correct_answer?: string;
   status: 'correct' | 'wrong' | 'unattempted';
   marks_awarded: number;
 }
@@ -87,7 +87,7 @@ export interface Attempt {
   student_id?: string;
   student_name: string;
   student_mobile: string;
-  student_email: string;
+  student_email?: string | null;
   student_state: string;
   student_district: string;
   start_time?: string;
@@ -156,6 +156,30 @@ export interface AdminSettings {
   default_marks: number;
   default_negative_marking: number;
   mask_leaderboard_names: boolean;
+}
+
+export interface PublicLeaderboardEntry {
+  rank: number;
+  attempt_id: string;
+  masked_name: string;
+  score: number;
+  correct_answers: number;
+  time_taken_seconds: number;
+  submitted_at: string;
+}
+
+export interface SubmitAttemptResult {
+  success: boolean;
+  attempt_id: string;
+  status: AttemptStatus;
+  score: number;
+  max_marks: number;
+  correct_answers: number;
+  wrong_answers: number;
+  skipped_questions: number;
+  percentage: number;
+  time_taken_seconds: number;
+  already_submitted: boolean;
 }
 
 export type QuestionStatus = 'not_visited' | 'visited' | 'answered' | 'marked_for_review' | 'answered_marked';

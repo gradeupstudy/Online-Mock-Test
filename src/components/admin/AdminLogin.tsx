@@ -9,7 +9,9 @@ interface AdminLoginProps {
 }
 
 export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackToHome, onToast }) => {
-  const [email, setEmail] = useState('admin@gradeupstudy.com');
+  const [email, setEmail] = useState(() => {
+    return localStorage.getItem('gradeup_admin_email') || 'admin@gradeupstudy.com';
+  });
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -43,12 +45,21 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
       }
     }
 
-    // Default admin passcode fallback if Supabase Auth is not set or for local dev access
-    if (password === 'gradeup123' || password === 'admin123' || password === 'admin') {
+    const savedEmail = localStorage.getItem('gradeup_admin_email') || 'admin@gradeupstudy.com';
+    const savedPassword = localStorage.getItem('gradeup_admin_password');
+
+    // Check custom saved credentials or default admin passcodes
+    const isEmailValid = email.trim().toLowerCase() === savedEmail.toLowerCase();
+    const isPasswordValid = (savedPassword && password === savedPassword) ||
+      password === 'gradeup123' ||
+      password === 'admin123' ||
+      password === 'admin';
+
+    if (isPasswordValid) {
       notify('success', 'Admin authenticated successfully!');
       onLoginSuccess();
     } else {
-      notify('error', 'Invalid admin password. Default passcode: gradeup123');
+      notify('error', 'Invalid admin password/credentials. Please try again.');
     }
     setIsLoading(false);
   };

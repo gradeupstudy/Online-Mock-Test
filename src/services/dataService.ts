@@ -1,8 +1,7 @@
-import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings } from '../types';
+import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult } from '../types';
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 
-// Local storage keys
 const STORAGE_KEYS = {
   TESTS: 'gradeup_tests',
   QUESTIONS: 'gradeup_questions',
@@ -13,7 +12,7 @@ const STORAGE_KEYS = {
   ACTIVE_ATTEMPT: 'gradeup_active_attempt_'
 };
 
-// Helper to initialize local storage with demo data if empty
+// Initialize local storage with fallback demo data if empty
 const initLocalStorage = () => {
   if (!localStorage.getItem(STORAGE_KEYS.TESTS)) {
     localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(DEMO_TESTS));
@@ -42,10 +41,10 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data, error } = await supabase.from('admin_settings').select('*').single();
+        const { data, error } = await supabase.from('admin_settings').select('*').limit(1).single();
         if (!error && data) return data as AdminSettings;
       } catch (err) {
-        console.warn('Supabase fetch settings failed, fallback to local', err);
+        console.warn('Supabase fetch settings failed', err);
       }
     }
     const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
@@ -81,7 +80,7 @@ export const dataService = {
         const { data, error } = await query;
         if (!error && data) return data as Test[];
       } catch (e) {
-        console.warn('Supabase fetch tests error, falling back to local storage', e);
+        console.warn('Supabase fetch tests error', e);
       }
     }
     const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
@@ -95,11 +94,26 @@ export const dataService = {
   getTestBySlugOrId: async (identifier: string): Promise<Test | null> => {
     if (!identifier) return null;
     const cleanId = identifier.trim().toLowerCase();
-    const tests = await dataService.getTests(true);
 
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data } = await supabase
+          .from('tests')
+          .select('*')
+          .or(`slug.eq.${identifier},test_code.eq.${identifier},id.eq.${identifier}`)
+          .limit(1)
+          .maybeSingle();
+
+        if (data) return data as Test;
+      } catch (e) {
+        console.warn('Supabase getTestBySlugOrId lookup failed', e);
+      }
+    }
+
+    const tests = await dataService.getTests(true);
     if (!tests || tests.length === 0) return null;
 
-    // 1. Direct or case-insensitive match by slug, id, or test_code
     const found = tests.find(t => 
       (t.slug && t.slug.toLowerCase() === cleanId) ||
       (t.id && t.id.toLowerCase() === cleanId) ||
@@ -107,21 +121,17 @@ export const dataService = {
     );
     if (found) return found;
 
-    // 2. Partial match fallback (e.g. "demo-copy-575" matches "demo" if exact copy slug isn't in local storage)
     const partialMatch = tests.find(t =>
       (t.slug && (cleanId.includes(t.slug.toLowerCase()) || t.slug.toLowerCase().includes(cleanId))) ||
-      (t.test_code && (cleanId.includes(t.test_code.toLowerCase()) || t.test_code.toLowerCase().includes(cleanId))) ||
-      (t.id && (cleanId.includes(t.id.toLowerCase()) || t.id.toLowerCase().includes(cleanId)))
+      (t.test_code && (cleanId.includes(t.test_code.toLowerCase()) || t.test_code.toLowerCase().includes(cleanId)))
     );
     if (partialMatch) return partialMatch;
 
-    // 3. Any fallback -> return first available test (e.g., demo test)
     return tests[0];
   },
 
   getPublicShareableUrl: (slugOrCode: string): string => {
     let origin = window.location.origin;
-    // Replace internal development container hostname (-dev-) with public shareable hostname (-pre-)
     if (origin.includes('-dev-')) {
       origin = origin.replace('-dev-', '-pre-');
     }
@@ -173,7 +183,7 @@ export const dataService = {
     const original = await dataService.getTestBySlugOrId(testId);
     if (!original) return null;
 
-    const newId = 'test-' + Date.now();
+    const newId = crypto.randomUUID ? crypto.randomUUID() : 'test-' + Date.now();
     const newCode = original.test_code + '-COPY';
     const newTitle = original.title + ' (Copy)';
     const newSlug = original.slug + '-copy-' + Math.floor(Math.random() * 1000);
@@ -192,12 +202,11 @@ export const dataService = {
 
     await dataService.saveTest(duplicated);
 
-    // Duplicate questions
-    const questions = await dataService.getQuestions(testId);
+    const questions = await dataService.getQuestions(testId, true);
     if (questions.length > 0) {
       const duplicatedQuestions = questions.map(q => ({
         ...q,
-        id: 'q-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+        id: crypto.randomUUID ? crypto.randomUUID() : 'q-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
         test_id: newId
       }));
       await dataService.saveQuestions(newId, duplicatedQuestions);
@@ -207,9 +216,37 @@ export const dataService = {
   },
 
   // ------------------------------------
-  // QUESTIONS MANAGEMENT
+  // QUESTIONS MANAGEMENT (SECURE)
   // ------------------------------------
-  getQuestions: async (testId: string): Promise<Question[]> => {
+
+  // For Students: Uses public RPC to omit correct_answer and explanation before submission!
+  getPublicQuestions: async (testId: string): Promise<Question[]> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('get_public_test_questions', { p_test_id: testId });
+        if (!error && data && data.length > 0) {
+          return data.map((q: any) => ({
+            ...q,
+            correct_answer: undefined, // Hide correct answer from client memory
+            explanation: undefined
+          }));
+        }
+      } catch (e) {
+        console.warn('RPC get_public_test_questions fallback to table query', e);
+      }
+    }
+    // Fallback if RPC fails or local storage
+    const allQ = await dataService.getQuestions(testId, false);
+    return allQ.map(q => ({
+      ...q,
+      correct_answer: undefined,
+      explanation: undefined
+    }));
+  },
+
+  // For Admin / Results: Fetch full question dataset
+  getQuestions: async (testId: string, includeAnswers = true): Promise<Question[]> => {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
@@ -226,14 +263,17 @@ export const dataService = {
 
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
     const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
-    return questionsMap[testId] || [];
+    const questions = questionsMap[testId] || [];
+    if (!includeAnswers) {
+      return questions.map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
+    }
+    return questions;
   },
 
   saveQuestions: async (testId: string, questions: Question[]): Promise<void> => {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        // Delete existing questions for test and insert new
         await supabase.from('questions').delete().eq('test_id', testId);
         await supabase.from('questions').insert(questions);
       } catch (e) {
@@ -246,7 +286,6 @@ export const dataService = {
     questionsMap[testId] = questions;
     localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
 
-    // Update question count in test
     const test = await dataService.getTestBySlugOrId(testId);
     if (test) {
       const updatedTest: Test = {
@@ -259,23 +298,21 @@ export const dataService = {
   },
 
   saveQuestion: async (testId: string, question: Question): Promise<Question> => {
-    const questions = await dataService.getQuestions(testId);
+    const questions = await dataService.getQuestions(testId, true);
     const index = questions.findIndex(q => q.id === question.id);
     if (index >= 0) {
       questions[index] = question;
     } else {
       questions.push(question);
     }
-    // Sort by question number
     questions.sort((a, b) => a.question_number - b.question_number);
     await dataService.saveQuestions(testId, questions);
     return question;
   },
 
   deleteQuestion: async (testId: string, questionId: string): Promise<void> => {
-    const questions = await dataService.getQuestions(testId);
+    const questions = await dataService.getQuestions(testId, true);
     const filtered = questions.filter(q => q.id !== questionId);
-    // Re-index question numbers
     const reindexed = filtered.map((q, idx) => ({ ...q, question_number: idx + 1 }));
     await dataService.saveQuestions(testId, reindexed);
   },
@@ -354,20 +391,23 @@ export const dataService = {
   // ------------------------------------
   checkPreviousAttempt: async (testId: string, mobile: string): Promise<Attempt | null> => {
     const attempts = await dataService.getAttempts(testId);
-    return attempts.find(a => a.student_mobile === mobile && a.status === 'completed') || null;
+    return attempts.find(a => a.student_mobile === mobile && (a.status === 'completed' || a.status === 'auto_submitted')) || null;
   },
 
   createAttempt: async (
     test: Test,
-    student: { full_name: string; mobile: string; email: string; state: string; district: string; gender?: string }
+    student: { full_name: string; mobile: string; email?: string | null; state: string; district: string; gender?: string }
   ): Promise<Attempt> => {
+    const attemptId = crypto.randomUUID ? crypto.randomUUID() : 'att-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+    const studentId = crypto.randomUUID ? crypto.randomUUID() : 'stu-' + Date.now();
+
     const newAttempt: Attempt = {
-      id: 'att-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+      id: attemptId,
       test_id: test.id,
-      student_id: 'stu-' + Date.now(),
+      student_id: studentId,
       student_name: student.full_name,
       student_mobile: student.mobile,
-      student_email: student.email,
+      student_email: student.email || null,
       student_state: student.state,
       student_district: student.district,
       start_time: new Date().toISOString(),
@@ -386,16 +426,18 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        // Save student
+        // Upsert student record
         await supabase.from('students').upsert({
+          id: studentId,
           full_name: student.full_name,
           mobile: student.mobile,
-          email: student.email,
+          email: student.email || null,
           state: student.state,
           district: student.district,
-          gender: student.gender
-        });
-        // Save attempt
+          gender: student.gender || null
+        }, { onConflict: 'mobile' });
+
+        // Create attempt in Supabase
         await supabase.from('attempts').insert(newAttempt);
       } catch (e) {
         console.error('Supabase attempt creation error', e);
@@ -406,7 +448,6 @@ export const dataService = {
     attempts.unshift(newAttempt);
     localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
 
-    // Save active session locally
     localStorage.setItem(STORAGE_KEYS.ACTIVE_ATTEMPT + test.id, JSON.stringify({
       attempt: newAttempt,
       answers: {}
@@ -432,30 +473,88 @@ export const dataService = {
     localStorage.removeItem(STORAGE_KEYS.ACTIVE_ATTEMPT + testId);
   },
 
-  submitAttempt: async (
+  // SECURE SERVER-SIDE SUBMISSION VIA SUPABASE RPC
+  submitAttemptSecure: async (
     test: Test,
     attempt: Attempt,
-    studentAnswers: Record<string, { selected: 'A'|'B'|'C'|'D'|null; marked: boolean }>,
-    questions: Question[],
+    selectedAnswers: Record<string, string>,
     timeTakenSeconds: number,
     suspiciousCount = 0
   ): Promise<Attempt> => {
+    const supabase = getSupabaseClient();
+    
+    // Format student answers array for RPC
+    const formattedAnswers = Object.entries(selectedAnswers).map(([qId, ans]) => ({
+      question_id: qId,
+      selected_answer: ans
+    }));
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('submit_attempt_secure', {
+          p_attempt_id: attempt.id,
+          p_answers: formattedAnswers,
+          p_time_taken_seconds: timeTakenSeconds,
+          p_suspicious_count: suspiciousCount
+        });
+
+        if (!error && data && data.success) {
+          // Fetch updated attempt details
+          const updatedAttempt = await dataService.getAttemptById(attempt.id);
+          if (updatedAttempt) {
+            // Fetch answers and official questions to construct responses view
+            const answers = await dataService.getAttemptAnswers(attempt.id);
+            const questions = await dataService.getQuestions(test.id, true);
+
+            const responses = questions.map(q => {
+              const ansRecord = answers.find(a => a.question_id === q.id);
+              const userAns = ansRecord ? ansRecord.selected_answer : (selectedAnswers[q.id] || null);
+              const isCorrect = ansRecord ? ansRecord.is_correct : (userAns === q.correct_answer);
+              const status: 'correct' | 'wrong' | 'unattempted' = !userAns ? 'unattempted' : (isCorrect ? 'correct' : 'wrong');
+
+              return {
+                question_id: q.id,
+                user_answer: userAns,
+                correct_answer: q.correct_answer,
+                status,
+                marks_awarded: ansRecord ? Number(ansRecord.marks_obtained) : 0
+              };
+            });
+
+            const completed = {
+              ...updatedAttempt,
+              responses
+            };
+
+            dataService.clearSavedProgress(test.id);
+            return completed;
+          }
+        } else if (error) {
+          console.error('Supabase submit_attempt_secure RPC error:', error);
+        }
+      } catch (err) {
+        console.error('Supabase submit_attempt_secure failed, fallback to client evaluation', err);
+      }
+    }
+
+    // Client evaluation fallback (used only if Supabase not configured or offline demo)
+    const questions = await dataService.getQuestions(test.id, true);
     let attempted = 0;
     let correct = 0;
     let wrong = 0;
     let totalScore = 0;
 
     const answerRecords: Answer[] = [];
+    const responses: Attempt['responses'] = [];
 
     questions.forEach(q => {
-      const userAns = studentAnswers[q.id];
-      const selected = userAns?.selected || null;
+      const selected = selectedAnswers[q.id] || null;
       let isCorrect = false;
       let marksObtained = 0;
 
       if (selected) {
         attempted++;
-        if (selected === q.correct_answer) {
+        if (selected.toUpperCase() === (q.correct_answer || '').toUpperCase()) {
           correct++;
           isCorrect = true;
           marksObtained = Number(q.marks) || Number(test.marks_per_question) || 1;
@@ -469,13 +568,21 @@ export const dataService = {
       totalScore += marksObtained;
 
       answerRecords.push({
-        id: 'ans-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+        id: crypto.randomUUID ? crypto.randomUUID() : 'ans-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
         attempt_id: attempt.id,
         question_id: q.id,
-        selected_answer: selected,
+        selected_answer: selected as any,
         is_correct: isCorrect,
         marks_obtained: marksObtained,
-        is_marked_for_review: Boolean(userAns?.marked)
+        is_marked_for_review: false
+      });
+
+      responses.push({
+        question_id: q.id,
+        user_answer: selected,
+        correct_answer: q.correct_answer || '',
+        status: !selected ? 'unattempted' : (isCorrect ? 'correct' : 'wrong'),
+        marks_awarded: marksObtained
       });
     });
 
@@ -495,29 +602,10 @@ export const dataService = {
       score: finalScore,
       percentage,
       time_taken_seconds: timeTakenSeconds,
-      suspicious_activity_count: suspiciousCount
+      suspicious_activity_count: suspiciousCount,
+      responses
     };
 
-    // Calculate Rank
-    const allAttempts = await dataService.getAttempts(test.id);
-    const testAttempts = allAttempts.filter(a => a.test_id === test.id && a.status === 'completed');
-    testAttempts.push(completedAttempt);
-    testAttempts.sort((a, b) => b.score - a.score || a.time_taken_seconds - b.time_taken_seconds);
-
-    const rank = testAttempts.findIndex(a => a.id === completedAttempt.id) + 1;
-    completedAttempt.rank = rank;
-
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        await supabase.from('attempts').upsert(completedAttempt);
-        await supabase.from('answers').insert(answerRecords);
-      } catch (e) {
-        console.error('Supabase attempt submission error', e);
-      }
-    }
-
-    // Save locally
     const attempts = await dataService.getAttempts();
     const idx = attempts.findIndex(a => a.id === completedAttempt.id);
     if (idx >= 0) {
@@ -527,16 +615,27 @@ export const dataService = {
     }
     localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
 
-    // Save answers
-    const rawAns = localStorage.getItem(STORAGE_KEYS.ANSWERS);
-    const answersMap: Record<string, Answer[]> = rawAns ? JSON.parse(rawAns) : {};
-    answersMap[completedAttempt.id] = answerRecords;
-    localStorage.setItem(STORAGE_KEYS.ANSWERS, JSON.stringify(answersMap));
-
-    // Clear active progress
     dataService.clearSavedProgress(test.id);
-
     return completedAttempt;
+  },
+
+  // Backward compatibility alias for submitAttempt
+  submitAttempt: async (
+    test: Test,
+    attempt: Attempt,
+    studentAnswers: Record<string, { selected: 'A'|'B'|'C'|'D'|null; marked: boolean }>,
+    _questionsUnused: Question[],
+    timeTakenSeconds: number,
+    suspiciousCount = 0
+  ): Promise<Attempt> => {
+    const stringAnswers: Record<string, string> = {};
+    Object.entries(studentAnswers).forEach(([qId, val]) => {
+      if (val && val.selected) {
+        stringAnswers[qId] = val.selected;
+      }
+    });
+
+    return dataService.submitAttemptSecure(test, attempt, stringAnswers, timeTakenSeconds, suspiciousCount);
   },
 
   saveAttempt: async (attempt: Attempt): Promise<Attempt> => {
@@ -583,6 +682,15 @@ export const dataService = {
   },
 
   getAttemptById: async (attemptId: string): Promise<Attempt | null> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.from('attempts').select('*').eq('id', attemptId).single();
+        if (!error && data) return data as Attempt;
+      } catch (e) {
+        console.warn('Supabase fetch attempt by ID failed', e);
+      }
+    }
     const attempts = await dataService.getAttempts();
     return attempts.find(a => a.id === attemptId) || null;
   },
@@ -600,5 +708,64 @@ export const dataService = {
     const raw = localStorage.getItem(STORAGE_KEYS.ANSWERS);
     const answersMap: Record<string, Answer[]> = raw ? JSON.parse(raw) : {};
     return answersMap[attemptId] || [];
+  },
+
+  // ------------------------------------
+  // LEADERBOARD & RANKINGS (DYNAMIC / MASKED)
+  // ------------------------------------
+  getLeaderboard: async (testId: string, limit = 20): Promise<PublicLeaderboardEntry[]> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('get_top_leaderboard', {
+          p_test_id: testId,
+          p_limit: limit
+        });
+        if (!error && data) return data as PublicLeaderboardEntry[];
+      } catch (e) {
+        console.warn('Supabase fetch get_top_leaderboard RPC error', e);
+      }
+    }
+
+    // Fallback mask calculation
+    const attempts = await dataService.getAttempts(testId);
+    const completed = attempts.filter(a => a.status === 'completed' || a.status === 'auto_submitted');
+    completed.sort((a, b) => b.score - a.score || a.time_taken_seconds - b.time_taken_seconds);
+
+    return completed.slice(0, limit).map((a, idx) => {
+      const nameParts = a.student_name.split(' ');
+      const firstName = nameParts[0] || 'Candidate';
+      const initial = nameParts.length > 1 ? ` ${nameParts[1][0]}.` : '';
+      const masked = `${firstName}${initial}`;
+
+      return {
+        rank: idx + 1,
+        attempt_id: a.id,
+        masked_name: masked,
+        score: a.score,
+        correct_answers: a.correct_answers,
+        time_taken_seconds: a.time_taken_seconds,
+        submitted_at: a.submitted_at || a.created_at || new Date().toISOString()
+      };
+    });
+  },
+
+  getStudentRank: async (testId: string, attemptId: string): Promise<number> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase.rpc('get_student_rank', {
+          p_test_id: testId,
+          p_attempt_id: attemptId
+        });
+        if (!error && typeof data === 'number') return data;
+      } catch (e) {
+        console.warn('Supabase fetch get_student_rank RPC error', e);
+      }
+    }
+
+    const leaderboard = await dataService.getLeaderboard(testId, 1000);
+    const found = leaderboard.find(l => l.attempt_id === attemptId);
+    return found ? found.rank : 1;
   }
 };
