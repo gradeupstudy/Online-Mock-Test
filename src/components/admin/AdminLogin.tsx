@@ -9,9 +9,7 @@ interface AdminLoginProps {
 }
 
 export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackToHome, onToast }) => {
-  const [email, setEmail] = useState(() => {
-    return localStorage.getItem('gradeup_admin_email') || 'admin@gradeupstudy.com';
-  });
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -91,7 +89,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
-                placeholder="admin@gradeupstudy.com"
+                placeholder="Enter admin email"
               />
             </div>
           </div>
@@ -108,12 +106,9 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-11 pr-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
-                placeholder="Enter admin password (e.g., gradeup123)"
+                placeholder="Enter admin password"
               />
             </div>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Demo passcode: <code className="bg-slate-100 dark:bg-slate-800 px-1 py-0.5 rounded text-blue-600 font-bold">gradeup123</code>
-            </p>
           </div>
 
           <button

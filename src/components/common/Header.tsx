@@ -119,12 +119,6 @@ export const Header: React.FC<HeaderProps> = ({
                 Your Trusted Partner During Preparation
               </p>
             </div>
-
-            {logoClicks > 0 && logoClicks < 10 && (
-              <span className="absolute -bottom-2 left-0 text-[10px] font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 animate-pulse">
-                Click {10 - logoClicks}x for Admin
-              </span>
-            )}
           </div>
 
           {/* Right Navigation & Status Controls */}

@@ -38,24 +38,6 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
     setSaving(false);
   };
 
-  const handleLogoFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 2 * 1024 * 1024) {
-        onToast?.('error', 'Image size should be less than 2MB');
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (typeof reader.result === 'string' && settings) {
-          setSettings({ ...settings, logo_url: reader.result });
-          onToast?.('info', 'New logo uploaded! Click "Save Settings" to apply.');
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   const handleUpdateAdminCredentials = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!adminEmail.trim()) {
@@ -204,64 +186,22 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
             Brand Identity & Project Logo
           </h2>
 
-          {/* PROJECT LOGO SECTION */}
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 space-y-3">
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
-              Main Project Logo
-            </label>
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-              <div className="w-16 h-16 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md overflow-hidden shrink-0 border border-slate-200 dark:border-slate-700">
-                {settings.logo_url ? (
-                  <img
-                    src={settings.logo_url}
-                    alt="Project Logo"
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).style.display = 'none';
-                    }}
-                  />
-                ) : (
-                  <ImageIcon className="w-8 h-8 opacity-80" />
-                )}
-              </div>
-
-              <div className="flex-1 w-full space-y-2">
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={settings.logo_url || ''}
-                    onChange={(e) => setSettings({ ...settings, logo_url: e.target.value })}
-                    placeholder="Enter image URL (e.g., https://example.com/logo.png)"
-                    className="flex-1 px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-mono"
-                  />
-                  {settings.logo_url && (
-                    <button
-                      type="button"
-                      onClick={() => setSettings({ ...settings, logo_url: '' })}
-                      className="p-2 text-rose-500 hover:text-rose-700 bg-rose-50 dark:bg-rose-950/50 rounded-lg hover:bg-rose-100 transition-colors"
-                      title="Remove Logo"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-600 rounded-lg text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
-                    <Upload className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                    <span>Upload Logo Image</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handleLogoFileUpload}
-                      className="hidden"
-                    />
-                  </label>
-                  <span className="text-[11px] text-slate-500">
-                    Recommended: PNG / SVG / JPG (Max 2MB)
-                  </span>
-                </div>
-              </div>
+          {/* PROJECT LOGO SECTION - DEFAULT FIXED LOGO */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700/80 flex items-center gap-4">
+            <div className="w-14 h-14 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 shadow-xs shrink-0 overflow-hidden">
+              <img
+                src="/logo.png"
+                alt="Gradeup Study Main Logo"
+                className="w-full h-full object-contain"
+              />
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
+                Main Project Logo
+              </p>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Official Gradeup Study GU Emblem active as project logo.
+              </p>
             </div>
           </div>
 
