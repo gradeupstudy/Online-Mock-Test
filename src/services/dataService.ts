@@ -1,6 +1,32 @@
-import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult } from '../types';
+import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus } from '../types';
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
+
+export const isValidUUID = (id: string | null | undefined): boolean => {
+  if (!id || typeof id !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+};
+
+export const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+};
+
+export const parseSafeNumber = (val: unknown, defaultVal = 0): number => {
+  if (typeof val === 'number') return isNaN(val) ? defaultVal : val;
+  if (typeof val === 'string') {
+    const clean = val.replace(',', '.').trim();
+    const num = parseFloat(clean);
+    return isNaN(num) ? defaultVal : num;
+  }
+  return defaultVal;
+};
 
 const STORAGE_KEYS = {
   TESTS: 'gradeup_tests',
@@ -94,7 +120,10 @@ export const dataService = {
           query = query.eq('is_published', true).eq('status', 'published');
         }
         const { data, error } = await query;
-        if (!error && data) return data as Test[];
+        if (!error && data) {
+          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(data));
+          return data as Test[];
+        }
       } catch (e) {
         console.warn('Supabase fetch tests error', e);
       }
@@ -114,13 +143,14 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data } = await supabase
-          .from('tests')
-          .select('*')
-          .or(`slug.eq.${identifier},test_code.eq.${identifier},id.eq.${identifier}`)
-          .limit(1)
-          .maybeSingle();
-
+        const isUUID = isValidUUID(identifier);
+        let query = supabase.from('tests').select('*');
+        if (isUUID) {
+          query = query.or(`slug.eq.${identifier},test_code.eq.${identifier},id.eq.${identifier}`);
+        } else {
+          query = query.or(`slug.eq.${identifier},test_code.eq.${identifier}`);
+        }
+        const { data } = await query.limit(1).maybeSingle();
         if (data) return data as Test;
       } catch (e) {
         console.warn('Supabase getTestBySlugOrId lookup failed', e);
@@ -160,31 +190,102 @@ export const dataService = {
   },
 
   saveTest: async (test: Test): Promise<Test> => {
+    const validId = isValidUUID(test.id) ? test.id : generateUUID();
+    const status: TestStatus = test.status || (test.is_published ? 'published' : 'draft');
+    const isPublished = status === 'published' || test.is_published === true;
+    const totalQuestions = parseSafeNumber(test.total_questions, 0);
+    const marksPerQuestion = parseSafeNumber(test.marks_per_question, 1);
+    const totalMarks = parseSafeNumber(test.total_marks, totalQuestions * marksPerQuestion);
+    const negativeMark = parseSafeNumber(test.negative_marking, 0.25);
+    const duration = parseSafeNumber(test.duration_minutes, 15);
+    const passingMarks = parseSafeNumber(test.passing_marks, totalMarks * 0.4);
+
+    const sanitizedTest: Test = {
+      ...test,
+      id: validId,
+      total_questions: totalQuestions,
+      marks_per_question: marksPerQuestion,
+      total_marks: totalMarks,
+      negative_marking: negativeMark,
+      duration_minutes: duration,
+      passing_marks: passingMarks,
+      status,
+      is_published: isPublished,
+      updated_at: new Date().toISOString()
+    };
+
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data, error } = await supabase.from('tests').upsert(test).select().single();
-        if (!error && data) return data as Test;
+        const payload = {
+          id: sanitizedTest.id,
+          test_code: sanitizedTest.test_code,
+          title: sanitizedTest.title,
+          slug: sanitizedTest.slug,
+          description: sanitizedTest.description || '',
+          category: sanitizedTest.category || 'Competitive Exam',
+          subject: sanitizedTest.subject || 'General Paper',
+          total_questions: sanitizedTest.total_questions,
+          total_marks: sanitizedTest.total_marks,
+          marks_per_question: sanitizedTest.marks_per_question,
+          negative_marking: sanitizedTest.negative_marking,
+          duration_minutes: sanitizedTest.duration_minutes,
+          passing_marks: sanitizedTest.passing_marks,
+          instructions: sanitizedTest.instructions || '',
+          status: sanitizedTest.status,
+          is_published: sanitizedTest.is_published,
+          social_gate_enabled: sanitizedTest.social_gate_enabled ?? true,
+          anti_cheating_enabled: sanitizedTest.anti_cheating_enabled ?? true,
+          randomize_questions: sanitizedTest.randomize_questions ?? false,
+          randomize_options: sanitizedTest.randomize_options ?? false,
+          allow_back_navigation: sanitizedTest.allow_back_navigation ?? true,
+          allow_mark_for_review: sanitizedTest.allow_mark_for_review ?? true,
+          show_result_immediately: sanitizedTest.show_result_immediately ?? true,
+          show_correct_answers: sanitizedTest.show_correct_answers ?? true,
+          show_explanation: sanitizedTest.show_explanation ?? true,
+          enable_leaderboard: sanitizedTest.enable_leaderboard ?? true,
+          max_attempts_per_student: parseSafeNumber(sanitizedTest.max_attempts_per_student, 1),
+          start_time: sanitizedTest.start_time || null,
+          end_time: sanitizedTest.end_time || null,
+          created_at: sanitizedTest.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+
+        const { data, error } = await supabase.from('tests').upsert(payload).select().single();
+        if (error) {
+          console.error('Supabase test save error:', error);
+        } else if (data) {
+          // Sync local
+          const localTests = await dataService.getTests(true);
+          const idx = localTests.findIndex(t => t.id === data.id);
+          if (idx >= 0) localTests[idx] = data as Test;
+          else localTests.unshift(data as Test);
+          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(localTests));
+          return data as Test;
+        }
       } catch (e) {
-        console.error('Supabase test save error', e);
+        console.error('Supabase test save exception', e);
       }
     }
+
     const tests = await dataService.getTests(true);
-    const index = tests.findIndex(t => t.id === test.id);
+    const index = tests.findIndex(t => t.id === sanitizedTest.id);
     if (index >= 0) {
-      tests[index] = { ...test, updated_at: new Date().toISOString() };
+      tests[index] = { ...sanitizedTest };
     } else {
-      tests.unshift({ ...test, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+      tests.unshift({ ...sanitizedTest, created_at: sanitizedTest.created_at || new Date().toISOString() });
     }
     localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(tests));
-    return test;
+    return sanitizedTest;
   },
 
   deleteTest: async (testId: string): Promise<boolean> => {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        await supabase.from('tests').delete().eq('id', testId);
+        if (isValidUUID(testId)) {
+          await supabase.from('tests').delete().eq('id', testId);
+        }
       } catch (e) {
         console.error('Supabase test delete error', e);
       }
@@ -199,7 +300,7 @@ export const dataService = {
     const original = await dataService.getTestBySlugOrId(testId);
     if (!original) return null;
 
-    const newId = crypto.randomUUID ? crypto.randomUUID() : 'test-' + Date.now();
+    const newId = generateUUID();
     const newCode = original.test_code + '-COPY';
     const newTitle = original.title + ' (Copy)';
     const newSlug = original.slug + '-copy-' + Math.floor(Math.random() * 1000);
@@ -220,10 +321,11 @@ export const dataService = {
 
     const questions = await dataService.getQuestions(testId, true);
     if (questions.length > 0) {
-      const duplicatedQuestions = questions.map(q => ({
+      const duplicatedQuestions = questions.map((q, idx) => ({
         ...q,
-        id: crypto.randomUUID ? crypto.randomUUID() : 'q-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
-        test_id: newId
+        id: generateUUID(),
+        test_id: newId,
+        question_number: idx + 1
       }));
       await dataService.saveQuestions(newId, duplicatedQuestions);
     }
@@ -238,7 +340,7 @@ export const dataService = {
   // For Students: Uses public RPC to omit correct_answer and explanation before submission!
   getPublicQuestions: async (testId: string): Promise<Question[]> => {
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured() && supabase && isValidUUID(testId)) {
       try {
         const { data, error } = await supabase.rpc('get_public_test_questions', { p_test_id: testId });
         if (!error && data && data.length > 0) {
@@ -264,7 +366,7 @@ export const dataService = {
   // For Admin / Results: Fetch full question dataset
   getQuestions: async (testId: string, includeAnswers = true): Promise<Question[]> => {
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured() && supabase && isValidUUID(testId)) {
       try {
         const { data, error } = await supabase
           .from('questions')
@@ -287,27 +389,57 @@ export const dataService = {
   },
 
   saveQuestions: async (testId: string, questions: Question[]): Promise<void> => {
+    const targetTestId = isValidUUID(testId) ? testId : generateUUID();
+    const sanitizedQuestions = questions.map((q, idx) => {
+      const qId = isValidUUID(q.id) ? q.id : generateUUID();
+      const ans = (q.correct_answer || 'A').toString().toUpperCase().trim().slice(0, 1);
+      const validAns = ['A', 'B', 'C', 'D'].includes(ans) ? ans : 'A';
+      return {
+        id: qId,
+        test_id: targetTestId,
+        question_number: Number(q.question_number) || (idx + 1),
+        question_text: q.question_text || '',
+        question_image: q.question_image || null,
+        option_a: q.option_a || '',
+        option_b: q.option_b || '',
+        option_c: q.option_c || '',
+        option_d: q.option_d || '',
+        correct_answer: validAns,
+        explanation: q.explanation || null,
+        marks: parseSafeNumber(q.marks, 1),
+        negative_marks: parseSafeNumber(q.negative_marks, 0.25),
+        subject: q.subject || 'General Studies',
+        chapter: q.chapter || 'General',
+        created_at: q.created_at || new Date().toISOString()
+      };
+    });
+
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured() && supabase && isValidUUID(targetTestId)) {
       try {
-        await supabase.from('questions').delete().eq('test_id', testId);
-        await supabase.from('questions').insert(questions);
+        await supabase.from('questions').delete().eq('test_id', targetTestId);
+        if (sanitizedQuestions.length > 0) {
+          const { error } = await supabase.from('questions').insert(sanitizedQuestions);
+          if (error) {
+            console.error('Supabase save questions error:', error);
+          }
+        }
       } catch (e) {
-        console.error('Supabase save questions error', e);
+        console.error('Supabase save questions exception', e);
       }
     }
 
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
     const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
-    questionsMap[testId] = questions;
+    questionsMap[targetTestId] = sanitizedQuestions as unknown as Question[];
     localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
 
-    const test = await dataService.getTestBySlugOrId(testId);
+    const test = await dataService.getTestBySlugOrId(targetTestId);
     if (test) {
       const updatedTest: Test = {
         ...test,
-        total_questions: questions.length,
-        total_marks: questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0)
+        total_questions: sanitizedQuestions.length,
+        total_marks: sanitizedQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0)
       };
       await dataService.saveTest(updatedTest);
     }
@@ -315,15 +447,22 @@ export const dataService = {
 
   saveQuestion: async (testId: string, question: Question): Promise<Question> => {
     const questions = await dataService.getQuestions(testId, true);
-    const index = questions.findIndex(q => q.id === question.id);
+    const validQId = isValidUUID(question.id) ? question.id : generateUUID();
+    const cleanQuestion: Question = {
+      ...question,
+      id: validQId,
+      test_id: testId
+    };
+
+    const index = questions.findIndex(q => q.id === cleanQuestion.id);
     if (index >= 0) {
-      questions[index] = question;
+      questions[index] = cleanQuestion;
     } else {
-      questions.push(question);
+      questions.push(cleanQuestion);
     }
     questions.sort((a, b) => a.question_number - b.question_number);
     await dataService.saveQuestions(testId, questions);
-    return question;
+    return cleanQuestion;
   },
 
   deleteQuestion: async (testId: string, questionId: string): Promise<void> => {

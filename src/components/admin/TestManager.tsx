@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Layers } from 'lucide-react';
 import { Test, TestStatus } from '../../types';
-import { dataService } from '../../services/dataService';
+import { dataService, generateUUID, parseSafeNumber } from '../../services/dataService';
 import { Modal } from '../common/Modal';
 
 interface TestManagerProps {
@@ -23,6 +23,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
     }
   };
   const [tests, setTests] = useState<Test[]>([]);
+  const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -35,29 +36,37 @@ export const TestManager: React.FC<TestManagerProps> = ({
   }, []);
 
   const loadTests = async () => {
-    const fetched = await dataService.getTests(true);
-    setTests(fetched);
+    setLoading(true);
+    try {
+      const fetched = await dataService.getTests(true);
+      setTests(fetched);
+    } catch (e) {
+      console.error('Failed to load tests', e);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleOpenCreateModal = () => {
-    const code = 'TEST-' + Math.floor(1000 + Math.random() * 9000);
+    const code = 'HPPC-' + Math.floor(1000 + Math.random() * 9000);
+    const newId = generateUUID();
     setEditingTest({
-      id: 'test-' + Date.now(),
+      id: newId,
       test_code: code,
       title: '',
       slug: '',
       description: '',
       category: 'Police Exam',
       subject: 'General Paper',
-      total_questions: 10,
-      total_marks: 10.0,
+      total_questions: 20,
+      total_marks: 20.0,
       marks_per_question: 1.0,
       negative_marking: 0.25,
       duration_minutes: 15,
-      passing_marks: 4.0,
+      passing_marks: 8.0,
       instructions: '1. Duration is 15 minutes.\n2. Each question carries 1 mark.\n3. Negative marking: 0.25 marks per wrong answer.\n4. Complete all questions before submitting.',
-      status: 'draft',
-      is_published: false,
+      status: 'published',
+      is_published: true,
       social_gate_enabled: true,
       anti_cheating_enabled: true,
       randomize_questions: false,
@@ -89,16 +98,33 @@ export const TestManager: React.FC<TestManagerProps> = ({
       ? editingTest.slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
       : editingTest.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 
+    const totalQuestions = parseSafeNumber(editingTest.total_questions, 10);
+    const marksPerQuestion = parseSafeNumber(editingTest.marks_per_question, 1);
+    const totalMarks = parseSafeNumber(editingTest.total_marks, totalQuestions * marksPerQuestion);
+    const negativeMark = parseSafeNumber(editingTest.negative_marking, 0.25);
+    const duration = parseSafeNumber(editingTest.duration_minutes, 15);
+    const passingMarks = parseSafeNumber(editingTest.passing_marks, totalMarks * 0.4);
+
     const testToSave: Test = {
       ...(editingTest as Test),
-      slug,
-      is_published: editingTest.status === 'published'
+      id: editingTest.id || generateUUID(),
+      slug: slug || `test-${Date.now()}`,
+      category: editingTest.category || 'Police Exam',
+      subject: editingTest.subject || 'General Paper',
+      total_questions: totalQuestions,
+      marks_per_question: marksPerQuestion,
+      total_marks: totalMarks,
+      negative_marking: negativeMark,
+      duration_minutes: duration,
+      passing_marks: passingMarks,
+      status: (editingTest.status as TestStatus) || 'published',
+      is_published: editingTest.status === 'published' || editingTest.is_published === true
     };
 
-    await dataService.saveTest(testToSave);
-    notify('success', `Mock test "${testToSave.title}" saved successfully!`);
+    const saved = await dataService.saveTest(testToSave);
+    notify('success', `Mock test "${saved.title}" saved successfully!`);
     setIsModalOpen(false);
-    loadTests();
+    await loadTests();
   };
 
   const handleTogglePublish = async (test: Test) => {
@@ -472,57 +498,203 @@ export const TestManager: React.FC<TestManagerProps> = ({
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {/* Category & Subject */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  Marks/Question
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Exam Category / Course *
                 </label>
                 <input
-                  type="number"
-                  step="0.1"
-                  value={editingTest.marks_per_question ?? 1.0}
-                  onChange={(e) => setEditingTest({ ...editingTest, marks_per_question: parseFloat(e.target.value) || 1 })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  type="text"
+                  required
+                  value={editingTest.category || ''}
+                  onChange={(e) => setEditingTest({ ...editingTest, category: e.target.value })}
+                  placeholder="e.g. Police Exam, HP Forest Guard, Patwari, HPAS"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  Negative Mark
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Subject / Paper Name
                 </label>
                 <input
-                  type="number"
-                  step="0.05"
-                  value={editingTest.negative_marking ?? 0.25}
-                  onChange={(e) => setEditingTest({ ...editingTest, negative_marking: parseFloat(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  type="text"
+                  value={editingTest.subject || ''}
+                  onChange={(e) => setEditingTest({ ...editingTest, subject: e.target.value })}
+                  placeholder="e.g. Full Syllabus Mock Test, Hindi & English, GK"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
               </div>
+            </div>
 
+            {/* Questions & Marks Configuration */}
+            <div className="p-3.5 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-200/80 dark:border-blue-900/60 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
+                  <CheckSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                  Questions & Marks Setup
+                </span>
+                <span className="text-[11px] text-blue-700 dark:text-blue-300">
+                  Target: <b>{editingTest.total_questions || 0} Questions</b> | <b>{editingTest.total_marks || 0} Total Marks</b>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Total Questions *
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    required
+                    value={editingTest.total_questions ?? 20}
+                    onChange={(e) => {
+                      const num = parseInt(e.target.value) || 0;
+                      const marksPerQ = editingTest.marks_per_question ?? 1;
+                      setEditingTest({
+                        ...editingTest,
+                        total_questions: num,
+                        total_marks: num * marksPerQ
+                      });
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white"
+                  />
+                  <div className="flex gap-1 mt-1.5">
+                    {[10, 20, 50, 80, 100].map((count) => (
+                      <button
+                        key={count}
+                        type="button"
+                        onClick={() => {
+                          const marksPerQ = editingTest.marks_per_question ?? 1;
+                          setEditingTest({
+                            ...editingTest,
+                            total_questions: count,
+                            total_marks: count * marksPerQ
+                          });
+                        }}
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                          editingTest.total_questions === count
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {count}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Marks / Question *
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.1"
+                    required
+                    value={editingTest.marks_per_question ?? 1.0}
+                    onChange={(e) => {
+                      const marksPerQ = parseFloat(e.target.value) || 1;
+                      const num = editingTest.total_questions ?? 0;
+                      setEditingTest({
+                        ...editingTest,
+                        marks_per_question: marksPerQ,
+                        total_marks: num * marksPerQ
+                      });
+                    }}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-slate-900 dark:text-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Total Marks
+                  </label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={editingTest.total_marks ?? 20.0}
+                    onChange={(e) => setEditingTest({ ...editingTest, total_marks: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-blue-600 dark:text-blue-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Negative Mark
+                  </label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min="0"
+                    value={editingTest.negative_marking ?? 0.25}
+                    onChange={(e) => setEditingTest({ ...editingTest, negative_marking: parseFloat(e.target.value) || 0 })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-rose-600 dark:text-rose-400"
+                  />
+                  <div className="flex gap-1 mt-1.5">
+                    {[0, 0.25, 0.33, 0.5].map((neg) => (
+                      <button
+                        key={neg}
+                        type="button"
+                        onClick={() => setEditingTest({ ...editingTest, negative_marking: neg })}
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-all ${
+                          editingTest.negative_marking === neg
+                            ? 'bg-rose-600 text-white'
+                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-600 hover:bg-slate-100'
+                        }`}
+                      >
+                        {neg === 0 ? 'None' : `-${neg}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  Duration (Mins)
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  Duration (Minutes) *
                 </label>
                 <input
                   type="number"
+                  min="1"
+                  required
                   value={editingTest.duration_minutes ?? 15}
                   onChange={(e) => setEditingTest({ ...editingTest, duration_minutes: parseInt(e.target.value) || 15 })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1">
-                  Status
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  Passing Marks
+                </label>
+                <input
+                  type="number"
+                  step="0.5"
+                  value={editingTest.passing_marks ?? 8.0}
+                  onChange={(e) => setEditingTest({ ...editingTest, passing_marks: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
+                  Publish Status *
                 </label>
                 <select
-                  value={editingTest.status || 'draft'}
+                  value={editingTest.status || 'published'}
                   onChange={(e) => setEditingTest({ ...editingTest, status: e.target.value as TestStatus, is_published: e.target.value === 'published' })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-emerald-600 dark:text-emerald-400"
                 >
-                  <option value="draft">Draft</option>
-                  <option value="published">Published</option>
-                  <option value="unpublished">Unpublished</option>
+                  <option value="published">🟢 Published (Live for Students)</option>
+                  <option value="draft">🟡 Draft (Admin Only)</option>
+                  <option value="unpublished">🔴 Unpublished (Hidden)</option>
                 </select>
               </div>
             </div>

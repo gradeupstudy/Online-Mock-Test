@@ -20,7 +20,7 @@ import {
   Copy
 } from 'lucide-react';
 import { Test, Question } from '../../types';
-import { dataService } from '../../services/dataService';
+import { dataService, generateUUID } from '../../services/dataService';
 import { aiService } from '../../services/aiService';
 import { Modal } from '../common/Modal';
 import { AIQuestionGeneratorModal } from './AIQuestionGeneratorModal';
@@ -181,7 +181,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   const handleOpenAdd = () => {
     const nextNum = questions.length + 1;
     setEditingQuestion({
-      id: 'q-' + Date.now(),
+      id: generateUUID(),
       test_id: testId,
       question_number: nextNum,
       question_text: '',
@@ -216,6 +216,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
 
     const toSave: Question = {
       ...(editingQuestion as Question),
+      id: editingQuestion.id || generateUUID(),
       section: editingQuestion.subject || 'General',
       topic: editingQuestion.chapter || 'General',
     };
@@ -228,7 +229,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       const updatedList = await dataService.getQuestions(testId);
       const nextNum = updatedList.length + 1;
       setEditingQuestion({
-        id: 'q-' + Date.now(),
+        id: generateUUID(),
         test_id: testId,
         question_number: nextNum,
         question_text: '',
