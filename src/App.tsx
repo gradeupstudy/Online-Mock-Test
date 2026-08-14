@@ -160,7 +160,11 @@ export default function App() {
   };
 
   const handleProceedToSocialGate = () => {
-    setViewMode('student_social');
+    if (selectedTest && selectedTest.social_gate_enabled === false) {
+      setViewMode('student_register');
+    } else {
+      setViewMode('student_social');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -272,6 +276,7 @@ export default function App() {
 
         {viewMode === 'student_social' && (
           <SocialGate
+            test={selectedTest}
             onSuccessGate={handleSocialGatePassed}
             onToast={showToast}
           />

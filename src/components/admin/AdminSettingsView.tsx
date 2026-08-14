@@ -27,6 +27,9 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
   const loadSettings = async () => {
     const s = await dataService.getSettings();
     setSettings(s);
+    if (s.admin_email) {
+      setAdminEmail(s.admin_email);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -72,6 +75,12 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
       }
     }
 
+    // Save to centralized database (Supabase admin_settings table)
+    await dataService.updateSettings({
+      admin_email: adminEmail.trim(),
+      ...(newPassword ? { admin_password: newPassword } : {})
+    });
+
     // Save to local storage for persistent offline / fallback admin access
     localStorage.setItem('gradeup_admin_email', adminEmail.trim());
     if (newPassword) {
@@ -81,7 +90,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
     setNewPassword('');
     setConfirmPassword('');
     setUpdatingAuth(false);
-    onToast?.('success', 'Admin User ID & Password updated successfully!');
+    onToast?.('success', 'Admin ID & Password updated & synced across all browsers successfully!');
   };
 
   if (!settings) return <div className="p-8 text-center text-slate-500">Loading settings...</div>;

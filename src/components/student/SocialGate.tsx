@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Youtube, Send, Instagram, CheckCircle2, ExternalLink, ShieldCheck, ArrowRight, Lock, Loader2, Globe, CheckSquare, Square } from 'lucide-react';
-import { SocialPlatform } from '../../types';
+import { Youtube, Send, Instagram, CheckCircle2, ExternalLink, ShieldCheck, ArrowRight, Lock, Loader2, Globe, CheckSquare, Square, MessageCircle } from 'lucide-react';
+import { SocialPlatform, Test } from '../../types';
 import { dataService } from '../../services/dataService';
 
 interface SocialGateProps {
+  test?: Test | null;
   onSuccessGate: () => void;
   onToast?: (type: 'success' | 'error' | 'info', msg: string) => void;
 }
 
-export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }) => {
+export const SocialGate: React.FC<SocialGateProps> = ({ test, onSuccessGate, onToast }) => {
   const [platforms, setPlatforms] = useState<SocialPlatform[]>([]);
   const [visited, setVisited] = useState<Record<string, boolean>>({});
   const [verifying, setVerifying] = useState<Record<string, number>>({});
@@ -23,17 +24,44 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
       // Clear timers on unmount
       Object.values(timerRefs.current).forEach(clearInterval);
     };
-  }, []);
+  }, [test]);
 
   const loadPlatforms = async () => {
     setLoading(true);
-    const list = await dataService.getSocialPlatforms(false);
+    
+    // If social gate is disabled for this test, bypass directly
+    if (test && test.social_gate_enabled === false) {
+      onSuccessGate();
+      return;
+    }
+
+    let list: SocialPlatform[] = [];
+
+    if (test?.social_gate_mode === 'custom_links' && test.custom_social_platforms && test.custom_social_platforms.length > 0) {
+      // Use mock-specific custom platforms
+      list = test.custom_social_platforms.filter((p) => p.is_active !== false);
+    } else if (test?.social_gate_mode === 'custom_selection' && test.social_platform_ids && test.social_platform_ids.length > 0) {
+      // Filter global platforms according to this mock test's selected platforms
+      const allGlobal = await dataService.getSocialPlatforms(true);
+      list = allGlobal.filter((p) => p.is_active && test.social_platform_ids?.includes(p.id));
+    } else {
+      // Default to all active global platforms
+      list = await dataService.getSocialPlatforms(false);
+    }
+
     setPlatforms(list);
+
+    // If no active platforms configured, bypass automatically
+    if (list.length === 0) {
+      onSuccessGate();
+      return;
+    }
 
     // Check pre-verified platforms from localStorage
     const savedVisited: Record<string, boolean> = {};
     list.forEach((p) => {
-      if (localStorage.getItem(`gradeup_social_joined_${p.id}`) === 'true') {
+      const storageKey = `gradeup_social_joined_${p.id}_${p.platform_url || ''}`;
+      if (localStorage.getItem(storageKey) === 'true' || localStorage.getItem(`gradeup_social_joined_${p.id}`) === 'true') {
         savedVisited[p.id] = true;
       }
     });
@@ -43,7 +71,9 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
 
   const handleVisitPlatform = (p: SocialPlatform) => {
     // Open in new tab
-    window.open(p.platform_url, '_blank', 'noopener,noreferrer');
+    if (p.platform_url) {
+      window.open(p.platform_url, '_blank', 'noopener,noreferrer');
+    }
 
     // If already verified, no need to re-verify
     if (visited[p.id]) {
@@ -67,6 +97,8 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
           clearInterval(timerRefs.current[p.id]);
           // Mark as verified
           setVisited((vPrev) => ({ ...vPrev, [p.id]: true }));
+          const storageKey = `gradeup_social_joined_${p.id}_${p.platform_url || ''}`;
+          localStorage.setItem(storageKey, 'true');
           localStorage.setItem(`gradeup_social_joined_${p.id}`, 'true');
           onToast?.('success', `${p.platform_name} verified successfully! ✅`);
           const newVerifying = { ...prev };
@@ -102,7 +134,12 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
   };
 
   if (loading) {
-    return <div className="py-12 text-center text-slate-500">Loading social requirements...</div>;
+    return (
+      <div className="py-16 text-center space-y-3">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
+        <p className="text-sm font-medium text-slate-500">Checking mock test community requirements...</p>
+      </div>
+    );
   }
 
   // If no platforms exist, automatically allow pass
@@ -110,6 +147,9 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
     onSuccessGate();
     return null;
   }
+
+  const heading = test?.social_gate_title || "Gradeup Study Official Community Requirement";
+  const subtitle = test?.social_gate_description || "Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.";
 
   return (
     <div className="max-w-xl mx-auto space-y-6 my-6">
@@ -122,11 +162,18 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
             <ShieldCheck className="w-7 h-7" />
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
-            Gradeup Study Official Community Requirement
+            {heading}
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-            Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.
+            {subtitle}
           </p>
+
+          {test && (
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-full text-[11px] font-bold">
+              <span>Mock Test:</span>
+              <span className="text-blue-600 dark:text-blue-400">{test.title}</span>
+            </div>
+          )}
         </div>
 
         {/* Platforms List */}
@@ -152,7 +199,8 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
                     {p.icon === 'youtube' && <Youtube className="w-5 h-5 text-rose-600" />}
                     {p.icon === 'send' && <Send className="w-5 h-5 text-blue-500" />}
                     {p.icon === 'instagram' && <Instagram className="w-5 h-5 text-pink-600" />}
-                    {p.icon !== 'youtube' && p.icon !== 'send' && p.icon !== 'instagram' && (
+                    {p.icon === 'message-circle' && <MessageCircle className="w-5 h-5 text-emerald-600" />}
+                    {p.icon !== 'youtube' && p.icon !== 'send' && p.icon !== 'instagram' && p.icon !== 'message-circle' && (
                       <Globe className="w-5 h-5 text-indigo-500" />
                     )}
                   </div>
@@ -177,6 +225,7 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
                 </div>
 
                 <button
+                  type="button"
                   onClick={() => handleVisitPlatform(p)}
                   disabled={isVerifying}
                   className={`w-full sm:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-xs ${
@@ -229,6 +278,7 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
         {/* Continue Button */}
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
           <button
+            type="button"
             onClick={handleContinue}
             disabled={!canProceed}
             className={`w-full py-3.5 rounded-2xl font-bold text-sm transition-all flex items-center justify-center gap-2 ${
@@ -256,4 +306,5 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
     </div>
   );
 };
+
 

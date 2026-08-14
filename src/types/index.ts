@@ -21,6 +21,11 @@ export interface Test {
   is_multisection?: boolean;
   sections?: string[];
   social_gate_enabled: boolean;
+  social_gate_mode?: 'global' | 'custom_selection' | 'custom_links';
+  social_platform_ids?: string[];
+  custom_social_platforms?: SocialPlatform[];
+  social_gate_title?: string;
+  social_gate_description?: string;
   anti_cheating_enabled: boolean;
   randomize_questions: boolean;
   randomize_options: boolean;
@@ -134,6 +139,7 @@ export interface SocialPlatform {
   verification_method: 'redirect_only' | 'manual_confirmation' | 'oauth' | 'official_api' | 'admin_verification';
   is_required: boolean;
   is_active: boolean;
+  order_index?: number;
   created_at?: string;
 }
 
@@ -161,6 +167,8 @@ export interface AdminSettings {
   default_marks: number;
   default_negative_marking: number;
   mask_leaderboard_names: boolean;
+  admin_email?: string;
+  admin_password?: string;
 }
 
 export interface PublicLeaderboardEntry {

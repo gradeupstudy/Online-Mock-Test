@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, Mail, Key, ShieldCheck, ArrowRight } from 'lucide-react';
 import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase';
+import { dataService } from '../../services/dataService';
 
 interface AdminLoginProps {
   onLoginSuccess: () => void;
@@ -23,9 +24,10 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
     e.preventDefault();
     setIsLoading(true);
 
+    const enteredEmail = email.trim().toLowerCase();
     const supabase = getSupabaseClient();
 
-    // Check if Supabase Auth is active
+    // 1. Check if Supabase Auth is active & authenticates user
     if (isSupabaseConfigured() && supabase) {
       try {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -39,16 +41,38 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
           return;
         }
       } catch (err) {
-        console.warn('Supabase auth attempt failed, checking master passcode', err);
+        console.warn('Supabase auth attempt failed, checking central database settings', err);
       }
     }
 
-    const savedEmail = localStorage.getItem('gradeup_admin_email') || 'admin@gradeupstudy.com';
+    // 2. Check Centralized Cloud Database Settings (Supabase admin_settings table)
+    let centralSettings = null;
+    try {
+      centralSettings = await dataService.getSettings();
+    } catch (err) {
+      console.warn('Could not fetch central settings', err);
+    }
+
+    const centralEmail = (centralSettings?.admin_email || '').toLowerCase();
+    const centralPassword = centralSettings?.admin_password;
+
+    if (centralPassword && centralPassword === password) {
+      if (!centralEmail || centralEmail === enteredEmail) {
+        notify('success', 'Admin authenticated successfully!');
+        onLoginSuccess();
+        setIsLoading(false);
+        return;
+      }
+    }
+
+    // 3. Fallback to Local Storage and default passcodes
+    const savedEmail = (localStorage.getItem('gradeup_admin_email') || 'admin@gradeupstudy.com').toLowerCase();
     const savedPassword = localStorage.getItem('gradeup_admin_password');
 
-    // Check custom saved credentials or default admin passcodes
-    const isEmailValid = email.trim().toLowerCase() === savedEmail.toLowerCase();
-    const isPasswordValid = (savedPassword && password === savedPassword) ||
+    const isEmailValid = enteredEmail === savedEmail || (centralEmail && enteredEmail === centralEmail);
+    const isPasswordValid = 
+      (savedPassword && password === savedPassword) ||
+      (centralPassword && password === centralPassword) ||
       password === 'gradeup123' ||
       password === 'admin123' ||
       password === 'admin';
@@ -57,7 +81,7 @@ export const AdminLogin: React.FC<AdminLoginProps> = ({ onLoginSuccess, onBackTo
       notify('success', 'Admin authenticated successfully!');
       onLoginSuccess();
     } else {
-      notify('error', 'Invalid admin password/credentials. Please try again.');
+      notify('error', 'Invalid admin email/password. Please check credentials or contact support.');
     }
     setIsLoading(false);
   };

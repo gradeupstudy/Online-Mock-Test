@@ -53,11 +53,13 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const [selectedChapter, setSelectedChapter] = useState('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState('all');
   const [selectedInspectionStatus, setSelectedInspectionStatus] = useState('all');
+  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
 
   // Selected Questions for Batch Operations
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
   const [isGeneratingExplanationId, setIsGeneratingExplanationId] = useState<string | null>(null);
   const [isGeneratingEditExplanation, setIsGeneratingEditExplanation] = useState(false);
+  const [isDeduplicating, setIsDeduplicating] = useState(false);
 
   // Modals
   const [isAiGenModalOpen, setIsAiGenModalOpen] = useState(false);
@@ -115,8 +117,47 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
     )
   );
 
+  // Normalize Question Text for Accurate Duplicate Tracking
+  const normalizeQText = (t: string) => {
+    return (t || '')
+      .toLowerCase()
+      .replace(/[?.,!;:_'"“”‘’\-–—()[\]{}]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  // Group Questions by Normalized Text to Detect Exact / Near-Duplicate Questions
+  const duplicateGroupsMap = React.useMemo(() => {
+    const map = new Map<string, Question[]>();
+    questions.forEach((q) => {
+      const key = normalizeQText(q.question_text);
+      if (key && key.length > 6) {
+        if (!map.has(key)) map.set(key, []);
+        map.get(key)!.push(q);
+      }
+    });
+    return map;
+  }, [questions]);
+
+  // Duplicate Question IDs Set
+  const duplicateIdsSet = React.useMemo(() => {
+    const set = new Set<string>();
+    duplicateGroupsMap.forEach((list) => {
+      if (list.length > 1) {
+        list.forEach((q) => set.add(q.id));
+      }
+    });
+    return set;
+  }, [duplicateGroupsMap]);
+
+  const totalDuplicateQuestionsCount = duplicateIdsSet.size;
+
   // Filtered Questions List
   const filteredQuestions = questions.filter((q) => {
+    if (showOnlyDuplicates && !duplicateIdsSet.has(q.id)) {
+      return false;
+    }
+
     const textMatch =
       !searchQuery ||
       q.question_text?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -136,6 +177,54 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
 
     return textMatch && subjectMatch && chapterMatch && difficultyMatch && inspectMatch;
   });
+
+  // Auto-Deduplicate Bank: Keeps the highest quality version of each duplicate and removes redundant copies
+  const handleAutoDeduplicateBank = async () => {
+    if (totalDuplicateQuestionsCount === 0) {
+      onToast?.('info', 'No duplicate questions found in Question Bank!');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Clean Question Bank?\nFound ${totalDuplicateQuestionsCount} duplicate questions across multiple groups.\n\nAuto-deduplicate will keep the best version (highest QA score & complete explanation) and remove the redundant duplicates.`
+    );
+    if (!confirmed) return;
+
+    setIsDeduplicating(true);
+    let removedCount = 0;
+    try {
+      const idsToDelete: string[] = [];
+
+      duplicateGroupsMap.forEach((group) => {
+        if (group.length > 1) {
+          // Score each question: quality score + explanation bonus + length
+          const sorted = [...group].sort((a, b) => {
+            const scoreA = (a.quality_score || 0) + (a.explanation ? 50 : 0);
+            const scoreB = (b.quality_score || 0) + (b.explanation ? 50 : 0);
+            return scoreB - scoreA;
+          });
+
+          // Keep index 0 (the best one), mark remaining for deletion
+          const redundant = sorted.slice(1);
+          redundant.forEach((q) => idsToDelete.push(q.id));
+        }
+      });
+
+      for (const id of idsToDelete) {
+        await dataService.deleteQuestionFromBank(id);
+        removedCount++;
+      }
+
+      await loadBankData();
+      setShowOnlyDuplicates(false);
+      onToast?.('success', `Successfully removed ${removedCount} duplicate question(s)! Best versions retained.`);
+    } catch (err: any) {
+      console.error('Auto deduplicate error:', err);
+      onToast?.('error', 'Failed to auto deduplicate questions.');
+    } finally {
+      setIsDeduplicating(false);
+    }
+  };
 
   // Batch Selection Handlers
   const toggleSelectQuestion = (id: string) => {
@@ -509,8 +598,81 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
               <option value="verified">360° Inspected</option>
               <option value="pending">Pending Inspection</option>
             </select>
+
+            {/* DUPLICATE TRACKER FILTER BUTTON */}
+            <button
+              type="button"
+              onClick={() => setShowOnlyDuplicates(!showOnlyDuplicates)}
+              className={`px-3 py-2 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                showOnlyDuplicates
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                  : totalDuplicateQuestionsCount > 0
+                  ? 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/60 hover:bg-rose-100'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'
+              }`}
+            >
+              <AlertCircle className="w-3.5 h-3.5" />
+              <span>Duplicate Tracker</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                showOnlyDuplicates ? 'bg-white text-rose-600' : 'bg-rose-600 text-white'
+              }`}>
+                {totalDuplicateQuestionsCount}
+              </span>
+            </button>
           </div>
         </div>
+
+        {/* DUPLICATE QUESTIONS DETECTED BANNER */}
+        {totalDuplicateQuestionsCount > 0 && (
+          <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-2xl border border-amber-300 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 flex items-center justify-center font-black">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-amber-950 dark:text-amber-200">
+                  {totalDuplicateQuestionsCount} Duplicate Questions Detected in Question Bank
+                </h4>
+                <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                  Multiple questions have identical or matching question text. You can review them or auto-clean to retain the highest quality version.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowOnlyDuplicates(!showOnlyDuplicates)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  showOnlyDuplicates
+                    ? 'bg-amber-200 dark:bg-amber-900 text-amber-950 dark:text-amber-100'
+                    : 'bg-white dark:bg-slate-900 text-amber-950 dark:text-amber-200 border border-amber-300'
+                }`}
+              >
+                {showOnlyDuplicates ? 'Show All Questions' : 'View Duplicates Side-by-Side'}
+              </button>
+
+              <button
+                type="button"
+                disabled={isDeduplicating}
+                onClick={handleAutoDeduplicateBank}
+                className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isDeduplicating ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Cleaning...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Auto-Clean Duplicates (Keep Best)</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* BATCH SELECTION ACTION BAR */}
         {selectedQuestionIds.size > 0 && (
@@ -689,6 +851,12 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                         ) : (
                           <span className="px-2 py-0.5 bg-slate-200 dark:bg-slate-800 text-slate-500 rounded-md">
                             Not Audited
+                          </span>
+                        )}
+
+                        {duplicateIdsSet.has(q.id) && (
+                          <span className="px-2 py-0.5 bg-rose-500 text-white rounded-md flex items-center gap-1 font-black animate-pulse">
+                            <AlertCircle className="w-3 h-3" /> Duplicate MCQ
                           </span>
                         )}
                       </div>

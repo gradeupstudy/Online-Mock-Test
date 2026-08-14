@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Layers } from 'lucide-react';
-import { Test, TestStatus } from '../../types';
+import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Layers, Youtube, Send, Instagram, MessageCircle, Globe, ShieldCheck, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Test, TestStatus, SocialPlatform } from '../../types';
 import { dataService, generateUUID, parseSafeNumber } from '../../services/dataService';
 import { Modal } from '../common/Modal';
 
@@ -23,6 +23,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
     }
   };
   const [tests, setTests] = useState<Test[]>([]);
+  const [availablePlatforms, setAvailablePlatforms] = useState<SocialPlatform[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
@@ -38,8 +39,12 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const loadTests = async () => {
     setLoading(true);
     try {
-      const fetched = await dataService.getTests(true);
+      const [fetched, platforms] = await Promise.all([
+        dataService.getTests(true),
+        dataService.getSocialPlatforms(true)
+      ]);
       setTests(fetched);
+      setAvailablePlatforms(platforms);
     } catch (e) {
       console.error('Failed to load tests', e);
     } finally {
@@ -68,6 +73,11 @@ export const TestManager: React.FC<TestManagerProps> = ({
       status: 'published',
       is_published: true,
       social_gate_enabled: true,
+      social_gate_mode: 'global',
+      social_platform_ids: availablePlatforms.filter(p => p.is_active).map(p => p.id),
+      custom_social_platforms: [],
+      social_gate_title: '',
+      social_gate_description: '',
       anti_cheating_enabled: true,
       randomize_questions: false,
       randomize_options: false,
@@ -83,7 +93,17 @@ export const TestManager: React.FC<TestManagerProps> = ({
   };
 
   const handleOpenEditModal = (test: Test) => {
-    setEditingTest({ ...test });
+    setEditingTest({
+      ...test,
+      social_gate_enabled: test.social_gate_enabled ?? true,
+      social_gate_mode: test.social_gate_mode || 'global',
+      social_platform_ids: test.social_platform_ids && test.social_platform_ids.length > 0 
+        ? test.social_platform_ids 
+        : availablePlatforms.filter(p => p.is_active).map(p => p.id),
+      custom_social_platforms: test.custom_social_platforms || [],
+      social_gate_title: test.social_gate_title || '',
+      social_gate_description: test.social_gate_description || ''
+    });
     setIsModalOpen(true);
   };
 
@@ -163,6 +183,87 @@ export const TestManager: React.FC<TestManagerProps> = ({
     const url = dataService.getPublicShareableUrl(slug);
     navigator.clipboard.writeText(url);
     notify('success', 'Public shareable test URL copied!');
+  };
+
+  const handleTogglePlatformSelection = (platformId: string) => {
+    if (!editingTest) return;
+    const currentIds = editingTest.social_platform_ids || [];
+    const exists = currentIds.includes(platformId);
+    const newIds = exists ? currentIds.filter(id => id !== platformId) : [...currentIds, platformId];
+    setEditingTest({
+      ...editingTest,
+      social_platform_ids: newIds
+    });
+  };
+
+  const handleSelectAllPlatforms = () => {
+    if (!editingTest) return;
+    setEditingTest({
+      ...editingTest,
+      social_platform_ids: availablePlatforms.map(p => p.id)
+    });
+  };
+
+  const handleDeselectAllPlatforms = () => {
+    if (!editingTest) return;
+    setEditingTest({
+      ...editingTest,
+      social_platform_ids: []
+    });
+  };
+
+  const handleAddCustomPlatform = () => {
+    if (!editingTest) return;
+    const newPlatform: SocialPlatform = {
+      id: generateUUID(),
+      platform_name: 'Telegram Group',
+      platform_url: 'https://t.me/',
+      icon: 'send',
+      button_text: 'Join Channel',
+      verification_method: 'redirect_only',
+      is_required: true,
+      is_active: true,
+      order_index: (editingTest.custom_social_platforms?.length || 0) + 1
+    };
+    setEditingTest({
+      ...editingTest,
+      custom_social_platforms: [...(editingTest.custom_social_platforms || []), newPlatform]
+    });
+  };
+
+  const handleUpdateCustomPlatform = (index: number, field: keyof SocialPlatform, value: any) => {
+    if (!editingTest || !editingTest.custom_social_platforms) return;
+    const updated = [...editingTest.custom_social_platforms];
+    updated[index] = {
+      ...updated[index],
+      [field]: value
+    };
+    setEditingTest({
+      ...editingTest,
+      custom_social_platforms: updated
+    });
+  };
+
+  const handleRemoveCustomPlatform = (index: number) => {
+    if (!editingTest || !editingTest.custom_social_platforms) return;
+    const updated = editingTest.custom_social_platforms.filter((_, i) => i !== index);
+    setEditingTest({
+      ...editingTest,
+      custom_social_platforms: updated
+    });
+  };
+
+  const handleCloneGlobalToCustom = () => {
+    if (!editingTest) return;
+    const cloned = availablePlatforms.map(p => ({
+      ...p,
+      id: generateUUID()
+    }));
+    setEditingTest({
+      ...editingTest,
+      custom_social_platforms: cloned
+    });
+    notify('info', 'Loaded global channels as editable custom channels!');
   };
 
   // Filtered tests
@@ -266,7 +367,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
               </p>
 
               {/* Specs Badge Pill Grid */}
-              <div className="grid grid-cols-3 gap-2 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl text-center text-xs mb-4">
+              <div className="grid grid-cols-3 gap-2 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl text-center text-xs mb-3">
                 <div>
                   <p className="font-black text-slate-900 dark:text-white">{test.total_questions}</p>
                   <p className="text-[10px] text-slate-400 uppercase">Questions</p>
@@ -279,6 +380,27 @@ export const TestManager: React.FC<TestManagerProps> = ({
                   <p className="font-black text-slate-900 dark:text-white">{test.negative_marking}</p>
                   <p className="text-[10px] text-slate-400 uppercase">Neg Mark</p>
                 </div>
+              </div>
+
+              {/* Social Gate Status Badge on Card */}
+              <div className="mb-3">
+                {test.social_gate_enabled !== false ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60">
+                    <ShieldCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span className="truncate">
+                      {test.social_gate_mode === 'custom_links'
+                        ? `Custom Channels (${test.custom_social_platforms?.length || 0})`
+                        : test.social_gate_mode === 'custom_selection'
+                        ? `Selected Channels (${test.social_platform_ids?.length || 0})`
+                        : 'Global Social Gate (Active)'}
+                    </span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
+                    <XCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>Social Gate Disabled</span>
+                  </span>
+                )}
               </div>
             </div>
 
@@ -699,21 +821,361 @@ export const TestManager: React.FC<TestManagerProps> = ({
               </div>
             </div>
 
-            {/* Checkbox Settings */}
+            {/* Social Media Requirements (Mock by Mock) */}
+            <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-700/80 p-4 space-y-4">
+                
+                {/* Header & Toggle */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-700/60">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-100 dark:bg-blue-900/60 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white flex items-center gap-2">
+                        <span>Social Follow Gate Requirements</span>
+                        <span className="px-1.5 py-0.5 text-[9px] font-bold bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 rounded-md border border-blue-200 dark:border-blue-900">
+                          Mock-by-Mock
+                        </span>
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Require students to visit/join Gradeup Study channels before starting this mock test.
+                      </p>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer self-start sm:self-auto bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 shadow-2xs select-none">
+                    <input
+                      type="checkbox"
+                      checked={editingTest.social_gate_enabled ?? true}
+                      onChange={(e) => setEditingTest({ ...editingTest, social_gate_enabled: e.target.checked })}
+                      className="rounded text-blue-600 w-4 h-4"
+                    />
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      {editingTest.social_gate_enabled ?? true ? 'Gate Enabled' : 'Gate Disabled'}
+                    </span>
+                  </label>
+                </div>
+
+                {/* Gate Options when Enabled */}
+                {(editingTest.social_gate_enabled ?? true) && (
+                  <div className="space-y-4 pt-1">
+                    
+                    {/* Mode Selector Tabs */}
+                    <div>
+                      <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">
+                        Requirement Mode for this Mock Test:
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        
+                        <button
+                          type="button"
+                          onClick={() => setEditingTest({ ...editingTest, social_gate_mode: 'global' })}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            (editingTest.social_gate_mode || 'global') === 'global'
+                              ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 dark:border-blue-600 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/20'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs mb-1">
+                            <Globe className="w-3.5 h-3.5 text-blue-500" />
+                            <span>Global Default</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                            Inherit all active global channels from Social Gate Manager.
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setEditingTest({ ...editingTest, social_gate_mode: 'custom_selection' })}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            editingTest.social_gate_mode === 'custom_selection'
+                              ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 dark:border-blue-600 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/20'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs mb-1">
+                            <CheckSquare className="w-3.5 h-3.5 text-indigo-500" />
+                            <span>Select Specific Channels</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                            Pick & choose which channels apply specifically to this mock test.
+                          </p>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!editingTest.custom_social_platforms || editingTest.custom_social_platforms.length === 0) {
+                              handleCloneGlobalToCustom();
+                            }
+                            setEditingTest(prev => ({ ...prev, social_gate_mode: 'custom_links' }));
+                          }}
+                          className={`p-3 rounded-xl border text-left transition-all ${
+                            editingTest.social_gate_mode === 'custom_links'
+                              ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 dark:border-blue-600 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/20'
+                              : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 font-bold text-xs mb-1">
+                            <Edit3 className="w-3.5 h-3.5 text-emerald-500" />
+                            <span>Custom Links & Batch</span>
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-tight">
+                            Define custom URLs or specific exam batch groups for this test.
+                          </p>
+                        </button>
+
+                      </div>
+                    </div>
+
+                    {/* Mode 1: Global Default View */}
+                    {(editingTest.social_gate_mode || 'global') === 'global' && (
+                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-bold text-slate-700 dark:text-slate-300">Active Global Channels ({availablePlatforms.filter(p => p.is_active).length}):</span>
+                          <span className="text-[10px] text-slate-400">Configured in Social Gate Tab</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {availablePlatforms.filter(p => p.is_active).map(p => (
+                            <span key={p.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-semibold">
+                              {p.icon === 'youtube' && <Youtube className="w-3.5 h-3.5 text-rose-600" />}
+                              {p.icon === 'send' && <Send className="w-3.5 h-3.5 text-blue-500" />}
+                              {p.icon === 'instagram' && <Instagram className="w-3.5 h-3.5 text-pink-600" />}
+                              {p.icon === 'message-circle' && <MessageCircle className="w-3.5 h-3.5 text-emerald-600" />}
+                              {p.icon !== 'youtube' && p.icon !== 'send' && p.icon !== 'instagram' && p.icon !== 'message-circle' && <Globe className="w-3.5 h-3.5 text-indigo-500" />}
+                              <span>{p.platform_name}</span>
+                              {p.is_required && <span className="text-[9px] bg-rose-100 dark:bg-rose-950 text-rose-600 dark:text-rose-300 px-1 rounded font-bold">Mandatory</span>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Mode 2: Custom Selection View */}
+                    {editingTest.social_gate_mode === 'custom_selection' && (
+                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              Select Channels for this Mock Test:
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              Selected: {(editingTest.social_platform_ids || []).length} of {availablePlatforms.length} platforms
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleSelectAllPlatforms}
+                              className="px-2 py-1 text-[10px] font-bold text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 rounded"
+                            >
+                              Select All
+                            </button>
+                            <span className="text-slate-300">|</span>
+                            <button
+                              type="button"
+                              onClick={handleDeselectAllPlatforms}
+                              className="px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 rounded"
+                            >
+                              Clear All
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {availablePlatforms.map((p) => {
+                            const isSelected = (editingTest.social_platform_ids || []).includes(p.id);
+                            return (
+                              <label
+                                key={p.id}
+                                className={`flex items-center justify-between p-2.5 rounded-xl border cursor-pointer transition-all ${
+                                  isSelected
+                                    ? 'bg-blue-50/70 dark:bg-blue-950/40 border-blue-300 dark:border-blue-700'
+                                    : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700/80 opacity-70'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleTogglePlatformSelection(p.id)}
+                                    className="rounded text-blue-600 w-4 h-4"
+                                  />
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5">
+                                      {p.icon === 'youtube' && <Youtube className="w-3.5 h-3.5 text-rose-600 shrink-0" />}
+                                      {p.icon === 'send' && <Send className="w-3.5 h-3.5 text-blue-500 shrink-0" />}
+                                      {p.icon === 'instagram' && <Instagram className="w-3.5 h-3.5 text-pink-600 shrink-0" />}
+                                      {p.icon === 'message-circle' && <MessageCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                                      {p.icon !== 'youtube' && p.icon !== 'send' && p.icon !== 'instagram' && p.icon !== 'message-circle' && <Globe className="w-3.5 h-3.5 text-indigo-500 shrink-0" />}
+                                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{p.platform_name}</span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-400 truncate max-w-[180px]">{p.platform_url}</p>
+                                  </div>
+                                </div>
+                                {p.is_required && (
+                                  <span className="text-[9px] font-bold text-rose-600 bg-rose-50 dark:bg-rose-950 px-1.5 py-0.5 rounded border border-rose-200 dark:border-rose-900 shrink-0">
+                                    Mandatory
+                                  </span>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Mode 3: Custom Links & Channels View */}
+                    {editingTest.social_gate_mode === 'custom_links' && (
+                      <div className="bg-white dark:bg-slate-900 p-3.5 rounded-xl border border-slate-200 dark:border-slate-700 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                              Custom Channels for this Mock Test:
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              Configure specific URLs (e.g. Police Batch Telegram or Dedicated YouTube channel)
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleCloneGlobalToCustom}
+                              className="px-2.5 py-1 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg transition-colors"
+                            >
+                              📥 Load Global Template
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleAddCustomPlatform}
+                              className="px-2.5 py-1 text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-1"
+                            >
+                              <Plus className="w-3 h-3" /> Add Channel
+                            </button>
+                          </div>
+                        </div>
+
+                        {(!editingTest.custom_social_platforms || editingTest.custom_social_platforms.length === 0) ? (
+                          <div className="py-6 text-center text-xs text-slate-400 border border-dashed border-slate-200 dark:border-slate-700 rounded-xl">
+                            No custom channels added. Click "Load Global Template" or "Add Channel".
+                          </div>
+                        ) : (
+                          <div className="space-y-2.5">
+                            {editingTest.custom_social_platforms.map((cp, idx) => (
+                              <div key={cp.id || idx} className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col sm:flex-row gap-2 items-start sm:items-center justify-between">
+                                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 flex-1 w-full">
+                                  
+                                  {/* Icon & Name */}
+                                  <div className="flex items-center gap-2 sm:col-span-1">
+                                    <select
+                                      value={cp.icon}
+                                      onChange={(e) => handleUpdateCustomPlatform(idx, 'icon', e.target.value)}
+                                      className="px-2 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium outline-hidden"
+                                    >
+                                      <option value="youtube">YouTube</option>
+                                      <option value="send">Telegram</option>
+                                      <option value="message-circle">WhatsApp</option>
+                                      <option value="instagram">Instagram</option>
+                                      <option value="globe">Website</option>
+                                    </select>
+                                    <input
+                                      type="text"
+                                      value={cp.platform_name}
+                                      onChange={(e) => handleUpdateCustomPlatform(idx, 'platform_name', e.target.value)}
+                                      placeholder="Platform Name"
+                                      className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-semibold outline-hidden"
+                                    />
+                                  </div>
+
+                                  {/* URL */}
+                                  <div className="sm:col-span-2">
+                                    <input
+                                      type="url"
+                                      value={cp.platform_url}
+                                      onChange={(e) => handleUpdateCustomPlatform(idx, 'platform_url', e.target.value)}
+                                      placeholder="https://t.me/..."
+                                      className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-mono outline-hidden"
+                                    />
+                                  </div>
+
+                                  {/* Button text & Required */}
+                                  <div className="flex items-center gap-2 sm:col-span-1">
+                                    <input
+                                      type="text"
+                                      value={cp.button_text || ''}
+                                      onChange={(e) => handleUpdateCustomPlatform(idx, 'button_text', e.target.value)}
+                                      placeholder="Button Label"
+                                      className="w-full px-2 py-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-hidden"
+                                    />
+                                    <label className="flex items-center gap-1 text-[11px] font-bold text-slate-700 dark:text-slate-300 shrink-0 cursor-pointer">
+                                      <input
+                                        type="checkbox"
+                                        checked={cp.is_required}
+                                        onChange={(e) => handleUpdateCustomPlatform(idx, 'is_required', e.target.checked)}
+                                        className="rounded text-rose-600"
+                                      />
+                                      <span>Req</span>
+                                    </label>
+                                  </div>
+
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveCustomPlatform(idx)}
+                                  className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors shrink-0"
+                                  title="Remove channel"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Custom Header & Subtitle */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                          Custom Social Gate Title (Optional):
+                        </label>
+                        <input
+                          type="text"
+                          value={editingTest.social_gate_title || ''}
+                          onChange={(e) => setEditingTest({ ...editingTest, social_gate_title: e.target.value })}
+                          placeholder="Gradeup Study Official Community Requirement"
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-hidden"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                          Custom Instructions / Subtitle (Optional):
+                        </label>
+                        <input
+                          type="text"
+                          value={editingTest.social_gate_description || ''}
+                          onChange={(e) => setEditingTest({ ...editingTest, social_gate_description: e.target.value })}
+                          placeholder="Join our official community channels to receive free study PDFs..."
+                          className="w-full px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl text-xs outline-hidden"
+                        />
+                      </div>
+                    </div>
+
+                  </div>
+                )}
+
+              </div>
+            </div>
+
+            {/* Other Checkbox Settings */}
             <div className="pt-3 border-t border-slate-100 dark:border-slate-800">
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Test Features & Rules</p>
+              <p className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">Exam Rules & Security</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 
-                <label className="flex items-center gap-2 cursor-pointer p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={editingTest.social_gate_enabled ?? true}
-                    onChange={(e) => setEditingTest({ ...editingTest, social_gate_enabled: e.target.checked })}
-                    className="rounded text-blue-600"
-                  />
-                  <span>Enable Social Follow Gate</span>
-                </label>
-
                 <label className="flex items-center gap-2 cursor-pointer p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
                   <input
                     type="checkbox"
@@ -721,7 +1183,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
                     onChange={(e) => setEditingTest({ ...editingTest, anti_cheating_enabled: e.target.checked })}
                     className="rounded text-blue-600"
                   />
-                  <span>Anti-Cheating Protection</span>
+                  <span>Anti-Cheating Protection (Tab lock & Copy prevention)</span>
                 </label>
 
                 <label className="flex items-center gap-2 cursor-pointer p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
@@ -741,7 +1203,17 @@ export const TestManager: React.FC<TestManagerProps> = ({
                     onChange={(e) => setEditingTest({ ...editingTest, enable_leaderboard: e.target.checked })}
                     className="rounded text-blue-600"
                   />
-                  <span>Enable Public Leaderboard</span>
+                  <span>Enable Public Leaderboard & Rank List</span>
+                </label>
+
+                <label className="flex items-center gap-2 cursor-pointer p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg border border-slate-100 dark:border-slate-800">
+                  <input
+                    type="checkbox"
+                    checked={editingTest.show_result_immediately ?? true}
+                    onChange={(e) => setEditingTest({ ...editingTest, show_result_immediately: e.target.checked })}
+                    className="rounded text-blue-600"
+                  />
+                  <span>Show Detailed Scorecard Immediately</span>
                 </label>
 
               </div>
