@@ -29,6 +29,7 @@ import { MCQInspectionModal } from './MCQInspectionModal';
 import { AISmartParseModal } from './AISmartParseModal';
 import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
 import { BulkAIExplanationModal } from './BulkAIExplanationModal';
+import { QuestionBankImportModal } from './QuestionBankImportModal';
 
 interface QuestionManagerProps {
   testId: string;
@@ -72,10 +73,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   const [inspectingQuestion, setInspectingQuestion] = useState<Question | null>(null);
   const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
 
-  // Bank import selection states
-  const [bankQuestions, setBankQuestions] = useState<Question[]>([]);
-  const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(new Set());
-
   useEffect(() => {
     loadTestAndQuestions();
   }, [testId]);
@@ -88,12 +85,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     setSelectedQuestionIds(new Set());
   };
 
-  const loadBankQuestions = async () => {
-    const all = await dataService.getAllQuestionBank();
-    // Exclude questions already in this test
-    const currentIds = new Set(questions.map(q => q.id));
-    setBankQuestions(all.filter(q => !currentIds.has(q.id)));
-    setSelectedBankIds(new Set());
+  const handleOpenBankImportModal = () => {
     setIsBankImportOpen(true);
   };
 
@@ -260,19 +252,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     loadTestAndQuestions();
   };
 
-  const handleConfirmBankImport = async () => {
-    const toImport = bankQuestions.filter(q => selectedBankIds.has(q.id));
-    if (toImport.length === 0) {
-      notify('error', 'Please select at least 1 question to import!');
-      return;
-    }
-
-    await dataService.addQuestionsToExistingTest(testId, toImport);
-    notify('success', `Imported ${toImport.length} questions from Bank!`);
-    setIsBankImportOpen(false);
-    loadTestAndQuestions();
-  };
-
   // Subjects for filter
   const subjects = Array.from(new Set(questions.map(q => q.subject))).filter(Boolean);
 
@@ -352,7 +331,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           </button>
 
           <button
-            onClick={loadBankQuestions}
+            onClick={handleOpenBankImportModal}
             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
           >
             <Copy className="w-4 h-4" />
@@ -711,97 +690,15 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       />
 
       {/* IMPORT FROM QUESTION BANK MODAL */}
-      {isBankImportOpen && (
-        <Modal
-          isOpen={isBankImportOpen}
-          onClose={() => setIsBankImportOpen(false)}
-          title="Import Questions from Question Bank"
-          maxWidth="4xl"
-        >
-          <div className="space-y-4">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-bold text-slate-500">
-                {bankQuestions.length} Questions Available in Central Bank
-              </span>
-              <span className="font-bold text-indigo-600">
-                {selectedBankIds.size} Selected to Import
-              </span>
-            </div>
-
-            {bankQuestions.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 text-xs">
-                No additional questions available in the question bank.
-              </div>
-            ) : (
-              <div className="max-h-96 overflow-y-auto space-y-2 p-1">
-                {bankQuestions.map((bq) => (
-                  <label
-                    key={bq.id}
-                    className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${selectedBankIds.has(bq.id) ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-500' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedBankIds.has(bq.id)}
-                      onChange={() => {
-                        const next = new Set(selectedBankIds);
-                        if (next.has(bq.id)) next.delete(bq.id);
-                        else next.add(bq.id);
-                        setSelectedBankIds(next);
-                      }}
-                      className="mt-1 w-4 h-4 rounded text-indigo-600"
-                    />
-                    <div className="flex-1 text-xs space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 rounded font-bold">
-                          {bq.subject}
-                        </span>
-                        {bq.section && (
-                          <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 rounded font-bold">
-                            {bq.section}
-                          </span>
-                        )}
-                        {bq.chapter && (
-                          <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 rounded font-bold">
-                            {bq.chapter}
-                          </span>
-                        )}
-                        {bq.quality_score && (
-                          <span className="px-2 py-0.5 bg-emerald-500 text-white rounded font-bold">
-                            QA {bq.quality_score}/100
-                          </span>
-                        )}
-                      </div>
-                      <p className="font-bold text-slate-900 dark:text-white">
-                        {bq.question_text}
-                      </p>
-                      <div className="text-[11px] text-slate-500">
-                        A. {bq.option_a} | B. {bq.option_b} | C. {bq.option_c} | D. {bq.option_d} (Ans: {bq.correct_answer})
-                      </div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
-
-            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
-              <button
-                type="button"
-                onClick={() => setIsBankImportOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-500 hover:underline"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmBankImport}
-                disabled={selectedBankIds.size === 0}
-                className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
-              >
-                <Check className="w-4 h-4" /> Import {selectedBankIds.size} Questions to Test
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
+      <QuestionBankImportModal
+        isOpen={isBankImportOpen}
+        testId={testId}
+        testTitle={test?.title}
+        existingQuestions={questions}
+        onClose={() => setIsBankImportOpen(false)}
+        onSuccessImport={loadTestAndQuestions}
+        onToast={notify}
+      />
 
       {/* ADD / EDIT QUESTION MODAL */}
       <Modal
