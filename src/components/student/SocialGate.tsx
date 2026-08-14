@@ -151,14 +151,28 @@ export const SocialGate: React.FC<SocialGateProps> = ({ test, onSuccessGate, onT
     );
   }
 
+  // If social gate is disabled globally or for this test, bypass directly
+  if (globalSettings?.social_gate_enabled === false || (test && test.social_gate_enabled === false)) {
+    onSuccessGate();
+    return null;
+  }
+
   // If no platforms exist, automatically allow pass
   if (platforms.length === 0) {
     onSuccessGate();
     return null;
   }
 
-  const heading = test?.social_gate_title || globalSettings?.social_gate_title || "Gradeup Study Official Community Requirement";
-  const subtitle = test?.social_gate_description || globalSettings?.social_gate_description || "Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.";
+  const isCustom = test?.social_gate_mode === 'custom_links' || 
+    (test?.social_gate_mode === 'custom_selection' && Boolean(test?.social_gate_title) && test?.social_gate_title !== "Gradeup Study Official Community Requirement");
+
+  const heading = (isCustom && test?.social_gate_title?.trim())
+    ? test.social_gate_title.trim()
+    : (globalSettings?.social_gate_title?.trim() || "Gradeup Study Official Community Requirement");
+
+  const subtitle = (isCustom && test?.social_gate_description?.trim())
+    ? test.social_gate_description.trim()
+    : (globalSettings?.social_gate_description?.trim() || "Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.");
 
   return (
     <div className="max-w-xl mx-auto space-y-6 my-6">

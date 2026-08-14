@@ -96,7 +96,13 @@ export const dataService = {
     
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data, error } = await supabase.from('admin_settings').select('*').limit(1).maybeSingle();
+        const { data, error } = await supabase
+          .from('admin_settings')
+          .select('*')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
         if (!error && data) {
           settings = { ...DEMO_ADMIN_SETTINGS, ...data };
           localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
@@ -162,7 +168,7 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data: existingRows } = await supabase.from('admin_settings').select('id').limit(1);
+        const { data: existingRows } = await supabase.from('admin_settings').select('id').order('updated_at', { ascending: false }).limit(1);
         const idToUse = existingRows && existingRows.length > 0 ? existingRows[0].id : generateUUID();
         
         const payload: Record<string, unknown> = {
@@ -192,7 +198,6 @@ export const dataService = {
         const { error } = await supabase.from('admin_settings').upsert(payload);
         if (error) {
           console.warn('Supabase admin_settings upsert error (retrying with minimal payload):', error);
-          // If custom columns don't exist yet in Supabase schema, try saving standard columns
           const minimalPayload = {
             id: idToUse,
             brand_name: updated.brand_name,
@@ -211,10 +216,50 @@ export const dataService = {
           };
           await supabase.from('admin_settings').upsert(minimalPayload);
         }
+
+        // Also sync global social gate updates to all tests that use global social gate
+        if (newSettings.social_gate_title || newSettings.social_gate_description) {
+          try {
+            await supabase
+              .from('tests')
+              .update({
+                social_gate_title: updated.social_gate_title,
+                social_gate_description: updated.social_gate_description,
+                updated_at: new Date().toISOString()
+              })
+              .or('social_gate_mode.eq.global,social_gate_mode.is.null');
+          } catch (syncErr) {
+            console.warn('Syncing tests social gate header in Supabase:', syncErr);
+          }
+        }
       } catch (e) {
         console.error('Failed to update settings in Supabase', e);
       }
     }
+
+    // Sync in local storage tests as well
+    if (newSettings.social_gate_title || newSettings.social_gate_description) {
+      const rawTests = localStorage.getItem(STORAGE_KEYS.TESTS);
+      if (rawTests) {
+        try {
+          const parsedTests: Test[] = JSON.parse(rawTests);
+          const updatedTests = parsedTests.map(t => {
+            if (!t.social_gate_mode || t.social_gate_mode === 'global') {
+              return {
+                ...t,
+                social_gate_title: updated.social_gate_title,
+                social_gate_description: updated.social_gate_description
+              };
+            }
+            return t;
+          });
+          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(updatedTests));
+        } catch {
+          // ignore
+        }
+      }
+    }
+
     return updated;
   },
 
@@ -248,20 +293,33 @@ export const dataService = {
 
   getTestBySlugOrId: async (identifier: string): Promise<Test | null> => {
     if (!identifier) return null;
-    const cleanId = identifier.trim().toLowerCase();
+    let cleanId = identifier.trim();
+    try {
+      cleanId = decodeURIComponent(cleanId);
+    } catch {
+      // keep cleanId
+    }
 
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const isUUID = isValidUUID(identifier);
+        const isUUID = isValidUUID(cleanId);
         let query = supabase.from('tests').select('*');
         if (isUUID) {
-          query = query.or(`slug.eq.${identifier},test_code.eq.${identifier},id.eq.${identifier}`);
+          query = query.or(`slug.ilike.${cleanId},test_code.ilike.${cleanId},id.eq.${cleanId}`);
         } else {
-          query = query.or(`slug.eq.${identifier},test_code.eq.${identifier}`);
+          query = query.or(`slug.ilike.${cleanId},test_code.ilike.${cleanId}`);
         }
         const { data } = await query.limit(1).maybeSingle();
-        if (data) return data as Test;
+        if (data) {
+          const testData = data as Test;
+          const localTests = await dataService.getTests(true);
+          const idx = localTests.findIndex(t => t.id === testData.id);
+          if (idx >= 0) localTests[idx] = testData;
+          else localTests.unshift(testData);
+          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(localTests));
+          return testData;
+        }
       } catch (e) {
         console.warn('Supabase getTestBySlugOrId lookup failed', e);
       }
@@ -270,16 +328,17 @@ export const dataService = {
     const tests = await dataService.getTests(true);
     if (!tests || tests.length === 0) return null;
 
+    const lowerId = cleanId.toLowerCase();
     const found = tests.find(t => 
-      (t.slug && t.slug.toLowerCase() === cleanId) ||
-      (t.id && t.id.toLowerCase() === cleanId) ||
-      (t.test_code && t.test_code.toLowerCase() === cleanId)
+      (t.slug && t.slug.toLowerCase() === lowerId) ||
+      (t.id && t.id.toLowerCase() === lowerId) ||
+      (t.test_code && t.test_code.toLowerCase() === lowerId)
     );
     if (found) return found;
 
     const partialMatch = tests.find(t =>
-      (t.slug && (cleanId.includes(t.slug.toLowerCase()) || t.slug.toLowerCase().includes(cleanId))) ||
-      (t.test_code && (cleanId.includes(t.test_code.toLowerCase()) || t.test_code.toLowerCase().includes(cleanId)))
+      (t.slug && (lowerId.includes(t.slug.toLowerCase()) || t.slug.toLowerCase().includes(lowerId))) ||
+      (t.test_code && (lowerId.includes(t.test_code.toLowerCase()) || t.test_code.toLowerCase().includes(lowerId)))
     );
     if (partialMatch) return partialMatch;
 
