@@ -1,5 +1,5 @@
 {
-  "name": "Gradeup Study Online Mock Test Platform",
+  "name": "Gradeup Study - Free Mock Test",
   "description": "Comprehensive competitive exam mock test platform for Gradeup Study featuring admin dashboard, question bank manager, social follow gate, anti-cheating timer, autosave, detailed score analysis, leaderboard, and Supabase integration.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
