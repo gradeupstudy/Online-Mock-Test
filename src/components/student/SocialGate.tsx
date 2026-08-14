@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Youtube, Send, Instagram, CheckCircle2, ExternalLink, ShieldCheck, ArrowRight, Lock, Loader2, Globe, CheckSquare, Square, MessageCircle } from 'lucide-react';
 import { SocialPlatform, Test, AdminSettings } from '../../types';
-import { dataService } from '../../services/dataService';
+import { dataService, normalizePlatformId } from '../../services/dataService';
 
 interface SocialGateProps {
   test?: Test | null;
@@ -52,23 +52,38 @@ export const SocialGate: React.FC<SocialGateProps> = ({ test, onSuccessGate, onT
     } else if (test?.social_gate_mode === 'custom_selection' && test.social_platform_ids && test.social_platform_ids.length > 0) {
       // Filter global platforms according to this mock test's selected platforms
       const allGlobal = await dataService.getSocialPlatforms(true);
-      list = allGlobal.filter((p) => p.is_active && test.social_platform_ids?.includes(p.id));
+      const selectedIdSet = new Set(test.social_platform_ids.map(id => normalizePlatformId(id)));
+      list = allGlobal.filter((p) => Boolean(p.is_active) && (
+        test.social_platform_ids?.includes(p.id) ||
+        selectedIdSet.has(normalizePlatformId(p.id, p.platform_name))
+      ));
     } else {
-      // Default to all active global platforms
+      // Default to all active global platforms configured by admin
       list = await dataService.getSocialPlatforms(false);
     }
 
-    setPlatforms(list);
+    // Clean deduplication
+    const seenNames = new Set<string>();
+    const cleanedList: SocialPlatform[] = [];
+    list.forEach(p => {
+      const key = (p.platform_name || '').toLowerCase().trim();
+      if (!seenNames.has(key) && p.is_active !== false) {
+        seenNames.add(key);
+        cleanedList.push(p);
+      }
+    });
+
+    setPlatforms(cleanedList);
 
     // If no active platforms configured, bypass automatically
-    if (list.length === 0) {
+    if (cleanedList.length === 0) {
       onSuccessGate();
       return;
     }
 
     // Check pre-verified platforms from localStorage
     const savedVisited: Record<string, boolean> = {};
-    list.forEach((p) => {
+    cleanedList.forEach((p) => {
       const storageKey = `gradeup_social_joined_${p.id}_${p.platform_url || ''}`;
       if (localStorage.getItem(storageKey) === 'true' || localStorage.getItem(`gradeup_social_joined_${p.id}`) === 'true') {
         savedVisited[p.id] = true;

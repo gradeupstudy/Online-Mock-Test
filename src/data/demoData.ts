@@ -38,7 +38,7 @@ export const DEMO_SOCIAL_PLATFORMS: SocialPlatform[] = [
     button_text: "Join Telegram Channel",
     verification_method: "redirect_only",
     is_required: true,
-    is_active: true,
+    is_active: false,
     order_index: 2
   },
   {
@@ -49,7 +49,7 @@ export const DEMO_SOCIAL_PLATFORMS: SocialPlatform[] = [
     button_text: "Follow on Instagram",
     verification_method: "redirect_only",
     is_required: false,
-    is_active: true,
+    is_active: false,
     order_index: 3
   },
   {
@@ -60,7 +60,7 @@ export const DEMO_SOCIAL_PLATFORMS: SocialPlatform[] = [
     button_text: "Join WhatsApp Channel",
     verification_method: "redirect_only",
     is_required: false,
-    is_active: true,
+    is_active: false,
     order_index: 4
   }
 ];

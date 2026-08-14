@@ -834,7 +834,7 @@ export const dataService = {
   getSocialPlatforms: async (includeInactive = true): Promise<SocialPlatform[]> => {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
-      // 1. Try checking admin_settings first (contains the authoritative admin configuration)
+      // 1. Try checking admin_settings first (authoritative admin configuration row)
       try {
         const { data: settingsData, error: settingsError } = await supabase
           .from('admin_settings')
@@ -851,14 +851,14 @@ export const dataService = {
             icon: p.icon || 'share2',
             button_text: p.button_text || 'Join Channel',
             verification_method: p.verification_method || 'redirect_only',
-            is_required: p.is_required ?? true,
-            is_active: p.is_active ?? true,
+            is_required: p.is_required !== undefined ? Boolean(p.is_required) : true,
+            is_active: p.is_active !== undefined ? Boolean(p.is_active) : true,
             order_index: p.order_index !== undefined ? p.order_index : idx + 1
           }));
 
           localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(platforms));
           if (!includeInactive) {
-            return platforms.filter((p) => p.is_active !== false);
+            return platforms.filter((p) => p.is_active === true);
           }
           return platforms;
         }
@@ -868,27 +868,35 @@ export const dataService = {
 
       // 2. Try fetching from social_platforms table
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('social_platforms')
           .select('*')
           .order('order_index', { ascending: true })
           .order('created_at', { ascending: true });
+
+        if (!includeInactive) {
+          query = query.eq('is_active', true);
+        }
+
+        const { data, error } = await query;
           
         if (!error && data && data.length > 0) {
           const seen = new Map<string, SocialPlatform>();
           (data as SocialPlatform[]).forEach((item, idx) => {
             const key = (item.platform_name || '').toLowerCase().trim();
             const normalizedId = normalizePlatformId(item.id, item.platform_name);
+            const isItemActive = item.is_active !== undefined ? Boolean(item.is_active) : true;
             seen.set(key || normalizedId, {
               ...item,
               id: normalizedId,
+              is_active: isItemActive,
               order_index: item.order_index !== undefined ? item.order_index : idx + 1
             });
           });
           const deduplicated = Array.from(seen.values());
           localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(deduplicated));
           if (!includeInactive) {
-            return deduplicated.filter(p => p.is_active !== false);
+            return deduplicated.filter((p) => p.is_active === true);
           }
           return deduplicated;
         }
@@ -902,10 +910,11 @@ export const dataService = {
     const normalized = platforms.map((p, idx) => ({
       ...p,
       id: normalizePlatformId(p.id, p.platform_name),
+      is_active: p.is_active !== undefined ? Boolean(p.is_active) : true,
       order_index: p.order_index !== undefined ? p.order_index : idx + 1
     }));
     if (!includeInactive) {
-      return normalized.filter(p => p.is_active !== false);
+      return normalized.filter((p) => p.is_active === true);
     }
     return normalized;
   },
@@ -916,8 +925,8 @@ export const dataService = {
     const sanitizedPlatform: SocialPlatform = {
       ...platform,
       id: cleanId,
-      is_active: platform.is_active ?? true,
-      is_required: platform.is_required ?? true,
+      is_active: platform.is_active !== undefined ? Boolean(platform.is_active) : true,
+      is_required: platform.is_required !== undefined ? Boolean(platform.is_required) : true,
       verification_method: platform.verification_method || 'redirect_only'
     };
 
@@ -935,7 +944,7 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        // 1. Upsert into social_platforms table
+        // 1. Upsert into social_platforms table with standard ID
         await supabase.from('social_platforms').upsert({
           id: sanitizedPlatform.id,
           platform_name: sanitizedPlatform.platform_name,
@@ -943,18 +952,22 @@ export const dataService = {
           icon: sanitizedPlatform.icon || 'share2',
           button_text: sanitizedPlatform.button_text || 'Follow Us',
           verification_method: sanitizedPlatform.verification_method || 'redirect_only',
-          is_required: sanitizedPlatform.is_required ?? true,
-          is_active: sanitizedPlatform.is_active ?? true,
+          is_required: sanitizedPlatform.is_required,
+          is_active: sanitizedPlatform.is_active,
           order_index: sanitizedPlatform.order_index ?? 0
         });
 
-        // 2. Clean up any duplicate rows with same platform_name but differing UUIDs
+        // 2. Update any existing legacy rows matching this platform_name
         try {
           await supabase
             .from('social_platforms')
-            .delete()
-            .ilike('platform_name', sanitizedPlatform.platform_name)
-            .neq('id', sanitizedPlatform.id);
+            .update({
+              is_active: sanitizedPlatform.is_active,
+              is_required: sanitizedPlatform.is_required,
+              platform_url: sanitizedPlatform.platform_url,
+              button_text: sanitizedPlatform.button_text
+            })
+            .ilike('platform_name', `%${sanitizedPlatform.platform_name}%`);
         } catch {
           // ignore
         }
@@ -976,6 +989,7 @@ export const dataService = {
     const normalized = platforms.map((p, idx) => ({
       ...p,
       id: normalizePlatformId(p.id, p.platform_name),
+      is_active: p.is_active !== undefined ? Boolean(p.is_active) : true,
       order_index: idx + 1
     }));
     localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(normalized));
@@ -992,9 +1006,15 @@ export const dataService = {
             button_text: p.button_text || 'Follow Us',
             verification_method: p.verification_method || 'redirect_only',
             is_required: p.is_required ?? true,
-            is_active: p.is_active ?? true,
+            is_active: p.is_active,
             order_index: p.order_index ?? 0
           });
+
+          // Also update by name to keep legacy rows synced
+          await supabase
+            .from('social_platforms')
+            .update({ is_active: p.is_active, is_required: p.is_required })
+            .ilike('platform_name', `%${p.platform_name}%`);
         }
       } catch (e) {
         console.warn('Bulk upsert social_platforms error:', e);
@@ -1012,33 +1032,76 @@ export const dataService = {
   toggleSocialPlatformActive: async (id: string, isActive: boolean): Promise<SocialPlatform | null> => {
     const platforms = await dataService.getSocialPlatforms(true);
     const cleanId = normalizePlatformId(id);
-    const platform = platforms.find(p => p.id === id || p.id === cleanId || normalizePlatformId(p.id, p.platform_name) === cleanId);
-    if (!platform) return null;
-    const updated: SocialPlatform = { 
-      ...platform, 
-      id: cleanId, 
-      is_active: isActive 
-    };
-    return await dataService.saveSocialPlatform(updated);
+    const target = platforms.find(p => p.id === id || p.id === cleanId || normalizePlatformId(p.id, p.platform_name) === cleanId);
+    if (!target) return null;
+    
+    const updatedList = platforms.map(p => {
+      if (
+        p.id === id || 
+        p.id === cleanId || 
+        normalizePlatformId(p.id, p.platform_name) === cleanId ||
+        (target && p.platform_name.toLowerCase().trim() === target.platform_name.toLowerCase().trim())
+      ) {
+        return { ...p, id: cleanId, is_active: isActive };
+      }
+      return p;
+    });
+
+    localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(updatedList));
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase
+          .from('social_platforms')
+          .update({ is_active: isActive })
+          .eq('id', cleanId);
+
+        await supabase
+          .from('social_platforms')
+          .update({ is_active: isActive })
+          .eq('id', id);
+
+        if (target.platform_name) {
+          await supabase
+            .from('social_platforms')
+            .update({ is_active: isActive })
+            .ilike('platform_name', `%${target.platform_name}%`);
+        }
+      } catch (e) {
+        console.warn('Supabase toggle social platform error:', e);
+      }
+
+      try {
+        await dataService.updateSettings({ social_platforms: updatedList });
+      } catch (err) {
+        console.error('Failed to sync to admin_settings:', err);
+      }
+    }
+
+    return { ...target, id: cleanId, is_active: isActive };
   },
 
   deleteSocialPlatform: async (id: string): Promise<void> => {
     const platforms = await dataService.getSocialPlatforms(true);
     const cleanId = normalizePlatformId(id);
     const targetPlatform = platforms.find(p => p.id === id || p.id === cleanId || normalizePlatformId(p.id, p.platform_name) === cleanId);
-    const filtered = platforms.filter(p => p.id !== id && p.id !== cleanId && normalizePlatformId(p.id, p.platform_name) !== cleanId);
+    const filtered = platforms.filter(p => 
+      p.id !== id && 
+      p.id !== cleanId && 
+      normalizePlatformId(p.id, p.platform_name) !== cleanId &&
+      (!targetPlatform || p.platform_name.toLowerCase().trim() !== targetPlatform.platform_name.toLowerCase().trim())
+    );
     localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(filtered));
 
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        let deleteQuery = supabase.from('social_platforms').delete();
+        await supabase.from('social_platforms').delete().eq('id', id);
+        await supabase.from('social_platforms').delete().eq('id', cleanId);
         if (targetPlatform && targetPlatform.platform_name) {
-          deleteQuery = deleteQuery.or(`id.eq.${cleanId},id.eq.${id},platform_name.ilike.${targetPlatform.platform_name}`);
-        } else {
-          deleteQuery = deleteQuery.or(`id.eq.${cleanId},id.eq.${id}`);
+          await supabase.from('social_platforms').delete().ilike('platform_name', `%${targetPlatform.platform_name}%`);
         }
-        await deleteQuery;
       } catch (e) {
         console.warn('Supabase delete social platform error', e);
       }
@@ -1046,7 +1109,7 @@ export const dataService = {
       try {
         await dataService.updateSettings({ social_platforms: filtered });
       } catch (err) {
-        console.error('Failed to update admin_settings after deleting social platform', err);
+        console.error('Failed to sync updated list to admin_settings after delete', err);
       }
     }
   },

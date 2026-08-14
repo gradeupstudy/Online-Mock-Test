@@ -121,6 +121,32 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
     loadData();
   };
 
+  const handleEnforceYouTubeOnly = async () => {
+    const updated = platforms.map(p => {
+      const isYT = (p.platform_name || '').toLowerCase().includes('youtube');
+      return {
+        ...p,
+        is_active: isYT,
+        is_required: isYT
+      };
+    });
+    await dataService.saveSocialPlatformsBulk(updated);
+    onToast?.('success', 'Preset applied: ONLY YouTube is mandatory & active! Synced to Supabase for all devices.');
+    loadData();
+  };
+
+  const handleForceSyncAll = async () => {
+    await dataService.saveSocialPlatformsBulk(platforms);
+    await dataService.updateSettings({
+      social_gate_title: globalTitle.trim(),
+      social_gate_description: globalDescription.trim(),
+      social_gate_enabled: isGlobalGateEnabled,
+      social_platforms: platforms
+    });
+    onToast?.('success', 'All social channel configurations synced to Supabase database successfully!');
+    loadData();
+  };
+
   const getIconComponent = (iconName: string) => {
     switch (iconName) {
       case 'youtube': return <Youtube className="w-5 h-5 text-rose-600" />;
@@ -160,13 +186,33 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
           </p>
         </div>
 
-        <button
-          onClick={handleOpenAdd}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add Social Channel</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleEnforceYouTubeOnly}
+            title="Set YouTube as the only active mandatory channel and disable all others"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/50 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 font-bold text-xs rounded-xl border border-rose-200 dark:border-rose-800 transition-all shrink-0 cursor-pointer"
+          >
+            <Youtube className="w-4 h-4 text-rose-600" />
+            <span>Preset: Only YouTube</span>
+          </button>
+
+          <button
+            onClick={handleForceSyncAll}
+            title="Force sync all channels and global headers to Supabase"
+            className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-bold text-xs rounded-xl border border-emerald-200 dark:border-emerald-800 transition-all shrink-0 cursor-pointer"
+          >
+            <Cloud className="w-4 h-4 text-emerald-600" />
+            <span>Sync Cloud Database</span>
+          </button>
+
+          <button
+            onClick={handleOpenAdd}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add Social Channel</span>
+          </button>
+        </div>
       </div>
 
       {/* SECTION 1: GLOBAL SOCIAL GATE HEADER & INSTRUCTIONS EDITOR */}
