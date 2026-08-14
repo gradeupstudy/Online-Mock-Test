@@ -20,44 +20,48 @@ export const DEMO_ADMIN_SETTINGS: AdminSettings = {
 
 export const DEMO_SOCIAL_PLATFORMS: SocialPlatform[] = [
   {
-    id: "sp-yt",
+    id: "a1000000-0000-0000-0000-000000000001",
     platform_name: "YouTube",
     platform_url: "https://youtube.com/@gradeupstudy",
     icon: "youtube",
     button_text: "Subscribe on YouTube",
     verification_method: "redirect_only",
     is_required: true,
-    is_active: true
+    is_active: true,
+    order_index: 1
   },
   {
-    id: "sp-tg",
+    id: "a1000000-0000-0000-0000-000000000002",
     platform_name: "Telegram Channel",
     platform_url: "https://t.me/gradeupstudy",
     icon: "send",
     button_text: "Join Telegram Channel",
     verification_method: "redirect_only",
     is_required: true,
-    is_active: true
+    is_active: true,
+    order_index: 2
   },
   {
-    id: "sp-ig",
+    id: "a1000000-0000-0000-0000-000000000003",
     platform_name: "Instagram",
     platform_url: "https://instagram.com/gradeupstudy",
     icon: "instagram",
     button_text: "Follow on Instagram",
     verification_method: "redirect_only",
     is_required: false,
-    is_active: true
+    is_active: true,
+    order_index: 3
   },
   {
-    id: "sp-wa",
+    id: "a1000000-0000-0000-0000-000000000004",
     platform_name: "WhatsApp Channel",
     platform_url: "https://whatsapp.com/channel/gradeupstudy",
     icon: "message-circle",
     button_text: "Join WhatsApp Channel",
     verification_method: "redirect_only",
     is_required: false,
-    is_active: true
+    is_active: true,
+    order_index: 4
   }
 ];
 

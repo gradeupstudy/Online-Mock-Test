@@ -28,6 +28,33 @@ export const parseSafeNumber = (val: unknown, defaultVal = 0): number => {
   return defaultVal;
 };
 
+export const STANDARD_PLATFORM_UUIDS: Record<string, string> = {
+  'sp-yt': 'a1000000-0000-0000-0000-000000000001',
+  'youtube': 'a1000000-0000-0000-0000-000000000001',
+  'sp-tg': 'a1000000-0000-0000-0000-000000000002',
+  'telegram': 'a1000000-0000-0000-0000-000000000002',
+  'telegram channel': 'a1000000-0000-0000-0000-000000000002',
+  'sp-ig': 'a1000000-0000-0000-0000-000000000003',
+  'instagram': 'a1000000-0000-0000-0000-000000000003',
+  'sp-wa': 'a1000000-0000-0000-0000-000000000004',
+  'whatsapp': 'a1000000-0000-0000-0000-000000000004',
+  'whatsapp channel': 'a1000000-0000-0000-0000-000000000004',
+};
+
+export const normalizePlatformId = (id: string | null | undefined, name?: string): string => {
+  if (id && isValidUUID(id)) return id;
+  const key = (id || '').toLowerCase().trim();
+  if (STANDARD_PLATFORM_UUIDS[key]) return STANDARD_PLATFORM_UUIDS[key];
+  if (name) {
+    const nameKey = name.toLowerCase().trim();
+    if (STANDARD_PLATFORM_UUIDS[nameKey]) return STANDARD_PLATFORM_UUIDS[nameKey];
+    for (const [k, v] of Object.entries(STANDARD_PLATFORM_UUIDS)) {
+      if (nameKey.includes(k) || k.includes(nameKey)) return v;
+    }
+  }
+  return generateUUID();
+};
+
 const STORAGE_KEYS = {
   TESTS: 'gradeup_tests',
   QUESTIONS: 'gradeup_questions',
@@ -807,8 +834,40 @@ export const dataService = {
   getSocialPlatforms: async (includeInactive = true): Promise<SocialPlatform[]> => {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
+      // 1. Try checking admin_settings first (contains the authoritative admin configuration)
       try {
-        // 1. Try fetching from social_platforms table
+        const { data: settingsData, error: settingsError } = await supabase
+          .from('admin_settings')
+          .select('social_platforms')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!settingsError && settingsData && Array.isArray(settingsData.social_platforms) && settingsData.social_platforms.length > 0) {
+          const platforms: SocialPlatform[] = settingsData.social_platforms.map((p: any, idx: number) => ({
+            id: normalizePlatformId(p.id, p.platform_name),
+            platform_name: p.platform_name || 'Community Channel',
+            platform_url: p.platform_url || '',
+            icon: p.icon || 'share2',
+            button_text: p.button_text || 'Join Channel',
+            verification_method: p.verification_method || 'redirect_only',
+            is_required: p.is_required ?? true,
+            is_active: p.is_active ?? true,
+            order_index: p.order_index !== undefined ? p.order_index : idx + 1
+          }));
+
+          localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(platforms));
+          if (!includeInactive) {
+            return platforms.filter((p) => p.is_active !== false);
+          }
+          return platforms;
+        }
+      } catch (e) {
+        console.warn('Supabase admin_settings social_platforms fetch error', e);
+      }
+
+      // 2. Try fetching from social_platforms table
+      try {
         const { data, error } = await supabase
           .from('social_platforms')
           .select('*')
@@ -816,55 +875,56 @@ export const dataService = {
           .order('created_at', { ascending: true });
           
         if (!error && data && data.length > 0) {
-          localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(data));
+          const seen = new Map<string, SocialPlatform>();
+          (data as SocialPlatform[]).forEach((item, idx) => {
+            const key = (item.platform_name || '').toLowerCase().trim();
+            const normalizedId = normalizePlatformId(item.id, item.platform_name);
+            seen.set(key || normalizedId, {
+              ...item,
+              id: normalizedId,
+              order_index: item.order_index !== undefined ? item.order_index : idx + 1
+            });
+          });
+          const deduplicated = Array.from(seen.values());
+          localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(deduplicated));
           if (!includeInactive) {
-            return (data as SocialPlatform[]).filter(p => p.is_active !== false);
+            return deduplicated.filter(p => p.is_active !== false);
           }
-          return data as SocialPlatform[];
+          return deduplicated;
         }
       } catch (e) {
-        console.warn('Supabase social platforms fetch error', e);
-      }
-
-      // 2. Fallback to checking admin_settings row
-      try {
-        const { data: settingsData } = await supabase
-          .from('admin_settings')
-          .select('social_platforms')
-          .limit(1)
-          .maybeSingle();
-
-        if (settingsData && Array.isArray(settingsData.social_platforms) && settingsData.social_platforms.length > 0) {
-          localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(settingsData.social_platforms));
-          if (!includeInactive) {
-            return (settingsData.social_platforms as SocialPlatform[]).filter(p => p.is_active !== false);
-          }
-          return settingsData.social_platforms as SocialPlatform[];
-        }
-      } catch (e) {
-        console.warn('Supabase admin_settings social_platforms fetch error', e);
+        console.warn('Supabase social platforms table fetch error', e);
       }
     }
 
     const raw = localStorage.getItem(STORAGE_KEYS.SOCIAL);
     const platforms: SocialPlatform[] = raw ? JSON.parse(raw) : DEMO_SOCIAL_PLATFORMS;
+    const normalized = platforms.map((p, idx) => ({
+      ...p,
+      id: normalizePlatformId(p.id, p.platform_name),
+      order_index: p.order_index !== undefined ? p.order_index : idx + 1
+    }));
     if (!includeInactive) {
-      return platforms.filter(p => p.is_active !== false);
+      return normalized.filter(p => p.is_active !== false);
     }
-    return platforms;
+    return normalized;
   },
 
   saveSocialPlatform: async (platform: SocialPlatform): Promise<SocialPlatform> => {
     const platforms = await dataService.getSocialPlatforms(true);
+    const cleanId = normalizePlatformId(platform.id, platform.platform_name);
     const sanitizedPlatform: SocialPlatform = {
       ...platform,
-      id: isValidUUID(platform.id) ? platform.id : (platform.id.startsWith('sp-') ? platform.id : generateUUID()),
+      id: cleanId,
       is_active: platform.is_active ?? true,
       is_required: platform.is_required ?? true,
       verification_method: platform.verification_method || 'redirect_only'
     };
 
-    const idx = platforms.findIndex(p => p.id === sanitizedPlatform.id || p.platform_name === sanitizedPlatform.platform_name);
+    const idx = platforms.findIndex(p => 
+      p.id === cleanId || 
+      p.platform_name.toLowerCase().trim() === sanitizedPlatform.platform_name.toLowerCase().trim()
+    );
     if (idx >= 0) {
       platforms[idx] = sanitizedPlatform;
     } else {
@@ -875,19 +935,34 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        // 1. Save to social_platforms table if ID is UUID
-        if (isValidUUID(sanitizedPlatform.id)) {
-          await supabase.from('social_platforms').upsert(sanitizedPlatform);
-        } else {
-          // If ID is not a UUID (e.g. sp-yt), create/upsert with a clean UUID in Supabase
-          const cleanPlatform = { ...sanitizedPlatform, id: generateUUID() };
-          await supabase.from('social_platforms').upsert(cleanPlatform);
+        // 1. Upsert into social_platforms table
+        await supabase.from('social_platforms').upsert({
+          id: sanitizedPlatform.id,
+          platform_name: sanitizedPlatform.platform_name,
+          platform_url: sanitizedPlatform.platform_url,
+          icon: sanitizedPlatform.icon || 'share2',
+          button_text: sanitizedPlatform.button_text || 'Follow Us',
+          verification_method: sanitizedPlatform.verification_method || 'redirect_only',
+          is_required: sanitizedPlatform.is_required ?? true,
+          is_active: sanitizedPlatform.is_active ?? true,
+          order_index: sanitizedPlatform.order_index ?? 0
+        });
+
+        // 2. Clean up any duplicate rows with same platform_name but differing UUIDs
+        try {
+          await supabase
+            .from('social_platforms')
+            .delete()
+            .ilike('platform_name', sanitizedPlatform.platform_name)
+            .neq('id', sanitizedPlatform.id);
+        } catch {
+          // ignore
         }
       } catch (e) {
-        console.warn('Supabase save social platform table error (will sync via admin_settings)', e);
+        console.warn('Supabase save social platform table error:', e);
       }
 
-      // 2. Also update admin_settings.social_platforms array for 100% reliable cross-browser sync
+      // 3. Update admin_settings.social_platforms array for instant cross-browser synchronization
       try {
         await dataService.updateSettings({ social_platforms: platforms });
       } catch (err) {
@@ -898,37 +973,72 @@ export const dataService = {
   },
 
   saveSocialPlatformsBulk: async (platforms: SocialPlatform[]): Promise<SocialPlatform[]> => {
-    localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(platforms));
+    const normalized = platforms.map((p, idx) => ({
+      ...p,
+      id: normalizePlatformId(p.id, p.platform_name),
+      order_index: idx + 1
+    }));
+    localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(normalized));
+
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        await dataService.updateSettings({ social_platforms: platforms });
+        for (const p of normalized) {
+          await supabase.from('social_platforms').upsert({
+            id: p.id,
+            platform_name: p.platform_name,
+            platform_url: p.platform_url,
+            icon: p.icon || 'share2',
+            button_text: p.button_text || 'Follow Us',
+            verification_method: p.verification_method || 'redirect_only',
+            is_required: p.is_required ?? true,
+            is_active: p.is_active ?? true,
+            order_index: p.order_index ?? 0
+          });
+        }
       } catch (e) {
-        console.error('Failed to bulk sync social platforms to Supabase', e);
+        console.warn('Bulk upsert social_platforms error:', e);
+      }
+
+      try {
+        await dataService.updateSettings({ social_platforms: normalized });
+      } catch (e) {
+        console.error('Failed to bulk sync social platforms to admin_settings', e);
       }
     }
-    return platforms;
+    return normalized;
   },
 
   toggleSocialPlatformActive: async (id: string, isActive: boolean): Promise<SocialPlatform | null> => {
     const platforms = await dataService.getSocialPlatforms(true);
-    const platform = platforms.find(p => p.id === id);
+    const cleanId = normalizePlatformId(id);
+    const platform = platforms.find(p => p.id === id || p.id === cleanId || normalizePlatformId(p.id, p.platform_name) === cleanId);
     if (!platform) return null;
-    const updated = { ...platform, is_active: isActive };
+    const updated: SocialPlatform = { 
+      ...platform, 
+      id: cleanId, 
+      is_active: isActive 
+    };
     return await dataService.saveSocialPlatform(updated);
   },
 
   deleteSocialPlatform: async (id: string): Promise<void> => {
     const platforms = await dataService.getSocialPlatforms(true);
-    const filtered = platforms.filter(p => p.id !== id);
+    const cleanId = normalizePlatformId(id);
+    const targetPlatform = platforms.find(p => p.id === id || p.id === cleanId || normalizePlatformId(p.id, p.platform_name) === cleanId);
+    const filtered = platforms.filter(p => p.id !== id && p.id !== cleanId && normalizePlatformId(p.id, p.platform_name) !== cleanId);
     localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(filtered));
 
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        if (isValidUUID(id)) {
-          await supabase.from('social_platforms').delete().eq('id', id);
+        let deleteQuery = supabase.from('social_platforms').delete();
+        if (targetPlatform && targetPlatform.platform_name) {
+          deleteQuery = deleteQuery.or(`id.eq.${cleanId},id.eq.${id},platform_name.ilike.${targetPlatform.platform_name}`);
+        } else {
+          deleteQuery = deleteQuery.or(`id.eq.${cleanId},id.eq.${id}`);
         }
+        await deleteQuery;
       } catch (e) {
         console.warn('Supabase delete social platform error', e);
       }
