@@ -54,6 +54,11 @@ export interface Question {
   subject: string;
   chapter: string;
   section?: string;
+  topic?: string;
+  difficulty?: 'Easy' | 'Medium' | 'Hard' | 'Mixed' | string;
+  quality_score?: number;
+  inspection_status?: 'verified' | 'needs_review' | 'pending';
+  inspection_notes?: string;
   created_at?: string;
 }
 
@@ -161,9 +166,15 @@ export interface AdminSettings {
 export interface PublicLeaderboardEntry {
   rank: number;
   attempt_id: string;
+  student_name: string;
+  student_district?: string;
+  student_state?: string;
   masked_name: string;
   score: number;
+  percentage?: number;
   correct_answers: number;
+  wrong_answers?: number;
+  unattempted_answers?: number;
   time_taken_seconds: number;
   submitted_at: string;
 }

@@ -322,7 +322,7 @@ export default function App() {
       </main>
 
       {/* FOOTER (Hidden during active exam) */}
-      {!isExamTerminalActive && <Footer onOpenAdmin={handleAdminNavClick} />}
+      {!isExamTerminalActive && <Footer />}
 
       {/* SUPABASE SETUP CONFIG MODAL */}
       <SupabaseSetupModal

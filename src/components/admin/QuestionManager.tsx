@@ -1,10 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit3, Trash2, Upload, Eye, ArrowLeft, Check, FileSpreadsheet, Image as ImageIcon, HelpCircle, Sparkles, FileText } from 'lucide-react';
+import { 
+  Plus, 
+  Search, 
+  Edit3, 
+  Trash2, 
+  Upload, 
+  Eye, 
+  ArrowLeft, 
+  Check, 
+  FileSpreadsheet, 
+  Image as ImageIcon, 
+  HelpCircle, 
+  Sparkles, 
+  FileText,
+  Zap,
+  ShieldCheck,
+  Layers,
+  BookOpen,
+  Copy
+} from 'lucide-react';
 import { Test, Question } from '../../types';
 import { dataService } from '../../services/dataService';
+import { aiService } from '../../services/aiService';
 import { Modal } from '../common/Modal';
 import { AIQuestionGeneratorModal } from './AIQuestionGeneratorModal';
 import { TextJsonImportModal } from './TextJsonImportModal';
+import { MCQInspectionModal } from './MCQInspectionModal';
+import { AISmartParseModal } from './AISmartParseModal';
+import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
+import { BulkAIExplanationModal } from './BulkAIExplanationModal';
 
 interface QuestionManagerProps {
   testId: string;
@@ -24,6 +48,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       onToast(type, msg);
     }
   };
+
   const [test, setTest] = useState<Test | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,9 +56,25 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
+  const [isSmartParseOpen, setIsSmartParseOpen] = useState(false);
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
+  const [isBankImportOpen, setIsBankImportOpen] = useState(false);
+  const [isBulkInspectOpen, setIsBulkInspectOpen] = useState(false);
+  const [isBulkExplanationOpen, setIsBulkExplanationOpen] = useState(false);
+  
+  // Selection states for batch actions on mock test questions
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
+  const [isGeneratingExplanationId, setIsGeneratingExplanationId] = useState<string | null>(null);
+  const [isGeneratingEditExplanation, setIsGeneratingEditExplanation] = useState(false);
+
   const [editingQuestion, setEditingQuestion] = useState<Partial<Question> | null>(null);
   const [previewQuestion, setPreviewQuestion] = useState<Question | null>(null);
+  const [inspectingQuestion, setInspectingQuestion] = useState<Question | null>(null);
+  const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
+
+  // Bank import selection states
+  const [bankQuestions, setBankQuestions] = useState<Question[]>([]);
+  const [selectedBankIds, setSelectedBankIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     loadTestAndQuestions();
@@ -44,6 +85,97 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     setTest(t);
     const qList = await dataService.getQuestions(testId);
     setQuestions(qList);
+    setSelectedQuestionIds(new Set());
+  };
+
+  const loadBankQuestions = async () => {
+    const all = await dataService.getAllQuestionBank();
+    // Exclude questions already in this test
+    const currentIds = new Set(questions.map(q => q.id));
+    setBankQuestions(all.filter(q => !currentIds.has(q.id)));
+    setSelectedBankIds(new Set());
+    setIsBankImportOpen(true);
+  };
+
+  const handleApplyAllImprovements = async (improvedQuestions: Question[]) => {
+    await dataService.saveQuestions(testId, improvedQuestions);
+    setQuestions(improvedQuestions);
+    notify('success', 'Applied 360° Quality Improvements to all questions in test!');
+  };
+
+  const handleApplyBulkExplanations = async (updatedQuestions: Question[]) => {
+    await dataService.saveQuestions(testId, updatedQuestions);
+    setQuestions(updatedQuestions);
+    notify('success', 'Saved AI Explanations to all questions in test!');
+  };
+
+  // 1-Click Single AI Explanation Generation on question card
+  const handleSingleAIExplain = async (q: Question) => {
+    try {
+      setIsGeneratingExplanationId(q.id);
+      const explanation = await aiService.generateSingleExplanation(q, 'bilingual', 'step_by_step');
+      const updatedQ: Question = { ...q, explanation };
+      await dataService.saveQuestion(testId, updatedQ);
+      setQuestions(prev => prev.map(item => item.id === q.id ? updatedQ : item));
+      notify('success', `Generated AI explanation for Q${q.question_number}!`);
+    } catch (err: any) {
+      console.error('Failed to generate single AI explanation', err);
+      notify('error', err?.message || 'Failed to generate explanation with AI.');
+    } finally {
+      setIsGeneratingExplanationId(null);
+    }
+  };
+
+  // Generate explanation inside the edit modal
+  const handleGenerateExplanationInEditModal = async () => {
+    if (!editingQuestion?.question_text) {
+      notify('error', 'Please enter question text first!');
+      return;
+    }
+    try {
+      setIsGeneratingEditExplanation(true);
+      const explanation = await aiService.generateSingleExplanation(
+        editingQuestion as Question,
+        'bilingual',
+        'step_by_step'
+      );
+      setEditingQuestion(prev => prev ? { ...prev, explanation } : null);
+      notify('success', 'AI Explanation generated!');
+    } catch (err: any) {
+      notify('error', err?.message || 'Failed to generate explanation.');
+    } finally {
+      setIsGeneratingEditExplanation(false);
+    }
+  };
+
+  // Multi-select handlers
+  const handleToggleSelectAll = () => {
+    if (selectedQuestionIds.size === filteredQuestions.length) {
+      setSelectedQuestionIds(new Set());
+    } else {
+      setSelectedQuestionIds(new Set(filteredQuestions.map(q => q.id)));
+    }
+  };
+
+  const handleToggleSelectQuestion = (id: string) => {
+    setSelectedQuestionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    if (selectedQuestionIds.size === 0) return;
+    if (window.confirm(`Are you sure you want to delete ${selectedQuestionIds.size} selected questions?`)) {
+      const remaining = questions.filter(q => !selectedQuestionIds.has(q.id));
+      const reindexed = remaining.map((q, idx) => ({ ...q, question_number: idx + 1 }));
+      await dataService.saveQuestions(testId, reindexed);
+      setQuestions(reindexed);
+      setSelectedQuestionIds(new Set());
+      notify('info', 'Deleted selected questions.');
+    }
   };
 
   const handleOpenAdd = () => {
@@ -60,7 +192,10 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       correct_answer: 'A',
       explanation: '',
       subject: test?.subject || 'General Studies',
+      section: test?.sections?.[0] || 'General',
       chapter: 'General',
+      topic: 'General Topic',
+      difficulty: 'Medium',
       marks: test?.marks_per_question || 1,
       negative_marks: test?.negative_marking || 0.25
     });
@@ -79,7 +214,13 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       return;
     }
 
-    const saved = await dataService.saveQuestion(testId, editingQuestion as Question);
+    const toSave: Question = {
+      ...(editingQuestion as Question),
+      section: editingQuestion.subject || 'General',
+      topic: editingQuestion.chapter || 'General',
+    };
+
+    const saved = await dataService.saveQuestion(testId, toSave);
     notify('success', `Question ${saved.question_number} saved!`);
     await loadTestAndQuestions();
 
@@ -98,19 +239,16 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
         correct_answer: 'A',
         explanation: '',
         subject: editingQuestion.subject || 'General Studies',
+        section: editingQuestion.subject || 'General',
         chapter: editingQuestion.chapter || 'General',
+        topic: editingQuestion.chapter || 'General',
+        difficulty: editingQuestion.difficulty || 'Medium',
         marks: editingQuestion.marks || 1,
         negative_marks: editingQuestion.negative_marks || 0.25
       });
     } else {
       setIsModalOpen(false);
     }
-  };
-
-  const [deletingQuestionId, setDeletingQuestionId] = useState<string | null>(null);
-
-  const handleDeleteQuestion = (qId: string) => {
-    setDeletingQuestionId(qId);
   };
 
   const confirmDeleteQuestion = async () => {
@@ -121,13 +259,27 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     loadTestAndQuestions();
   };
 
+  const handleConfirmBankImport = async () => {
+    const toImport = bankQuestions.filter(q => selectedBankIds.has(q.id));
+    if (toImport.length === 0) {
+      notify('error', 'Please select at least 1 question to import!');
+      return;
+    }
+
+    await dataService.addQuestionsToExistingTest(testId, toImport);
+    notify('success', `Imported ${toImport.length} questions from Bank!`);
+    setIsBankImportOpen(false);
+    loadTestAndQuestions();
+  };
+
   // Subjects for filter
   const subjects = Array.from(new Set(questions.map(q => q.subject))).filter(Boolean);
 
   const filteredQuestions = questions.filter(q => {
     const matchesSearch = q.question_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.chapter.toLowerCase().includes(searchQuery.toLowerCase());
+                          q.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          q.chapter?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          q.topic?.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesSubject = selectedSubject === 'all' || q.subject === selectedSubject;
     return matchesSearch && matchesSubject;
   });
@@ -146,42 +298,85 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           </button>
           <div>
             <span className="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-              Question Bank
+              Mock Test Question Manager
             </span>
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">
               {test?.title || 'Mock Test Questions'}
             </h1>
+            <div className="text-xs text-slate-400 flex items-center gap-2 mt-0.5">
+              <span>Code: {test?.test_code}</span>
+              <span>•</span>
+              <span>{questions.length} Questions</span>
+              <span>•</span>
+              <span>{test?.category}</span>
+            </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {/* BATCH AI 360 INSPECTION (ALL AT ONCE) */}
+          <button
+            onClick={() => setIsBulkInspectOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all cursor-pointer border border-amber-300/40"
+            title="Inspect and Audit all MCQs in this test simultaneously"
+          >
+            <ShieldCheck className="w-4 h-4 text-slate-950" />
+            <span>360° Inspect All MCQs</span>
+          </button>
+
+          {/* BATCH AI EXPLANATIONS (ALL AT ONCE) */}
+          <button
+            onClick={() => setIsBulkExplanationOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer"
+            title="Generate or upgrade AI explanations for all MCQs at once"
+          >
+            <BookOpen className="w-4 h-4 text-blue-200" />
+            <span>AI Explanations (Bulk)</span>
+          </button>
+
           <button
             onClick={() => setIsAiModalOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 hover:from-indigo-700 hover:to-blue-800 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer border border-slate-700"
           >
             <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
-            <span>AI Question Generator</span>
+            <span>AI MCQ Gen</span>
+          </button>
+
+          <button
+            onClick={() => setIsSmartParseOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+          >
+            <Zap className="w-4 h-4 text-emerald-200" />
+            <span>AI Smart Parse</span>
+          </button>
+
+          <button
+            onClick={loadBankQuestions}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+          >
+            <Copy className="w-4 h-4" />
+            <span>Import from Bank</span>
           </button>
 
           <button
             onClick={() => setIsTextModalOpen(true)}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
           >
             <FileText className="w-4 h-4" />
-            <span>Paste Text / JSON</span>
+            <span>Paste Text</span>
           </button>
 
           <button
             onClick={() => onOpenBulkImport(testId)}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-all cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Bulk CSV</span>
+            <span>CSV</span>
           </button>
 
           <button
             onClick={handleOpenAdd}
-            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Question</span>
@@ -189,23 +384,87 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
         </div>
       </div>
 
-      {/* Filter and Search */}
-      <div className="flex flex-col sm:flex-row gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
-        <div className="flex-1 relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-          <input
-            type="text"
-            placeholder="Search questions, options, chapter..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
-          />
+      {/* MULTI-SELECT ACTION BAR (When 1 or more questions are selected) */}
+      {selectedQuestionIds.size > 0 && (
+        <div className="p-4 bg-gradient-to-r from-indigo-900 via-slate-900 to-blue-950 text-white rounded-2xl border border-indigo-500/30 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <span className="w-8 h-8 rounded-xl bg-amber-400 text-slate-950 font-black text-sm flex items-center justify-center">
+              {selectedQuestionIds.size}
+            </span>
+            <div>
+              <h4 className="text-xs font-black uppercase tracking-wider text-amber-300">
+                {selectedQuestionIds.size} MCQ(s) Selected
+              </h4>
+              <p className="text-[11px] text-slate-300">
+                Perform bulk AI actions across selected questions.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => setIsBulkInspectOpen(true)}
+              className="px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>360° Inspect Selected ({selectedQuestionIds.size})</span>
+            </button>
+
+            <button
+              onClick={() => setIsBulkExplanationOpen(true)}
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Generate Explanations ({selectedQuestionIds.size})</span>
+            </button>
+
+            <button
+              onClick={handleDeleteSelected}
+              className="px-3 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold text-xs rounded-xl border border-rose-500/30 transition-all flex items-center gap-1 cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Delete Selected</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedQuestionIds(new Set())}
+              className="px-3 py-2 text-xs font-bold text-slate-400 hover:text-white"
+            >
+              Deselect All
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Filter, Search, and Select All Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+        <div className="flex items-center gap-3 flex-1">
+          <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-600 dark:text-slate-300 shrink-0">
+            <input
+              type="checkbox"
+              checked={filteredQuestions.length > 0 && selectedQuestionIds.size === filteredQuestions.length}
+              onChange={handleToggleSelectAll}
+              className="w-4 h-4 rounded text-blue-600 cursor-pointer"
+            />
+            <span>Select All</span>
+          </label>
+
+          <div className="flex-1 relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+            <input
+              type="text"
+              placeholder="Search questions, options, chapter, topic..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
+            />
+          </div>
         </div>
 
         <select
           value={selectedSubject}
           onChange={(e) => setSelectedSubject(e.target.value)}
-          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden"
+          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-bold"
         >
           <option value="all">All Subjects ({questions.length})</option>
           {subjects.map(s => (
@@ -219,44 +478,99 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
         {filteredQuestions.map((q) => (
           <div
             key={q.id}
-            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs hover:border-slate-300 transition-colors"
+            className={`bg-white dark:bg-slate-900 rounded-2xl border p-6 shadow-xs transition-all space-y-3 ${
+              selectedQuestionIds.has(q.id)
+                ? 'border-indigo-500/60 ring-2 ring-indigo-500/20 bg-indigo-50/20 dark:bg-indigo-950/20'
+                : 'border-slate-200 dark:border-slate-800 hover:border-slate-300'
+            }`}
           >
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div className="flex items-center gap-2">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <input
+                  type="checkbox"
+                  checked={selectedQuestionIds.has(q.id)}
+                  onChange={() => handleToggleSelectQuestion(q.id)}
+                  className="w-4 h-4 rounded text-indigo-600 cursor-pointer"
+                />
+
                 <span className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-sm flex items-center justify-center shrink-0">
                   Q{q.question_number}
                 </span>
-                <div>
-                  {q.section && (
-                    <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 text-xs font-bold rounded-md mr-1.5 border border-amber-200 dark:border-amber-800">
-                      Section: {q.section}
-                    </span>
-                  )}
-                  <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold rounded-md mr-2">
-                    {q.subject}
+                
+                {q.subject && (
+                  <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 text-xs font-bold rounded-md border border-blue-200 dark:border-blue-900">
+                    Subject: {q.subject}
                   </span>
-                  <span className="text-xs text-slate-400">Chapter: {q.chapter}</span>
-                </div>
+                )}
+                {q.section && (
+                  <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 text-xs font-bold rounded-md border border-amber-200 dark:border-amber-900">
+                    Section: {q.section}
+                  </span>
+                )}
+                {q.chapter && q.chapter !== 'General' && (
+                  <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 text-xs font-bold rounded-md">
+                    Chapter: {q.chapter}
+                  </span>
+                )}
+                {q.topic && q.topic !== 'General Topic' && (
+                  <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-200 text-xs font-bold rounded-md">
+                    Topic: {q.topic}
+                  </span>
+                )}
+
+                {q.quality_score ? (
+                  <span className="px-2 py-0.5 bg-emerald-500 text-white text-xs font-bold rounded-md flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3" /> QA {q.quality_score}/100
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 text-xs font-medium rounded-md">
+                    Pending Audit
+                  </span>
+                )}
               </div>
 
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 shrink-0">
+                {/* 1-Click AI Explain Button */}
+                <button
+                  onClick={() => handleSingleAIExplain(q)}
+                  disabled={isGeneratingExplanationId === q.id}
+                  className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-lg border border-blue-200 dark:border-blue-800 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                  title="Generate or enhance AI explanation for this question"
+                >
+                  {isGeneratingExplanationId === q.id ? (
+                    <Sparkles className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                  )}
+                  <span>✦ AI Explain</span>
+                </button>
+
+                <button
+                  onClick={() => setInspectingQuestion(q)}
+                  className="px-2.5 py-1 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-lg shadow-xs flex items-center gap-1 mr-1 cursor-pointer"
+                  title="360° AI Quality Audit & Polish"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 fill-slate-950" />
+                  <span>360° Inspect</span>
+                </button>
+
                 <button
                   onClick={() => setPreviewQuestion(q)}
-                  className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                   title="Preview Question"
                 >
                   <Eye className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => handleOpenEdit(q)}
-                  className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  className="p-1.5 text-slate-500 hover:text-blue-600 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                   title="Edit Question"
                 >
                   <Edit3 className="w-4 h-4" />
                 </button>
                 <button
-                  onClick={() => handleDeleteQuestion(q.id)}
-                  className="p-1.5 text-rose-500 hover:text-rose-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                  onClick={() => setDeletingQuestionId(q.id)}
+                  className="p-1.5 text-rose-500 hover:text-rose-700 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                   title="Delete Question"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -265,7 +579,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             </div>
 
             {/* Question Text */}
-            <p className="font-semibold text-base text-slate-900 dark:text-white mb-4 leading-relaxed">
+            <p className="font-semibold text-base text-slate-900 dark:text-white leading-relaxed">
               {q.question_text}
             </p>
 
@@ -313,26 +627,180 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             </div>
 
             {/* Explanation box */}
-            {q.explanation && (
-              <div className="mt-3 p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200/50 dark:border-amber-900/50 text-xs text-amber-900 dark:text-amber-200">
-                <span className="font-bold">Explanation: </span> {q.explanation}
+            {q.explanation ? (
+              <div className="p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200/50 dark:border-amber-900/50 text-xs text-amber-900 dark:text-amber-200 flex items-start justify-between gap-2">
+                <div>
+                  <span className="font-bold text-amber-950 dark:text-amber-300">Explanation: </span> {q.explanation}
+                </div>
+                <button
+                  onClick={() => handleSingleAIExplain(q)}
+                  disabled={isGeneratingExplanationId === q.id}
+                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-bold shrink-0"
+                >
+                  Upgrade
+                </button>
+              </div>
+            ) : (
+              <div className="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 text-xs text-slate-500 flex items-center justify-between">
+                <span>No explanation provided yet.</span>
+                <button
+                  onClick={() => handleSingleAIExplain(q)}
+                  disabled={isGeneratingExplanationId === q.id}
+                  className="text-xs text-blue-600 dark:text-blue-400 font-bold hover:underline flex items-center gap-1"
+                >
+                  <Sparkles className="w-3 h-3 text-blue-500" />
+                  <span>Generate Explanation with AI</span>
+                </button>
               </div>
             )}
           </div>
         ))}
 
         {questions.length === 0 && (
-          <div className="py-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <p className="text-slate-500 text-sm mb-3">No questions created for this test yet.</p>
-            <button
-              onClick={handleOpenAdd}
-              className="px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl"
-            >
-              Add First Question
-            </button>
+          <div className="py-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+            <p className="text-slate-500 text-sm">No questions created for this test yet.</p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                onClick={() => setIsAiModalOpen(true)}
+                className="px-4 py-2 bg-indigo-600 text-white font-bold text-xs rounded-xl shadow-sm"
+              >
+                Generate with AI
+              </button>
+              <button
+                onClick={() => setIsSmartParseOpen(true)}
+                className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow-sm"
+              >
+                AI Smart Parse
+              </button>
+              <button
+                onClick={handleOpenAdd}
+                className="px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl shadow-sm"
+              >
+                Add Manually
+              </button>
+            </div>
           </div>
         )}
       </div>
+
+      {/* 360° DEGREE MCQ INSPECTION MODAL */}
+      {inspectingQuestion && (
+        <MCQInspectionModal
+          isOpen={!!inspectingQuestion}
+          question={inspectingQuestion}
+          onClose={() => setInspectingQuestion(null)}
+          onApplyImprovement={async (updated) => {
+            await dataService.saveQuestion(testId, updated);
+            loadTestAndQuestions();
+          }}
+          onToast={notify}
+        />
+      )}
+
+      {/* AI SMART PARSE MODAL */}
+      <AISmartParseModal
+        isOpen={isSmartParseOpen}
+        testId={testId}
+        defaultSubject={test?.subject || 'General Studies'}
+        defaultSection={test?.sections?.[0] || 'General'}
+        availableSections={test?.sections || []}
+        onClose={() => setIsSmartParseOpen(false)}
+        onSuccessImport={loadTestAndQuestions}
+        onToast={notify}
+      />
+
+      {/* IMPORT FROM QUESTION BANK MODAL */}
+      {isBankImportOpen && (
+        <Modal
+          isOpen={isBankImportOpen}
+          onClose={() => setIsBankImportOpen(false)}
+          title="Import Questions from Question Bank"
+          maxWidth="4xl"
+        >
+          <div className="space-y-4">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-500">
+                {bankQuestions.length} Questions Available in Central Bank
+              </span>
+              <span className="font-bold text-indigo-600">
+                {selectedBankIds.size} Selected to Import
+              </span>
+            </div>
+
+            {bankQuestions.length === 0 ? (
+              <div className="p-8 text-center text-slate-400 text-xs">
+                No additional questions available in the question bank.
+              </div>
+            ) : (
+              <div className="max-h-96 overflow-y-auto space-y-2 p-1">
+                {bankQuestions.map((bq) => (
+                  <label
+                    key={bq.id}
+                    className={`p-3 rounded-xl border flex items-start gap-3 cursor-pointer transition-all ${selectedBankIds.has(bq.id) ? 'bg-indigo-50 dark:bg-indigo-950/50 border-indigo-500' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedBankIds.has(bq.id)}
+                      onChange={() => {
+                        const next = new Set(selectedBankIds);
+                        if (next.has(bq.id)) next.delete(bq.id);
+                        else next.add(bq.id);
+                        setSelectedBankIds(next);
+                      }}
+                      className="mt-1 w-4 h-4 rounded text-indigo-600"
+                    />
+                    <div className="flex-1 text-xs space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 rounded font-bold">
+                          {bq.subject}
+                        </span>
+                        {bq.section && (
+                          <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-200 rounded font-bold">
+                            {bq.section}
+                          </span>
+                        )}
+                        {bq.chapter && (
+                          <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 rounded font-bold">
+                            {bq.chapter}
+                          </span>
+                        )}
+                        {bq.quality_score && (
+                          <span className="px-2 py-0.5 bg-emerald-500 text-white rounded font-bold">
+                            QA {bq.quality_score}/100
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-bold text-slate-900 dark:text-white">
+                        {bq.question_text}
+                      </p>
+                      <div className="text-[11px] text-slate-500">
+                        A. {bq.option_a} | B. {bq.option_b} | C. {bq.option_c} | D. {bq.option_d} (Ans: {bq.correct_answer})
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setIsBankImportOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-500 hover:underline"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmBankImport}
+                disabled={selectedBankIds.size === 0}
+                className="px-6 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Check className="w-4 h-4" /> Import {selectedBankIds.size} Questions to Test
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* ADD / EDIT QUESTION MODAL */}
       <Modal
@@ -344,8 +812,9 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
         {editingQuestion && (
           <form onSubmit={(e) => handleSaveQuestion(e, false)} className="space-y-4">
             
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-              <div>
+            {/* SUBJECT & CHAPTER ROW */}
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+              <div className="sm:col-span-3">
                 <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                   Q. Number
                 </label>
@@ -353,58 +822,34 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                   type="number"
                   value={editingQuestion.question_number || 1}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, question_number: parseInt(e.target.value) || 1 })}
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold"
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-5">
                 <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                  Section
-                </label>
-                {test?.sections && test.sections.length > 0 ? (
-                  <select
-                    value={editingQuestion.section || test.sections[0]}
-                    onChange={(e) => setEditingQuestion({ ...editingQuestion, section: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
-                  >
-                    {test.sections.map((sec, i) => (
-                      <option key={i} value={sec}>{sec}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={editingQuestion.section || ''}
-                    onChange={(e) => setEditingQuestion({ ...editingQuestion, section: e.target.value })}
-                    placeholder="e.g. Reasoning"
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
-                  />
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                  Subject
+                  Subject Name *
                 </label>
                 <input
                   type="text"
+                  required
                   value={editingQuestion.subject || ''}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, subject: e.target.value })}
-                  placeholder="e.g. Indian Polity"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  placeholder="e.g. English Grammar"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
                 />
               </div>
 
-              <div>
+              <div className="sm:col-span-4">
                 <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                  Chapter
+                  Chapter Name
                 </label>
                 <input
                   type="text"
                   value={editingQuestion.chapter || ''}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, chapter: e.target.value })}
-                  placeholder="e.g. Constitution"
-                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  placeholder="e.g. Noun, Tenses..."
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold"
                 />
               </div>
             </div>
@@ -431,7 +876,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option A</span>
+                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option A *</span>
                   <input
                     type="text"
                     required
@@ -442,7 +887,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                 </div>
 
                 <div>
-                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option B</span>
+                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option B *</span>
                   <input
                     type="text"
                     required
@@ -456,7 +901,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                   <span className="text-xs font-semibold text-slate-500 mb-1 block">Option C</span>
                   <input
                     type="text"
-                    required
                     value={editingQuestion.option_c || ''}
                     onChange={(e) => setEditingQuestion({ ...editingQuestion, option_c: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
@@ -467,7 +911,6 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                   <span className="text-xs font-semibold text-slate-500 mb-1 block">Option D</span>
                   <input
                     type="text"
-                    required
                     value={editingQuestion.option_d || ''}
                     onChange={(e) => setEditingQuestion({ ...editingQuestion, option_d: e.target.value })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
@@ -476,16 +919,16 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
               </div>
             </div>
 
-            {/* Correct Answer Selector */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* Answer & Marks */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                  Correct Option *
+                  Correct Answer
                 </label>
                 <select
                   value={editingQuestion.correct_answer || 'A'}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, correct_answer: e.target.value as any })}
-                  className="w-full px-3 py-2.5 rounded-xl border border-blue-500 bg-blue-50/50 dark:bg-slate-800 font-bold text-blue-900 dark:text-blue-300 text-sm"
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-emerald-600"
                 >
                   <option value="A">Option A</option>
                   <option value="B">Option B</option>
@@ -496,29 +939,52 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
 
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                  Image URL (Optional)
+                  Marks
                 </label>
                 <input
-                  type="text"
-                  value={editingQuestion.question_image || ''}
-                  onChange={(e) => setEditingQuestion({ ...editingQuestion, question_image: e.target.value })}
-                  placeholder="https://example.com/diagram.png"
+                  type="number"
+                  step="0.25"
+                  value={editingQuestion.marks || 1}
+                  onChange={(e) => setEditingQuestion({ ...editingQuestion, marks: parseFloat(e.target.value) || 1 })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                  Negative Marks
+                </label>
+                <input
+                  type="number"
+                  step="0.05"
+                  value={editingQuestion.negative_marks || 0.25}
+                  onChange={(e) => setEditingQuestion({ ...editingQuestion, negative_marks: parseFloat(e.target.value) || 0.25 })}
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
                 />
               </div>
             </div>
 
-            {/* Explanation */}
             <div>
-              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                Detailed Explanation
-              </label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400">
+                  Detailed Explanation
+                </label>
+                <button
+                  type="button"
+                  onClick={handleGenerateExplanationInEditModal}
+                  disabled={isGeneratingEditExplanation}
+                  className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:text-blue-700 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                >
+                  <Sparkles className={`w-3.5 h-3.5 ${isGeneratingEditExplanation ? 'animate-spin' : 'text-blue-500'}`} />
+                  <span>{isGeneratingEditExplanation ? 'Generating...' : '✦ AI Generate Solution'}</span>
+                </button>
+              </div>
               <textarea
-                rows={2}
+                rows={3}
                 value={editingQuestion.explanation || ''}
                 onChange={(e) => setEditingQuestion({ ...editingQuestion, explanation: e.target.value })}
-                placeholder="Explain why this answer is correct..."
-                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                placeholder="Explain the correct solution, underlying rules, shortcuts, or concepts..."
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
               />
             </div>
 
@@ -526,24 +992,24 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="text-xs font-bold text-slate-500 hover:underline"
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
               >
                 Cancel
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex gap-2">
                 <button
                   type="button"
                   onClick={(e) => handleSaveQuestion(e, true)}
-                  className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors"
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors"
                 >
                   Save & Add Next
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition-all"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
                 >
-                  Save Question
+                  <Check className="w-4 h-4" /> Save Question
                 </button>
               </div>
             </div>
@@ -552,30 +1018,54 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
         )}
       </Modal>
 
-      {/* PREVIEW QUESTION MODAL */}
+      {/* PREVIEW MODAL */}
       <Modal
-        isOpen={Boolean(previewQuestion)}
+        isOpen={!!previewQuestion}
         onClose={() => setPreviewQuestion(null)}
-        title="Student View Preview"
+        title={`Preview Question #${previewQuestion?.question_number}`}
         maxWidth="lg"
       >
         {previewQuestion && (
-          <div className="space-y-4 text-slate-900 dark:text-white">
-            <span className="px-2.5 py-1 bg-blue-100 text-blue-800 text-xs font-bold rounded-md">
-              Question #{previewQuestion.question_number}
-            </span>
-            <h3 className="text-lg font-bold leading-relaxed">{previewQuestion.question_text}</h3>
-            
-            {previewQuestion.question_image && (
-              <img src={previewQuestion.question_image} alt="Diagram" className="max-h-48 rounded-xl border" />
-            )}
-
-            <div className="space-y-2 pt-2">
-              <div className="p-3 rounded-xl border bg-slate-50 dark:bg-slate-800 text-sm font-medium">A. {previewQuestion.option_a}</div>
-              <div className="p-3 rounded-xl border bg-slate-50 dark:bg-slate-800 text-sm font-medium">B. {previewQuestion.option_b}</div>
-              <div className="p-3 rounded-xl border bg-slate-50 dark:bg-slate-800 text-sm font-medium">C. {previewQuestion.option_c}</div>
-              <div className="p-3 rounded-xl border bg-slate-50 dark:bg-slate-800 text-sm font-medium">D. {previewQuestion.option_d}</div>
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-800 dark:text-blue-200 text-xs font-bold rounded">
+                {previewQuestion.subject}
+              </span>
+              <span className="text-xs text-slate-500">
+                Chapter: {previewQuestion.chapter}
+              </span>
             </div>
+
+            <p className="text-base font-semibold text-slate-900 dark:text-white">
+              {previewQuestion.question_text}
+            </p>
+
+            <div className="space-y-2">
+              {['A', 'B', 'C', 'D'].map((opt) => {
+                const optKey = `option_${opt.toLowerCase()}` as keyof Question;
+                const optVal = previewQuestion[optKey];
+                const isCorrect = previewQuestion.correct_answer === opt;
+                return (
+                  <div
+                    key={opt}
+                    className={`p-3 rounded-xl border text-sm font-medium flex items-center justify-between ${
+                      isCorrect
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 font-bold dark:bg-emerald-950/60 dark:text-emerald-200'
+                        : 'bg-slate-50 dark:bg-slate-800/50 border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    <span>{opt}. {optVal}</span>
+                    {isCorrect && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                  </div>
+                );
+              })}
+            </div>
+
+            {previewQuestion.explanation && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 text-xs text-amber-900 dark:text-amber-200">
+                <span className="font-bold">Explanation: </span> {previewQuestion.explanation}
+              </div>
+            )}
 
             <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 rounded-xl border border-emerald-200 text-xs text-emerald-900 dark:text-emerald-200">
               <span className="font-bold">Correct Answer: </span> Option {previewQuestion.correct_answer}
@@ -583,6 +1073,48 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           </div>
         )}
       </Modal>
+
+      {/* SINGLE QUESTION 360° INSPECTION MODAL */}
+      {inspectingQuestion && (
+        <MCQInspectionModal
+          isOpen={!!inspectingQuestion}
+          question={inspectingQuestion}
+          onClose={() => setInspectingQuestion(null)}
+          onApplyImprovement={async (improvedQ) => {
+            await dataService.saveQuestion(testId, improvedQ);
+            setQuestions((prev) => prev.map((q) => (q.id === improvedQ.id ? improvedQ : q)));
+            notify('success', `Updated and polished Question #${improvedQ.question_number}!`);
+            setInspectingQuestion(null);
+          }}
+          onToast={notify}
+        />
+      )}
+
+      {/* BATCH 360° INSPECTION MODAL (ALL / SELECTED AT ONCE) */}
+      <BulkMCQInspectionModal
+        isOpen={isBulkInspectOpen}
+        questions={
+          selectedQuestionIds.size > 0
+            ? questions.filter((q) => selectedQuestionIds.has(q.id))
+            : questions
+        }
+        onClose={() => setIsBulkInspectOpen(false)}
+        onApplyAllImprovements={handleApplyAllImprovements}
+        onToast={notify}
+      />
+
+      {/* BATCH AI EXPLANATION MODAL (ALL / SELECTED AT ONCE) */}
+      <BulkAIExplanationModal
+        isOpen={isBulkExplanationOpen}
+        questions={
+          selectedQuestionIds.size > 0
+            ? questions.filter((q) => selectedQuestionIds.has(q.id))
+            : questions
+        }
+        onClose={() => setIsBulkExplanationOpen(false)}
+        onApplyExplanations={handleApplyBulkExplanations}
+        onToast={notify}
+      />
 
       {/* AI QUESTION GENERATOR MODAL */}
       <AIQuestionGeneratorModal

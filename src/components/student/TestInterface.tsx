@@ -286,65 +286,73 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex flex-col font-sans -mx-4 -mt-6 sm:-mx-6 sm:-mt-8">
       
       {/* EXAM TOP HEADER BAR */}
-      <header className="bg-slate-900 text-white px-4 py-3 sticky top-0 z-30 border-b border-slate-800 flex items-center justify-between">
+      <header className="bg-slate-900 text-white px-3 sm:px-6 py-2.5 sm:py-3 sticky top-0 z-30 border-b border-slate-800 flex items-center justify-between gap-2">
         
         {/* Test title & Candidate info */}
-        <div className="flex items-center gap-3">
-          <div className="hidden sm:block">
-            <h1 className="font-black text-sm sm:text-base text-white">{test.title}</h1>
-            <p className="text-[11px] text-slate-400">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <button
+            onClick={() => setShowMobilePalette(true)}
+            className="lg:hidden px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 border border-slate-700 shrink-0 cursor-pointer shadow-xs"
+            title="Open Question Palette"
+          >
+            <Grid className="w-4 h-4 text-blue-400" />
+            <span className="hidden xs:inline">Palette</span>
+            <span className="text-[11px] font-mono text-blue-300">({currentIndex + 1}/{questions.length})</span>
+          </button>
+
+          <div className="min-w-0">
+            <h1 className="font-black text-xs sm:text-sm md:text-base text-white truncate">{test.title}</h1>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
               Candidate: <span className="text-blue-300 font-bold">{studentData.student_name}</span> ({studentData.student_district})
             </p>
           </div>
-          <button
-            onClick={() => setShowMobilePalette(!showMobilePalette)}
-            className="sm:hidden p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-white font-bold text-xs flex items-center gap-1"
-          >
-            <Grid className="w-4 h-4" /> Palette
-          </button>
         </div>
 
-        {/* Font size toggles & Timer */}
-        <div className="flex items-center gap-4">
+        {/* Font size toggles & Timer & Submit */}
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           
-          {/* Zoom Controls */}
-          <div className="hidden md:flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-lg text-xs">
+          {/* Zoom Controls (Tablet & PC) */}
+          <div className="hidden sm:flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-xl text-xs border border-slate-700">
             <button
               onClick={() => setFontSize('sm')}
-              className={`px-1.5 py-0.5 rounded font-bold ${fontSize === 'sm' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
+              className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'sm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              title="Small text"
             >
               A-
             </button>
             <button
               onClick={() => setFontSize('base')}
-              className={`px-1.5 py-0.5 rounded font-bold ${fontSize === 'base' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
+              className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'base' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              title="Normal text"
             >
               A
             </button>
             <button
               onClick={() => setFontSize('lg')}
-              className={`px-1.5 py-0.5 rounded font-bold ${fontSize === 'lg' ? 'bg-blue-600 text-white' : 'text-slate-400'}`}
+              className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'lg' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+              title="Large text"
             >
               A+
             </button>
           </div>
 
           {/* Countdown Clock */}
-          <div className={`px-3.5 py-1.5 rounded-xl font-mono font-black text-sm sm:text-base flex items-center gap-2 border ${
+          <div className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl font-mono font-black text-xs sm:text-sm md:text-base flex items-center gap-1.5 border shadow-inner ${
             timeLeftSeconds < 300
               ? 'bg-rose-950 text-rose-300 border-rose-600 animate-pulse'
               : 'bg-slate-800 text-emerald-400 border-slate-700'
           }`}>
-            <Clock className="w-4 h-4" />
+            <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
             <span>{formatTimer(timeLeftSeconds)}</span>
           </div>
 
           {/* Finish & Submit Button */}
           <button
             onClick={() => setShowConfirmModal(true)}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5"
+            className="px-3 sm:px-4 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
           >
-            <span>Submit Exam</span>
+            <span>Submit</span>
+            <span className="hidden sm:inline">Exam</span>
           </button>
         </div>
 
@@ -352,8 +360,8 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
 
       {/* Section Switcher Bar */}
       {sectionsList.length > 0 && (
-        <div className="bg-slate-800 text-slate-300 px-4 py-2 border-b border-slate-700 flex items-center gap-2 overflow-x-auto text-xs font-bold scrollbar-none">
-          <span className="text-amber-400 uppercase text-[10px] tracking-wider shrink-0 mr-1 font-black">Test Sections:</span>
+        <div className="bg-slate-800 text-slate-300 px-3 sm:px-6 py-2 border-b border-slate-700 flex items-center gap-2 overflow-x-auto text-xs font-bold scrollbar-none">
+          <span className="text-amber-400 uppercase text-[10px] tracking-wider shrink-0 mr-1 font-black">Sections:</span>
           {sectionsList.map((sec) => {
             const firstIdx = questions.findIndex((q) => q.section === sec || q.subject === sec);
             const isCurrentSection = (currentQuestion?.section === sec) || (!currentQuestion?.section && currentQuestion?.subject === sec);
@@ -361,7 +369,7 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
               <button
                 key={sec}
                 onClick={() => firstIdx !== -1 && handleGoToQuestion(firstIdx)}
-                className={`px-3 py-1.5 rounded-lg whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
                   isCurrentSection
                     ? 'bg-blue-600 text-white font-black shadow-xs'
                     : 'bg-slate-900 hover:bg-slate-700 text-slate-300 font-semibold'
@@ -375,18 +383,18 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
       )}
 
       {/* MAIN EXAM LAYOUT */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
         
         {/* LEFT/CENTER: Question View */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto space-y-6">
+        <main className="flex-1 p-3 sm:p-6 lg:p-8 overflow-y-auto space-y-6">
           
           {currentQuestion ? (
-            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs space-y-6 max-w-4xl mx-auto">
+            <div className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-7 md:p-8 shadow-xs space-y-5 sm:space-y-6 max-w-4xl mx-auto">
               
               {/* Question Number & Tags */}
-              <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3 sm:pb-4">
                 <div className="flex items-center gap-2">
-                  <span className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-sm flex items-center justify-center">
+                  <span className="w-8 h-8 rounded-xl bg-blue-600 text-white font-black text-sm flex items-center justify-center shadow-xs shrink-0">
                     Q{currentQuestion.question_number}
                   </span>
                   <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
@@ -394,17 +402,17 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <span className="px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-xs rounded-md">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <span className="px-2 sm:px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold text-xs rounded-lg">
                     +{test.marks_per_question} Marks
                   </span>
                   {currentQuestion.section && (
-                    <span className="px-2.5 py-0.5 bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 font-bold text-xs rounded-md border border-amber-200 dark:border-amber-800">
+                    <span className="px-2 sm:px-2.5 py-0.5 bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 font-bold text-xs rounded-lg border border-amber-200 dark:border-amber-800">
                       Section: {currentQuestion.section}
                     </span>
                   )}
                   {currentQuestion.subject && (
-                    <span className="px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-bold text-xs rounded-md">
+                    <span className="px-2 sm:px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 font-bold text-xs rounded-lg">
                       {currentQuestion.subject}
                     </span>
                   )}
@@ -412,14 +420,14 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
               </div>
 
               {/* Question Statement */}
-              <div className={`text-slate-900 dark:text-white font-bold leading-relaxed ${
-                fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-xl' : 'text-base sm:text-lg'
+              <div className={`text-slate-900 dark:text-white font-bold leading-relaxed whitespace-pre-line ${
+                fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
               }`}>
                 {currentQuestion.question_text}
               </div>
 
               {/* Options List */}
-              <div className="space-y-3 pt-2">
+              <div className="space-y-2.5 sm:space-y-3 pt-1 sm:pt-2">
                 {[
                   { key: 'A', text: currentQuestion.option_a },
                   { key: 'B', text: currentQuestion.option_b },
@@ -433,7 +441,7 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
                     <button
                       key={key}
                       onClick={() => handleSelectOption(key)}
-                      className={`w-full text-left p-4 rounded-2xl border transition-all flex items-start gap-3.5 group cursor-pointer ${
+                      className={`w-full text-left p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border transition-all flex items-start gap-3 group cursor-pointer active:scale-[0.99] min-h-[48px] ${
                         isSelected
                           ? 'bg-blue-50 dark:bg-blue-950/80 border-blue-600 dark:border-blue-500 shadow-sm'
                           : 'bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -441,13 +449,13 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
                     >
                       <div className={`w-7 h-7 rounded-xl font-black text-xs flex items-center justify-center shrink-0 mt-0.5 transition-colors ${
                         isSelected
-                          ? 'bg-blue-600 text-white'
+                          ? 'bg-blue-600 text-white shadow-xs'
                           : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-300 dark:border-slate-700 group-hover:border-blue-500'
                       }`}>
                         {key}
                       </div>
 
-                      <div className={`text-sm sm:text-base font-semibold pt-0.5 ${
+                      <div className={`text-sm sm:text-base font-semibold pt-0.5 leading-relaxed flex-1 ${
                         isSelected ? 'text-blue-900 dark:text-blue-100 font-bold' : 'text-slate-800 dark:text-slate-200'
                       }`}>
                         {text}
@@ -458,37 +466,39 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
               </div>
 
               {/* EXAM CONTROL BUTTONS */}
-              <div className="pt-6 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="pt-4 sm:pt-6 border-t border-slate-100 dark:border-slate-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
                 
+                {/* Secondary tools */}
                 <div className="flex items-center gap-2">
                   <button
                     onClick={handleMarkReviewAndNext}
-                    className="px-4 py-2.5 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 font-bold text-xs rounded-xl transition-all flex items-center gap-1.5"
+                    className="flex-1 sm:flex-none px-3 sm:px-4 py-2.5 bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 hover:bg-purple-100 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Bookmark className="w-4 h-4" />
-                    <span>{markedForReview[currentQuestion.id] ? 'Unmark Review' : 'Mark for Review'}</span>
+                    <span>{markedForReview[currentQuestion.id] ? 'Unmark Review' : 'Mark Review'}</span>
                   </button>
 
                   <button
                     onClick={handleClearChoice}
-                    className="px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 font-bold text-xs rounded-xl transition-all flex items-center gap-1"
+                    className="flex-1 sm:flex-none px-3 sm:px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer"
                   >
-                    <XCircle className="w-4 h-4" /> Clear Answer
+                    <XCircle className="w-4 h-4" /> <span>Clear</span>
                   </button>
                 </div>
 
+                {/* Main progression controls */}
                 <div className="flex items-center gap-2">
                   <button
                     disabled={currentIndex === 0}
                     onClick={() => handleGoToQuestion(currentIndex - 1)}
-                    className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 disabled:opacity-40 font-bold text-xs rounded-xl transition-all flex items-center gap-1"
+                    className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 disabled:opacity-40 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-1 cursor-pointer disabled:cursor-not-allowed"
                   >
-                    <ChevronLeft className="w-4 h-4" /> Previous
+                    <ChevronLeft className="w-4 h-4" /> <span>Previous</span>
                   </button>
 
                   <button
                     onClick={handleSaveAndNext}
-                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
+                    className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <span>Save & Next</span>
                     <ChevronRight className="w-4 h-4" />
@@ -499,7 +509,7 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
 
             </div>
           ) : (
-            <div className="p-8 text-center text-slate-500">No questions found for this exam.</div>
+            <div className="p-8 text-center text-slate-500 font-bold">No questions found for this exam.</div>
           )}
 
         </main>
@@ -509,7 +519,7 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
           
           <h3 className="font-bold text-sm text-slate-900 dark:text-white uppercase tracking-wider flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
             <span>Question Palette</span>
-            <span className="text-xs text-blue-600 font-mono">{questions.length} Questions</span>
+            <span className="text-xs text-blue-600 font-mono font-bold">{questions.length} Questions</span>
           </h3>
 
           {/* Palette Legends */}
@@ -549,18 +559,18 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
               const status = getQuestionStatus(q);
               const isCurrent = idx === currentIndex;
 
-              let btnBg = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300';
-              if (status === 'answered') btnBg = 'bg-emerald-600 text-white';
+              let btnBg = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700';
+              if (status === 'answered') btnBg = 'bg-emerald-600 text-white hover:bg-emerald-700';
               if (status === 'answered-review') btnBg = 'bg-purple-600 text-white font-black border-2 border-emerald-400';
-              if (status === 'marked-review') btnBg = 'bg-purple-600 text-white';
-              if (status === 'not-answered') btnBg = 'bg-rose-600 text-white';
+              if (status === 'marked-review') btnBg = 'bg-purple-600 text-white hover:bg-purple-700';
+              if (status === 'not-answered') btnBg = 'bg-rose-600 text-white hover:bg-rose-700';
 
               return (
                 <button
                   key={q.id}
                   onClick={() => handleGoToQuestion(idx)}
-                  className={`h-9 rounded-xl font-bold text-xs flex items-center justify-center transition-all ${btnBg} ${
-                    isCurrent ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-900 scale-105' : ''
+                  className={`h-9 rounded-xl font-bold text-xs flex items-center justify-center transition-all cursor-pointer ${btnBg} ${
+                    isCurrent ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-900 scale-105 shadow-sm' : ''
                   }`}
                 >
                   {idx + 1}
@@ -578,29 +588,48 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
         isOpen={showMobilePalette}
         onClose={() => setShowMobilePalette(false)}
         title="Question Navigation Palette"
-        maxWidth="md"
+        maxWidth="lg"
       >
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
-            <div className="p-2 bg-emerald-50 text-emerald-800 rounded-lg">Answered: {countAnswered}</div>
-            <div className="p-2 bg-rose-50 text-rose-800 rounded-lg">Not Answered: {countNotAnswered}</div>
-            <div className="p-2 bg-purple-50 text-purple-800 rounded-lg">Marked Review: {countMarked}</div>
-            <div className="p-2 bg-slate-100 text-slate-800 rounded-lg">Not Visited: {countNotVisited}</div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
+            <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
+              <span>Answered</span>
+              <strong className="text-sm">{countAnswered}</strong>
+            </div>
+            <div className="p-2.5 bg-rose-50 dark:bg-rose-950/50 text-rose-800 dark:text-rose-300 rounded-xl border border-rose-200 dark:border-rose-800 flex items-center justify-between">
+              <span>Unanswered</span>
+              <strong className="text-sm">{countNotAnswered}</strong>
+            </div>
+            <div className="p-2.5 bg-purple-50 dark:bg-purple-950/50 text-purple-800 dark:text-purple-300 rounded-xl border border-purple-200 dark:border-purple-800 flex items-center justify-between">
+              <span>Marked</span>
+              <strong className="text-sm">{countMarked}</strong>
+            </div>
+            <div className="p-2.5 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-xl border border-slate-200 dark:border-slate-700 flex items-center justify-between">
+              <span>Not Visited</span>
+              <strong className="text-sm">{countNotVisited}</strong>
+            </div>
           </div>
 
-          <div className="grid grid-cols-5 gap-2 pt-2 max-h-64 overflow-y-auto">
+          <div className="grid grid-cols-6 sm:grid-cols-8 md:grid-cols-10 gap-2 pt-2 max-h-[50vh] overflow-y-auto p-1">
             {questions.map((q, idx) => {
               const status = getQuestionStatus(q);
+              const isCurrent = idx === currentIndex;
               let btnBg = 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300';
               if (status === 'answered') btnBg = 'bg-emerald-600 text-white';
+              if (status === 'answered-review') btnBg = 'bg-purple-600 text-white font-black border-2 border-emerald-400';
               if (status === 'marked-review') btnBg = 'bg-purple-600 text-white';
               if (status === 'not-answered') btnBg = 'bg-rose-600 text-white';
 
               return (
                 <button
                   key={q.id}
-                  onClick={() => handleGoToQuestion(idx)}
-                  className={`h-10 rounded-xl font-bold text-xs flex items-center justify-center ${btnBg}`}
+                  onClick={() => {
+                    handleGoToQuestion(idx);
+                    setShowMobilePalette(false);
+                  }}
+                  className={`h-11 rounded-xl font-bold text-xs flex items-center justify-center transition-all cursor-pointer active:scale-95 ${btnBg} ${
+                    isCurrent ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-900 shadow-md scale-105' : ''
+                  }`}
                 >
                   {idx + 1}
                 </button>

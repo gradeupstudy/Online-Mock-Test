@@ -139,7 +139,7 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
             return (
               <div
                 key={p.id}
-                className={`p-4 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                className={`p-3.5 sm:p-4 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
                   isCompleted
                     ? 'bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-300 dark:border-emerald-800'
                     : isVerifying
@@ -147,7 +147,7 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
                     : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700'
                 }`}
               >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 min-w-0">
                   <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 flex items-center justify-center shrink-0 shadow-xs">
                     {p.icon === 'youtube' && <Youtube className="w-5 h-5 text-rose-600" />}
                     {p.icon === 'send' && <Send className="w-5 h-5 text-blue-500" />}
@@ -157,11 +157,11 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
                     )}
                   </div>
 
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <p className="font-bold text-sm text-slate-900 dark:text-white">{p.platform_name}</p>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <p className="font-bold text-sm text-slate-900 dark:text-white truncate">{p.platform_name}</p>
                       {p.is_required && (
-                        <span className="text-[10px] font-bold uppercase text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950 px-1.5 py-0.5 rounded-md border border-rose-200 dark:border-rose-900">
+                        <span className="text-[10px] font-bold uppercase text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950 px-1.5 py-0.5 rounded-md border border-rose-200 dark:border-rose-900 shrink-0">
                           Required
                         </span>
                       )}
@@ -179,12 +179,12 @@ export const SocialGate: React.FC<SocialGateProps> = ({ onSuccessGate, onToast }
                 <button
                   onClick={() => handleVisitPlatform(p)}
                   disabled={isVerifying}
-                  className={`px-3.5 py-2 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 shadow-xs ${
+                  className={`w-full sm:w-auto px-3.5 py-2.5 sm:py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-xs ${
                     isCompleted
                       ? 'bg-emerald-600 text-white'
                       : isVerifying
                       ? 'bg-amber-500 text-white cursor-wait animate-pulse'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                      : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white cursor-pointer'
                   }`}
                 >
                   {isCompleted ? (

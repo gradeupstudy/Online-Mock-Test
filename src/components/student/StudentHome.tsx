@@ -40,27 +40,27 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
     <div className="space-y-8 pb-12">
       
       {/* Banner / Hero */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white p-8 sm:p-10 shadow-xl border border-blue-900/40">
-        <div className="relative z-10 max-w-2xl space-y-4">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white p-5 sm:p-8 md:p-10 shadow-xl border border-blue-900/40">
+        <div className="relative z-10 max-w-2xl space-y-3 sm:space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5" /> Gradeup Study Official Test Portal
           </div>
-          <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-white">
+          <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight text-white leading-tight">
             Master Competitive Exams with Real Exam Pattern Mock Tests
           </h1>
-          <p className="text-sm sm:text-base text-slate-300 leading-relaxed">
+          <p className="text-xs sm:text-sm md:text-base text-slate-300 leading-relaxed">
             Practice state-level recruitment mock tests with real-time timers, negative marking, instant score cards, and subject-wise answer keys.
           </p>
 
-          <div className="pt-2 flex flex-wrap items-center gap-6 text-xs text-slate-300">
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-emerald-400" /> Free Registration
+          <div className="pt-2 flex flex-wrap items-center gap-3 sm:gap-6 text-xs text-slate-300">
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>Free Registration</span>
             </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-emerald-400" /> Instant Performance Result
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>Instant Performance Result</span>
             </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle className="w-4 h-4 text-emerald-400" /> Detailed Explanations
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>Detailed Explanations</span>
             </div>
           </div>
         </div>
@@ -70,31 +70,31 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="space-y-4">
-        <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
-          <div className="relative w-full sm:w-96">
+      <div className="space-y-3 sm:space-y-4">
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+          <div className="relative w-full sm:w-80 md:w-96">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
             <input
               type="text"
               placeholder="Search exam, test series or code..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden shadow-xs"
+              className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl sm:rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden shadow-xs"
             />
           </div>
 
-          <div className="text-xs text-slate-500 font-semibold self-end sm:self-center">
-            Showing {filteredTests.length} published test series
+          <div className="text-xs text-slate-500 font-semibold flex items-center justify-between sm:justify-end gap-2">
+            <span>Showing <strong className="text-slate-800 dark:text-slate-200">{filteredTests.length}</strong> published test series</span>
           </div>
         </div>
 
         {/* Category Filter Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
           {categories.map((cat) => (
             <button
               key={cat}
               onClick={() => setSelectedCategory(cat)}
-              className={`px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap transition-all ${
+              className={`px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap transition-all cursor-pointer ${
                 selectedCategory === cat
                   ? 'bg-blue-600 text-white shadow-md'
                   : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'

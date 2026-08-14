@@ -334,6 +334,153 @@ export const dataService = {
   },
 
   // ------------------------------------
+  // QUESTION BANK MASTER SYSTEM
+  // ------------------------------------
+  getAllQuestionBank: async (): Promise<Question[]> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('questions')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (!error && data && data.length > 0) return data as Question[];
+      } catch (e) {
+        console.warn('Supabase all questions fetch error', e);
+      }
+    }
+
+    const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+    const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
+    
+    const allList: Question[] = [];
+    const seenIds = new Set<string>();
+
+    Object.entries(questionsMap).forEach(([_, qList]) => {
+      if (Array.isArray(qList)) {
+        qList.forEach(q => {
+          if (q && q.id && !seenIds.has(q.id)) {
+            seenIds.add(q.id);
+            allList.push(q);
+          }
+        });
+      }
+    });
+
+    return allList;
+  },
+
+  saveQuestionToBank: async (question: Question): Promise<Question> => {
+    const testId = question.test_id || 'bank';
+    const saved = await dataService.saveQuestion(testId, question);
+    return saved;
+  },
+
+  deleteQuestionFromBank: async (questionId: string): Promise<void> => {
+    const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+    const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
+
+    let targetTestId = 'bank';
+    Object.entries(questionsMap).forEach(([tId, list]) => {
+      if (Array.isArray(list) && list.some(q => q.id === questionId)) {
+        targetTestId = tId;
+      }
+    });
+
+    await dataService.deleteQuestion(targetTestId, questionId);
+  },
+
+  createTestFromQuestions: async (
+    testMeta: Partial<Test>,
+    selectedQuestions: Question[]
+  ): Promise<Test> => {
+    const newId = crypto.randomUUID ? crypto.randomUUID() : 'test-' + Date.now();
+    const cleanTitle = testMeta.title || 'Custom Mock Test';
+    const cleanSlug = (testMeta.slug || cleanTitle)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') + '-' + Math.floor(Math.random() * 1000);
+
+    const distinctSections = Array.from(
+      new Set(selectedQuestions.map(q => q.section).filter(Boolean))
+    ) as string[];
+
+    const distinctSubjects = Array.from(
+      new Set(selectedQuestions.map(q => q.subject).filter(Boolean))
+    );
+
+    const totalMarks = selectedQuestions.reduce(
+      (acc, q) => acc + (Number(q.marks) || Number(testMeta.marks_per_question) || 1),
+      0
+    );
+
+    const newTest: Test = {
+      id: newId,
+      test_code: testMeta.test_code || 'TEST-' + Math.floor(1000 + Math.random() * 9000),
+      title: cleanTitle,
+      slug: cleanSlug,
+      description: testMeta.description || `Generated from Question Bank (${selectedQuestions.length} Questions)`,
+      category: testMeta.category || 'General',
+      subject: distinctSubjects.length === 1 ? distinctSubjects[0] : 'Multi-Subject',
+      total_questions: selectedQuestions.length,
+      total_marks: totalMarks,
+      marks_per_question: Number(testMeta.marks_per_question) || 1,
+      negative_marking: Number(testMeta.negative_marking) || 0.25,
+      duration_minutes: Number(testMeta.duration_minutes) || Math.max(15, selectedQuestions.length),
+      passing_marks: Number(testMeta.passing_marks) || Math.round(totalMarks * 0.4),
+      instructions: testMeta.instructions || '1. Read all questions carefully.\n2. Negative marking applies.\n3. Do not refresh the page during test.',
+      status: 'published',
+      is_published: true,
+      is_multisection: distinctSections.length > 1,
+      sections: distinctSections.length > 0 ? distinctSections : ['General'],
+      social_gate_enabled: testMeta.social_gate_enabled ?? true,
+      anti_cheating_enabled: testMeta.anti_cheating_enabled ?? true,
+      randomize_questions: testMeta.randomize_questions ?? false,
+      randomize_options: testMeta.randomize_options ?? false,
+      allow_back_navigation: testMeta.allow_back_navigation ?? true,
+      allow_mark_for_review: testMeta.allow_mark_for_review ?? true,
+      show_result_immediately: testMeta.show_result_immediately ?? true,
+      show_correct_answers: testMeta.show_correct_answers ?? true,
+      show_explanation: testMeta.show_explanation ?? true,
+      enable_leaderboard: testMeta.enable_leaderboard ?? true,
+      max_attempts_per_student: testMeta.max_attempts_per_student ?? 3,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    await dataService.saveTest(newTest);
+
+    // Clone and map questions into new test
+    const testQuestions: Question[] = selectedQuestions.map((q, idx) => ({
+      ...q,
+      id: 'q-' + newId + '-' + (idx + 1) + '-' + Math.random().toString(36).substr(2, 4),
+      test_id: newId,
+      question_number: idx + 1,
+    }));
+
+    await dataService.saveQuestions(newId, testQuestions);
+    return newTest;
+  },
+
+  addQuestionsToExistingTest: async (
+    targetTestId: string,
+    selectedQuestions: Question[]
+  ): Promise<void> => {
+    const existing = await dataService.getQuestions(targetTestId, true);
+    let startNum = existing.length + 1;
+
+    const cloned: Question[] = selectedQuestions.map(q => ({
+      ...q,
+      id: 'q-' + targetTestId + '-' + startNum + '-' + Math.random().toString(36).substr(2, 4),
+      test_id: targetTestId,
+      question_number: startNum++,
+    }));
+
+    const combined = [...existing, ...cloned];
+    await dataService.saveQuestions(targetTestId, combined);
+  },
+
+  // ------------------------------------
   // SOCIAL PLATFORMS
   // ------------------------------------
   getSocialPlatforms: async (includeInactive = true): Promise<SocialPlatform[]> => {
@@ -690,7 +837,25 @@ export const dataService = {
       }
     }
     const raw = localStorage.getItem(STORAGE_KEYS.ATTEMPTS);
-    const attempts: Attempt[] = raw ? JSON.parse(raw) : DEMO_ATTEMPTS;
+    let attempts: Attempt[] = raw ? JSON.parse(raw) : DEMO_ATTEMPTS;
+    
+    // Ensure all demo attempts are available if not present
+    if (Array.isArray(attempts)) {
+      const existingIds = new Set(attempts.map(a => a.id));
+      let added = false;
+      DEMO_ATTEMPTS.forEach(da => {
+        if (!existingIds.has(da.id)) {
+          attempts.push(da);
+          added = true;
+        }
+      });
+      if (added) {
+        localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
+      }
+    } else {
+      attempts = DEMO_ATTEMPTS;
+    }
+
     if (testId) {
       return attempts.filter(a => a.test_id === testId);
     }
@@ -737,19 +902,21 @@ export const dataService = {
           p_test_id: testId,
           p_limit: limit
         });
-        if (!error && data) return data as PublicLeaderboardEntry[];
+        if (!error && data && Array.isArray(data) && data.length > 0) {
+          return data as PublicLeaderboardEntry[];
+        }
       } catch (e) {
         console.warn('Supabase fetch get_top_leaderboard RPC error', e);
       }
     }
 
-    // Fallback mask calculation
+    // Direct calculation from attempts
     const attempts = await dataService.getAttempts(testId);
     const completed = attempts.filter(a => a.status === 'completed' || a.status === 'auto_submitted');
     completed.sort((a, b) => b.score - a.score || a.time_taken_seconds - b.time_taken_seconds);
 
     return completed.slice(0, limit).map((a, idx) => {
-      const nameParts = a.student_name.split(' ');
+      const nameParts = (a.student_name || 'Candidate').split(' ');
       const firstName = nameParts[0] || 'Candidate';
       const initial = nameParts.length > 1 ? ` ${nameParts[1][0]}.` : '';
       const masked = `${firstName}${initial}`;
@@ -757,10 +924,16 @@ export const dataService = {
       return {
         rank: idx + 1,
         attempt_id: a.id,
+        student_name: a.student_name || 'Aspirant',
+        student_district: a.student_district || 'Himachal Pradesh',
+        student_state: a.student_state || 'HP',
         masked_name: masked,
         score: a.score,
-        correct_answers: a.correct_answers,
-        time_taken_seconds: a.time_taken_seconds,
+        percentage: a.percentage || 0,
+        correct_answers: a.correct_answers || 0,
+        wrong_answers: a.wrong_answers || 0,
+        unattempted_answers: a.skipped_questions ?? (a.total_questions ? a.total_questions - (a.attempted_questions || 0) : 0),
+        time_taken_seconds: a.time_taken_seconds || 0,
         submitted_at: a.submitted_at || a.created_at || new Date().toISOString()
       };
     });

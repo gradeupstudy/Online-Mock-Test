@@ -112,7 +112,7 @@ export const TestIntro: React.FC<TestIntroProps> = ({ test, onBack, onProceedToS
         <div className="pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-end">
           <button
             onClick={onProceedToSocialGate}
-            className="px-8 py-3.5 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+            className="w-full sm:w-auto px-6 sm:px-8 py-3.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
             <span>Agree & Proceed to Registration</span>
             <ArrowRight className="w-4 h-4" />

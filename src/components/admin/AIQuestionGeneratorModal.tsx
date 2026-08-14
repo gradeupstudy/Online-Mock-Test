@@ -1,20 +1,49 @@
 import React, { useState, useEffect } from 'react';
 import { Modal } from '../common/Modal';
-import { Sparkles, Key, Plus, Trash2, CheckCircle, RefreshCw, AlertCircle, ArrowRight, BookOpen, Layers, Target, HelpCircle, ShieldCheck } from 'lucide-react';
+import { 
+  Sparkles, 
+  Key, 
+  Plus, 
+  Trash2, 
+  CheckCircle, 
+  RefreshCw, 
+  AlertCircle, 
+  ArrowRight, 
+  BookOpen, 
+  Layers, 
+  Target, 
+  HelpCircle, 
+  ShieldCheck,
+  Check,
+  Zap
+} from 'lucide-react';
 import { aiService, AIGenerateParams } from '../../services/aiService';
 import { Question } from '../../types';
 import { dataService } from '../../services/dataService';
 
 interface AIQuestionGeneratorModalProps {
   isOpen: boolean;
-  testId: string;
+  testId?: string;
   defaultSubject?: string;
   defaultSection?: string;
   availableSections?: string[];
   onClose: () => void;
-  onSuccessImport: () => void;
+  onSuccessImport: (newQuestions?: Question[]) => void;
   onToast?: (type: 'success' | 'error' | 'info', msg: string) => void;
 }
+
+const POPULAR_SUBJECTS = [
+  'General Studies',
+  'English Grammar',
+  'General English',
+  'Reasoning Ability',
+  'Quantitative Aptitude',
+  'Himachal Pradesh GK',
+  'Indian Polity & Constitution',
+  'General Science',
+  'General Hindi',
+  'Current Affairs'
+];
 
 export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> = ({
   isOpen,
@@ -91,14 +120,14 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
     setGeneratedQuestions([]);
 
     const params: AIGenerateParams = {
-      subject,
-      section: section || 'General',
-      chapter: chapter || 'General',
-      topic: topic || 'General Topic',
+      subject: subject.trim(),
+      section: subject.trim() || 'General',
+      chapter: chapter.trim() || 'General',
+      topic: chapter.trim() || 'General',
       count,
       difficulty,
       customPrompt,
-      testId,
+      testId: testId || 'bank',
       onLog: (msg) => {
         setLogs((prev) => [...prev, msg]);
       },
@@ -120,25 +149,37 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
   const handleConfirmImport = async () => {
     if (generatedQuestions.length === 0) return;
 
-    const existing = await dataService.getQuestions(testId);
-    let startNum = existing.length + 1;
+    if (testId && testId !== 'bank') {
+      const existing = await dataService.getQuestions(testId);
+      let startNum = existing.length + 1;
 
-    const newQuestions: Question[] = generatedQuestions.map((q) => ({
-      ...q,
-      question_number: startNum++,
-    }));
+      const newQuestions: Question[] = generatedQuestions.map((q) => ({
+        ...q,
+        test_id: testId,
+        question_number: startNum++,
+      }));
 
-    const combined = [...existing, ...newQuestions];
-    await dataService.saveQuestions(testId, combined);
+      const combined = [...existing, ...newQuestions];
+      await dataService.saveQuestions(testId, combined);
+      onToast?.('success', `Added ${newQuestions.length} AI questions to mock test!`);
+      onSuccessImport(newQuestions);
+    } else {
+      for (const q of generatedQuestions) {
+        await dataService.saveQuestionToBank({
+          ...q,
+          test_id: 'bank',
+        });
+      }
+      onToast?.('success', `Saved ${generatedQuestions.length} AI questions to Question Bank!`);
+      onSuccessImport(generatedQuestions);
+    }
 
-    onToast?.('success', `Added ${newQuestions.length} AI questions to mock test!`);
-    onSuccessImport();
     setGeneratedQuestions([]);
     onClose();
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="AI Mock Test Question Generator (Gemini Multi-Key Connected)" maxWidth="4xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="AI Mock Test Question Generator (Multi-Key Rotation)" maxWidth="4xl">
       <div className="space-y-6">
 
         {/* GEMINI MULTI-KEY ROTATION HEADER & MANAGER TOGGLE */}
@@ -146,9 +187,8 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
           <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
-                <span className="text-xs font-bold uppercase tracking-wider text-amber-300">
-                  Gemini 3.6 Flash AI Engine
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                  <Zap className="w-3 h-3 fill-slate-950" /> Gemini 3.7 Flash Engine
                 </span>
               </div>
               <h3 className="text-lg font-black mt-1">Automatic Multi-Key Rotation Connected</h3>
@@ -161,7 +201,7 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
 
             <button
               onClick={() => setShowKeyManager(!showKeyManager)}
-              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 backdrop-blur-md flex items-center gap-2 shrink-0 transition-all"
+              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 backdrop-blur-md flex items-center gap-2 shrink-0 transition-all cursor-pointer"
             >
               <Key className="w-4 h-4 text-amber-400" />
               <span>{showKeyManager ? 'Close Key Manager' : `Manage API Keys (${savedKeys.length})`}</span>
@@ -202,7 +242,7 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
               </span>
               <button
                 onClick={handleSaveKeys}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition-all"
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md transition-all cursor-pointer"
               >
                 Save API Keys
               </button>
@@ -213,74 +253,61 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
         {/* INPUT FORM FOR GENERATION */}
         {generatedQuestions.length === 0 && (
           <form onSubmit={handleGenerateAI} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            
+            {/* SUBJECT & CHAPTER ROW */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
-                  <BookOpen className="w-3.5 h-3.5 text-blue-500" /> Subject Name *
+                <label className="block text-xs font-bold uppercase text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-blue-600 dark:text-blue-400">
+                    <BookOpen className="w-4 h-4" /> 1. Subject Name *
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">e.g. English Grammar</span>
                 </label>
                 <input
                   type="text"
                   required
                   value={subject}
                   onChange={(e) => setSubject(e.target.value)}
-                  placeholder="e.g. Indian Polity"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
+                  placeholder="e.g. English Grammar, General Studies..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
+                {/* Popular chips */}
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {POPULAR_SUBJECTS.slice(0, 4).map((sub, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => setSubject(sub)}
+                      className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-blue-50 hover:text-blue-600 transition-colors"
+                    >
+                      {sub}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
-                  <Layers className="w-3.5 h-3.5 text-amber-500" /> Section Name
-                </label>
-                {availableSections.length > 0 ? (
-                  <select
-                    value={section}
-                    onChange={(e) => setSection(e.target.value)}
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
-                  >
-                    {availableSections.map((sec, i) => (
-                      <option key={i} value={sec}>{sec}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={section}
-                    onChange={(e) => setSection(e.target.value)}
-                    placeholder="e.g. Reasoning Ability"
-                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-amber-500 outline-hidden"
-                  />
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
-                  <Layers className="w-3.5 h-3.5 text-emerald-500" /> Chapter Name
+                <label className="block text-xs font-bold uppercase text-slate-700 dark:text-slate-300 mb-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
+                    <Layers className="w-4 h-4" /> 2. Chapter Name
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">e.g. Noun, Tenses, Rivers</span>
                 </label>
                 <input
                   type="text"
                   value={chapter}
                   onChange={(e) => setChapter(e.target.value)}
-                  placeholder="e.g. Constitution"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
+                  placeholder="e.g. Noun, Tenses, Indian Constitution, Rivers..."
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold focus:ring-2 focus:ring-emerald-500 outline-hidden"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1">
-                  <Target className="w-3.5 h-3.5 text-purple-500" /> Topic Name
-                </label>
-                <input
-                  type="text"
-                  value={topic}
-                  onChange={(e) => setTopic(e.target.value)}
-                  placeholder="e.g. Fundamental Rights"
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
-                />
+                <p className="text-[10px] text-slate-400 mt-1.5">
+                  Specify topic/chapter to generate targeted exam questions.
+                </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* COUNT & DIFFICULTY */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                   Number of Questions to Generate
@@ -288,9 +315,9 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
                 <select
                   value={count}
                   onChange={(e) => setCount(Number(e.target.value))}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
                 >
-                  <option value={5}>5 Questions</option>
+                  <option value={5}>5 Questions (Fastest)</option>
                   <option value={10}>10 Questions</option>
                   <option value={15}>15 Questions</option>
                   <option value={20}>20 Questions</option>
@@ -307,12 +334,12 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
                 <select
                   value={difficulty}
                   onChange={(e) => setDifficulty(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold"
                 >
                   <option value="Easy">Easy (Basic Concepts)</option>
                   <option value="Medium">Medium (Standard Exam Pattern)</option>
-                  <option value="Hard">Hard (UPSC / State PCS Level)</option>
-                  <option value="Mixed">Mixed (Balanced Easy/Med/Hard)</option>
+                  <option value="Hard">Hard (State PCS / UPSC Level)</option>
+                  <option value="Mixed">Mixed (Balanced Easy / Medium / Hard)</option>
                 </select>
               </div>
             </div>
@@ -325,8 +352,8 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
                 rows={2}
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
-                placeholder="e.g. Focus on Himachal Pradesh previous year questions pattern with detailed Hindi explanations..."
-                className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                placeholder="e.g. Focus on previous year questions pattern with detailed bilingual explanations..."
+                className="w-full px-3.5 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
               />
             </div>
 
@@ -355,7 +382,7 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
               <button
                 type="submit"
                 disabled={generating}
-                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50"
+                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
               >
                 {generating ? (
                   <>
@@ -395,7 +422,7 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
                 <div key={idx} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-2">
                   <div className="flex items-center justify-between font-bold text-slate-900 dark:text-white">
                     <span>Q{idx + 1}. {q.question_text}</span>
-                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 rounded-md shrink-0">
+                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 rounded-md shrink-0 font-bold">
                       Ans: {q.correct_answer}
                     </span>
                   </div>
@@ -412,6 +439,13 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
                       <b>Explanation:</b> {q.explanation}
                     </div>
                   )}
+
+                  <div className="flex items-center gap-2 pt-1 text-[10px] text-slate-400">
+                    <span>Subject: {q.subject}</span>
+                    {q.section && <span>• Section: {q.section}</span>}
+                    {q.chapter && <span>• Chapter: {q.chapter}</span>}
+                    {q.topic && <span>• Topic: {q.topic}</span>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -425,9 +459,9 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
               </button>
               <button
                 onClick={handleConfirmImport}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
               >
-                Save {generatedQuestions.length} Questions to Test <ArrowRight className="w-4 h-4" />
+                Save {generatedQuestions.length} Questions {testId && testId !== 'bank' ? 'to Test' : 'to Question Bank'} <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>

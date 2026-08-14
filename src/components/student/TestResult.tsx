@@ -1,5 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { Award, CheckCircle, XCircle, Clock, BookOpen, Share2, Printer, Trophy, ArrowLeft, HelpCircle, Check, AlertCircle, FileText } from 'lucide-react';
+import { 
+  Award, 
+  CheckCircle, 
+  XCircle, 
+  Clock, 
+  BookOpen, 
+  Share2, 
+  Printer, 
+  Trophy, 
+  ArrowLeft, 
+  HelpCircle, 
+  Check, 
+  AlertCircle, 
+  FileText,
+  MapPin,
+  RefreshCw,
+  Sparkles,
+  Users,
+  Target,
+  BarChart3
+} from 'lucide-react';
 import { Attempt, Test, Question, PublicLeaderboardEntry } from '../../types';
 import { dataService } from '../../services/dataService';
 
@@ -13,9 +33,11 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   const [test, setTest] = useState<Test | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [leaderboard, setLeaderboard] = useState<PublicLeaderboardEntry[]>([]);
+  const [totalAspirants, setTotalAspirants] = useState<number>(1);
   const [myRank, setMyRank] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<'solutions' | 'leaderboard' | 'summary'>('summary');
+  const [activeTab, setActiveTab] = useState<'summary' | 'solutions' | 'leaderboard'>('summary');
   const [solutionFilter, setSolutionFilter] = useState<'all' | 'correct' | 'wrong' | 'unattempted'>('all');
+  const [isRefreshingBoard, setIsRefreshingBoard] = useState(false);
 
   useEffect(() => {
     loadResultData();
@@ -24,13 +46,28 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   const loadResultData = async () => {
     const t = await dataService.getTestById(attempt.test_id);
     const qList = await dataService.getQuestions(attempt.test_id, true);
-    const topBoard = await dataService.getLeaderboard(attempt.test_id, 30);
+    const topBoard = await dataService.getLeaderboard(attempt.test_id, 20);
     const rank = await dataService.getStudentRank(attempt.test_id, attempt.id);
+    const allAttempts = await dataService.getAttempts(attempt.test_id);
 
     setTest(t);
     setQuestions(qList);
     setLeaderboard(topBoard);
+    setTotalAspirants(Math.max(1, allAttempts.length));
     setMyRank(rank || 1);
+  };
+
+  const handleRefreshLeaderboard = async () => {
+    setIsRefreshingBoard(true);
+    const topBoard = await dataService.getLeaderboard(attempt.test_id, 20);
+    const rank = await dataService.getStudentRank(attempt.test_id, attempt.id);
+    const allAttempts = await dataService.getAttempts(attempt.test_id);
+
+    setLeaderboard(topBoard);
+    setMyRank(rank || 1);
+    setTotalAspirants(Math.max(1, allAttempts.length));
+    setIsRefreshingBoard(false);
+    onToast?.('success', 'Real-time Leaderboard updated!');
   };
 
   const handlePrint = () => {
@@ -39,15 +76,17 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
 
   const handleShare = () => {
     const shareUrl = dataService.getPublicShareableUrl(test?.slug || attempt.test_id);
+    const textToShare = `🎯 I scored ${attempt.score} marks (${attempt.percentage}%) and secured Rank #${myRank} on Gradeup Study's "${test?.title || 'Mock Test'}"! Try it now:`;
+    
     if (navigator.share) {
       navigator.share({
-        title: `Gradeup Study Mock Test Scorecard`,
-        text: `I scored ${attempt.score} marks (${attempt.percentage}%) on ${test?.title || 'Mock Test'}!`,
+        title: `Gradeup Study Scorecard - ${attempt.student_name}`,
+        text: textToShare,
         url: shareUrl
       }).catch(() => {});
     } else {
-      navigator.clipboard.writeText(shareUrl);
-      onToast?.('success', 'Public test link copied to clipboard!');
+      navigator.clipboard.writeText(`${textToShare} ${shareUrl}`);
+      onToast?.('success', 'Scorecard & Test link copied to clipboard!');
     }
   };
 
@@ -59,14 +98,23 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
     return true;
   });
 
+  const unattemptedCount = attempt.unattempted_answers ?? 
+    attempt.skipped_questions ?? 
+    (attempt.total_questions ? Math.max(0, attempt.total_questions - (attempt.attempted_questions || 0)) : 0);
+
+  // Top 3 Podium Rankers from real-time leaderboard
+  const top1 = leaderboard[0];
+  const top2 = leaderboard[1];
+  const top3 = leaderboard[2];
+
   return (
-    <div className="max-w-4xl mx-auto space-y-8 pb-16 print:p-0">
+    <div className="max-w-4xl mx-auto space-y-6 pb-16 print:p-0">
       
-      {/* Top Header Actions */}
-      <div className="flex items-center justify-between gap-4 print:hidden">
+      {/* TOP HEADER ACTIONS */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 print:hidden">
         <button
           onClick={onBackToHome}
-          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+          className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" /> Back to Test Directory
         </button>
@@ -74,149 +122,257 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
         <div className="flex items-center gap-2">
           <button
             onClick={handleShare}
-            className="px-3.5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-1.5"
+            className="flex-1 sm:flex-none px-3.5 py-2.5 sm:py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
           >
-            <Share2 className="w-3.5 h-3.5" /> Share Scorecard
+            <Share2 className="w-3.5 h-3.5" /> <span>Share Result</span>
           </button>
           <button
             onClick={handlePrint}
-            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+            className="flex-1 sm:flex-none px-3.5 py-2.5 sm:py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
           >
-            <Printer className="w-3.5 h-3.5" /> Print Scorecard
+            <Printer className="w-3.5 h-3.5" /> <span>Print Scorecard / PDF</span>
           </button>
         </div>
       </div>
 
-      {/* SCORECARD HERO CARD */}
-      <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white rounded-3xl p-6 sm:p-8 shadow-xl border border-blue-900/40 relative overflow-hidden">
-        <div className="relative z-10 space-y-6">
+      {/* 🎯 SCORECARD HERO CARD (High Contrast, Rich Metrics) */}
+      <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white rounded-3xl p-5 sm:p-7 shadow-xl border border-blue-900/50 relative overflow-hidden">
+        <div className="relative z-10 space-y-5">
           
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-blue-900/60 pb-4">
+          {/* Header Title & Student Info */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-900/60 pb-4">
             <div>
-              <span className="px-2.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[11px] font-bold rounded-md uppercase">
-                Official Exam Scorecard
-              </span>
-              <h1 className="text-xl sm:text-2xl font-black text-white mt-1">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] sm:text-[11px] font-bold rounded-md uppercase">
+                  Official Exam Scorecard
+                </span>
+                <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" /> Submitted Successfully
+                </span>
+              </div>
+              <h1 className="text-lg sm:text-2xl font-black text-white mt-1">
                 {test?.title || 'Mock Test'}
               </h1>
             </div>
 
-            <div className="text-right">
-              <p className="text-xs text-slate-300 font-semibold">{attempt.student_name}</p>
-              <p className="text-[11px] text-slate-400">{attempt.student_district}, {attempt.student_state}</p>
+            <div className="sm:text-right bg-blue-950/60 p-2.5 sm:p-0 rounded-xl sm:bg-transparent border border-blue-800/30 sm:border-none">
+              <p className="text-sm text-white font-black">{attempt.student_name}</p>
+              <p className="text-xs text-slate-300 flex items-center sm:justify-end gap-1 mt-0.5">
+                <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
+                <span>{attempt.student_district || 'District'}, {attempt.student_state || 'HP'}</span>
+              </p>
             </div>
           </div>
 
-          {/* Core Metrics Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
+          {/* 4 CORE KPI METRICS: Score, Percentage, Live Rank, Time */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-4 text-center">
             
-            <div className="p-4 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10">
-              <p className="text-[10px] text-slate-400 font-bold uppercase">Marks Obtained</p>
+            <div className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15">
+              <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold uppercase">Marks Obtained</p>
               <p className="text-2xl sm:text-3xl font-black text-emerald-400 mt-1">
-                {attempt.score} <span className="text-xs text-slate-400 font-normal">/ {test?.total_marks || 10}</span>
+                {attempt.score} <span className="text-xs text-slate-300 font-normal">/ {test?.total_marks || 10}</span>
               </p>
             </div>
 
-            <div className="p-4 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10">
-              <p className="text-[10px] text-slate-400 font-bold uppercase">Percentage Score</p>
+            <div className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15">
+              <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold uppercase">Accuracy Percentage</p>
               <p className="text-2xl sm:text-3xl font-black text-blue-400 mt-1">
                 {attempt.percentage}%
               </p>
             </div>
 
-            <div className="p-4 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10">
-              <p className="text-[10px] text-slate-400 font-bold uppercase">State Rank</p>
+            <div className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15">
+              <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold uppercase">Real-Time State Rank</p>
               <p className="text-2xl sm:text-3xl font-black text-amber-400 mt-1 flex items-center justify-center gap-1">
-                <Trophy className="w-5 h-5" /> #{myRank || 1}
+                <Trophy className="w-5 h-5 shrink-0 text-amber-400 fill-amber-400" /> #{myRank}
               </p>
+              <p className="text-[10px] text-slate-300 mt-0.5 font-medium">Out of {totalAspirants} Aspirants</p>
             </div>
 
-            <div className="p-4 bg-white/5 backdrop-blur-md rounded-2xl border border-white/10">
-              <p className="text-[10px] text-slate-400 font-bold uppercase">Time Taken</p>
-              <p className="text-xl sm:text-2xl font-black text-slate-200 mt-1">
+            <div className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15">
+              <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold uppercase">Time Taken</p>
+              <p className="text-xl sm:text-2xl font-black text-slate-100 mt-1">
                 {Math.floor(attempt.time_taken_seconds / 60)}m {attempt.time_taken_seconds % 60}s
               </p>
+              <p className="text-[10px] text-slate-300 mt-0.5 font-medium">Duration: {test?.duration_minutes || 60}m</p>
             </div>
 
           </div>
 
-          {/* Attempt Accuracy Stats Pill */}
-          <div className="flex flex-wrap items-center justify-around gap-4 p-3 bg-slate-900/80 rounded-xl text-xs font-bold text-slate-300">
-            <span className="text-emerald-400 flex items-center gap-1">
-              <CheckCircle className="w-4 h-4" /> {attempt.correct_answers} Correct
-            </span>
-            <span className="text-rose-400 flex items-center gap-1">
-              <XCircle className="w-4 h-4" /> {attempt.wrong_answers} Incorrect
-            </span>
-            <span className="text-slate-400 flex items-center gap-1">
-              <HelpCircle className="w-4 h-4" /> {attempt.unattempted_answers} Unattempted
-            </span>
+          {/* 3 PILL METRICS: Correct, Wrong, Unattempted (Detailed Breakdown) */}
+          <div className="grid grid-cols-3 gap-2.5 p-3 bg-slate-950/80 rounded-2xl text-center text-xs font-bold border border-white/5">
+            <div className="flex items-center justify-center gap-1.5 text-emerald-400 py-1">
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              <span>{attempt.correct_answers} Correct (+{(attempt.correct_answers * (test?.marks_per_question || 1)).toFixed(2)} pts)</span>
+            </div>
+            <div className="flex items-center justify-center gap-1.5 text-rose-400 py-1 border-x border-slate-800">
+              <XCircle className="w-4 h-4 shrink-0" />
+              <span>{attempt.wrong_answers} Wrong (-{(attempt.wrong_answers * (test?.negative_marking || 0)).toFixed(2)} pts)</span>
+            </div>
+            <div className="flex items-center justify-center gap-1.5 text-slate-400 py-1">
+              <HelpCircle className="w-4 h-4 shrink-0" />
+              <span>{unattemptedCount} Unattempted</span>
+            </div>
           </div>
 
         </div>
       </div>
 
-      {/* RESULT TABS NAVIGATION */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 print:hidden">
+      {/* RESULT TABS NAVIGATION BAR */}
+      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 print:hidden overflow-x-auto scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
         <button
           onClick={() => setActiveTab('summary')}
-          className={`px-5 py-2.5 text-xs font-extrabold rounded-xl transition-all ${
+          className={`px-4 sm:px-5 py-2.5 text-xs font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'summary'
               ? 'bg-blue-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          Performance Summary
+          <BarChart3 className="w-3.5 h-3.5" />
+          <span>Performance Summary</span>
         </button>
 
         <button
           onClick={() => setActiveTab('solutions')}
-          className={`px-5 py-2.5 text-xs font-extrabold rounded-xl transition-all ${
+          className={`px-4 sm:px-5 py-2.5 text-xs font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'solutions'
               ? 'bg-blue-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          Detailed Solutions & Answer Key
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>Full Solutions & Keys ({questions.length})</span>
         </button>
 
         <button
           onClick={() => setActiveTab('leaderboard')}
-          className={`px-5 py-2.5 text-xs font-extrabold rounded-xl transition-all ${
+          className={`px-4 sm:px-5 py-2.5 text-xs font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'leaderboard'
               ? 'bg-blue-600 text-white shadow-md'
-              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
           }`}
         >
-          State Leaderboard
+          <Trophy className="w-3.5 h-3.5 text-amber-500" />
+          <span>Real-Time Top 20 Leaderboard</span>
         </button>
       </div>
 
-      {/* TAB 1: SUMMARY */}
+      {/* TAB 1: SUMMARY TAB */}
       {activeTab === 'summary' && (
         <div className="space-y-6">
-          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
-            <h3 className="text-base font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-3">
-              Marking & Accuracy Analysis
+          
+          {/* Detailed Marking & Evaluation Card */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-xs">
+            <h3 className="text-base font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-3 flex items-center justify-between">
+              <span>Marking Scheme & Evaluation Breakdown</span>
+              <span className="text-xs text-slate-400 font-normal">Auto-Calculated</span>
             </h3>
 
             <div className="space-y-3 text-xs text-slate-600 dark:text-slate-300">
-              <div className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
-                <span>Positive Score (+{test?.marks_per_question} per right answer)</span>
-                <span className="font-bold text-emerald-600">+{attempt.correct_answers * (test?.marks_per_question || 1)} Marks</span>
+              <div className="flex justify-between items-center p-3.5 bg-emerald-50/70 dark:bg-emerald-950/30 rounded-2xl border border-emerald-100 dark:border-emerald-900">
+                <span className="font-semibold text-emerald-900 dark:text-emerald-300">
+                  Positive Marks (+{test?.marks_per_question || 1} × {attempt.correct_answers} Correct Answers)
+                </span>
+                <span className="font-black text-sm text-emerald-600 dark:text-emerald-400">
+                  +{(attempt.correct_answers * (test?.marks_per_question || 1)).toFixed(2)} Marks
+                </span>
               </div>
 
-              <div className="flex justify-between items-center p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
-                <span>Negative Marks Deduction (-{test?.negative_marking} per wrong answer)</span>
-                <span className="font-bold text-rose-600">-{attempt.wrong_answers * (test?.negative_marking || 0)} Marks</span>
+              <div className="flex justify-between items-center p-3.5 bg-rose-50/70 dark:bg-rose-950/30 rounded-2xl border border-rose-100 dark:border-rose-900">
+                <span className="font-semibold text-rose-900 dark:text-rose-300">
+                  Negative Penalty (-{test?.negative_marking || 0.25} × {attempt.wrong_answers} Wrong Answers)
+                </span>
+                <span className="font-black text-sm text-rose-600 dark:text-rose-400">
+                  -{(attempt.wrong_answers * (test?.negative_marking || 0)).toFixed(2)} Marks
+                </span>
               </div>
 
-              <div className="flex justify-between items-center p-3 bg-blue-50 dark:bg-blue-950/60 rounded-xl font-bold text-slate-900 dark:text-white">
-                <span>Final Evaluated Score</span>
-                <span className="text-base text-blue-600">{attempt.score} Marks</span>
+              <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/60 dark:to-indigo-950/60 rounded-2xl border border-blue-200 dark:border-blue-800 font-bold text-slate-900 dark:text-white">
+                <div>
+                  <p className="text-sm font-black text-blue-950 dark:text-blue-200">Final Evaluated Net Score</p>
+                  <p className="text-[11px] text-slate-500 font-normal mt-0.5">Passing Marks: {test?.passing_marks || 4} Marks</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-xl font-black text-blue-600 dark:text-blue-400">{attempt.score} pts</span>
+                  <p className="text-[10px] text-emerald-600 font-bold">
+                    {attempt.score >= (test?.passing_marks || 4) ? '✓ Qualified' : 'Needs Practice'}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
+
+          {/* Quick Snapshot: Real-time Top 3 Podium on Summary */}
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 shadow-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-500" />
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  Real-Time Top 3 State Podium
+                </h3>
+              </div>
+              <button
+                onClick={() => setActiveTab('leaderboard')}
+                className="text-xs font-bold text-blue-600 hover:text-blue-700 cursor-pointer"
+              >
+                View Full Top 20 →
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Silver 2nd */}
+              <div className="p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700 flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-lg">🥈</span>
+                  <span className="text-[10px] font-black uppercase text-slate-500 bg-white dark:bg-slate-700 px-2 py-0.5 rounded">Rank 2</span>
+                </div>
+                <div>
+                  <p className="font-black text-sm text-slate-900 dark:text-white truncate">
+                    {top2 ? (top2.attempt_id === attempt.id ? `${top2.student_name} (You)` : top2.student_name) : 'Vacant'}
+                  </p>
+                  <p className="text-[11px] text-slate-400">{top2 ? `${top2.student_district || 'District'}, ${top2.student_state || 'HP'}` : '-'}</p>
+                </div>
+                <p className="font-black text-slate-800 dark:text-slate-200 text-sm mt-2 text-right">
+                  {top2 ? `${top2.score} pts` : '-'}
+                </p>
+              </div>
+
+              {/* Gold 1st */}
+              <div className="p-4 bg-gradient-to-b from-amber-50 to-amber-100/50 dark:from-amber-950/40 dark:to-amber-900/20 rounded-2xl border-2 border-amber-400 flex flex-col justify-between shadow-xs">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xl">🥇</span>
+                  <span className="text-[10px] font-black uppercase text-amber-900 bg-amber-300/80 px-2.5 py-0.5 rounded">Rank 1 (Topper)</span>
+                </div>
+                <div>
+                  <p className="font-black text-base text-amber-950 dark:text-amber-200 truncate">
+                    {top1 ? (top1.attempt_id === attempt.id ? `${top1.student_name} (You)` : top1.student_name) : 'Vacant'}
+                  </p>
+                  <p className="text-xs text-amber-800 dark:text-amber-400 font-semibold">{top1 ? `${top1.student_district || 'District'}, ${top1.student_state || 'HP'}` : '-'}</p>
+                </div>
+                <p className="font-black text-amber-900 dark:text-amber-300 text-base mt-2 text-right">
+                  {top1 ? `${top1.score} pts (${top1.percentage}%)` : '-'}
+                </p>
+              </div>
+
+              {/* Bronze 3rd */}
+              <div className="p-3.5 bg-orange-50/50 dark:bg-amber-950/20 rounded-2xl border border-amber-200 dark:border-amber-900/60 flex flex-col justify-between">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-lg">🥉</span>
+                  <span className="text-[10px] font-black uppercase text-amber-800 bg-white dark:bg-slate-700 px-2 py-0.5 rounded">Rank 3</span>
+                </div>
+                <div>
+                  <p className="font-black text-sm text-slate-900 dark:text-white truncate">
+                    {top3 ? (top3.attempt_id === attempt.id ? `${top3.student_name} (You)` : top3.student_name) : 'Vacant'}
+                  </p>
+                  <p className="text-[11px] text-slate-400">{top3 ? `${top3.student_district || 'District'}, ${top3.student_state || 'HP'}` : '-'}</p>
+                </div>
+                <p className="font-black text-amber-900 dark:text-amber-300 text-sm mt-2 text-right">
+                  {top3 ? `${top3.score} pts` : '-'}
+                </p>
+              </div>
+            </div>
+          </div>
+
         </div>
       )}
 
@@ -225,24 +381,29 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
         <div className="space-y-6">
           
           {/* Solution Filter Pills */}
-          <div className="flex items-center gap-2 print:hidden">
+          <div className="flex items-center gap-2 print:hidden overflow-x-auto pb-1">
             {(['all', 'correct', 'wrong', 'unattempted'] as const).map((flt) => (
               <button
                 key={flt}
                 onClick={() => setSolutionFilter(flt)}
-                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all ${
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-bold capitalize transition-all cursor-pointer whitespace-nowrap ${
                   solutionFilter === flt
-                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900'
-                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500'
+                    ? 'bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900 shadow-xs'
+                    : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
-                {flt} Questions
+                {flt} ({
+                  flt === 'all' ? (attempt.responses || []).length :
+                  flt === 'correct' ? attempt.correct_answers :
+                  flt === 'wrong' ? attempt.wrong_answers :
+                  unattemptedCount
+                })
               </button>
             ))}
           </div>
 
           {/* Question Solutions List */}
-          <div className="space-y-6">
+          <div className="space-y-5">
             {filteredResponses.map((resp, idx) => {
               const q = questions.find((item) => item.id === resp.question_id);
               if (!q) return null;
@@ -250,27 +411,38 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
               return (
                 <div
                   key={q.id}
-                  className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-4"
+                  className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-5 sm:p-6 shadow-xs space-y-4"
                 >
                   <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-                    <span className="font-bold text-xs text-slate-500">Question #{q.question_number}</span>
-                    <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold uppercase ${
+                    <div className="flex items-center gap-2">
+                      <span className="font-black text-xs text-slate-500">Question #{q.question_number}</span>
+                      {q.subject && (
+                        <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-[10px] font-bold text-slate-600 dark:text-slate-400 rounded-md">
+                          {q.subject} {q.chapter ? `• ${q.chapter}` : ''}
+                        </span>
+                      )}
+                    </div>
+                    
+                    <span className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase flex items-center gap-1 ${
                       resp.status === 'correct'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
                         : resp.status === 'wrong'
-                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950'
-                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800'
+                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
                     }`}>
-                      {resp.status} ({resp.marks_awarded > 0 ? `+${resp.marks_awarded}` : resp.marks_awarded})
+                      {resp.status === 'correct' && <CheckCircle className="w-3.5 h-3.5" />}
+                      {resp.status === 'wrong' && <XCircle className="w-3.5 h-3.5" />}
+                      {resp.status === 'unattempted' && <HelpCircle className="w-3.5 h-3.5" />}
+                      <span>{resp.status} ({resp.marks_awarded > 0 ? `+${resp.marks_awarded}` : resp.marks_awarded})</span>
                     </span>
                   </div>
 
-                  <p className="font-bold text-slate-900 dark:text-white text-base">
+                  <p className="font-bold text-slate-900 dark:text-white text-base leading-relaxed">
                     {q.question_text}
                   </p>
 
                   {/* Options status */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-semibold">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-semibold">
                     {[
                       { key: 'A', text: q.option_a },
                       { key: 'B', text: q.option_b },
@@ -278,28 +450,30 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
                       { key: 'D', text: q.option_d }
                     ].map(({ key, text }) => {
                       if (!text) return null;
-                      const isCorrect = q.correct_answer.toUpperCase() === key;
+                      const isCorrect = q.correct_answer?.toUpperCase() === key;
                       const isUserChoice = resp.user_answer?.toUpperCase() === key;
 
                       let borderStyle = 'border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/40 text-slate-700 dark:text-slate-300';
-                      if (isCorrect) borderStyle = 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 font-bold';
-                      if (isUserChoice && !isCorrect) borderStyle = 'border-rose-500 bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 font-bold';
+                      if (isCorrect) borderStyle = 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-900 dark:text-emerald-200 font-bold ring-1 ring-emerald-500';
+                      if (isUserChoice && !isCorrect) borderStyle = 'border-rose-500 bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 font-bold ring-1 ring-rose-500';
 
                       return (
                         <div key={key} className={`p-3 rounded-xl border flex items-center justify-between ${borderStyle}`}>
-                          <span>{key}: {text}</span>
-                          {isCorrect && <span className="text-[10px] bg-emerald-600 text-white px-1.5 py-0.5 rounded">Correct Answer</span>}
-                          {isUserChoice && !isCorrect && <span className="text-[10px] bg-rose-600 text-white px-1.5 py-0.5 rounded">Your Choice</span>}
+                          <span className="flex-1 pr-2"><b>{key}.</b> {text}</span>
+                          {isCorrect && <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded font-bold shrink-0">Correct Answer</span>}
+                          {isUserChoice && !isCorrect && <span className="text-[10px] bg-rose-600 text-white px-2 py-0.5 rounded font-bold shrink-0">Your Choice</span>}
                         </div>
                       );
                     })}
                   </div>
 
-                  {/* Explanation box */}
+                  {/* Detailed Explanation Box */}
                   {q.explanation && (
-                    <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-900 text-xs space-y-1">
-                      <p className="font-bold text-blue-900 dark:text-blue-200 uppercase tracking-wider text-[10px]">Detailed Explanation</p>
-                      <p className="text-slate-700 dark:text-slate-300 leading-relaxed">{q.explanation}</p>
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-900 text-xs space-y-1.5">
+                      <p className="font-black text-blue-900 dark:text-blue-200 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-blue-500" /> Detailed Explanation & Solution Notes
+                      </p>
+                      <p className="text-slate-700 dark:text-slate-300 leading-relaxed font-normal">{q.explanation}</p>
                     </div>
                   )}
 
@@ -311,40 +485,190 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
         </div>
       )}
 
-      {/* TAB 3: STATE LEADERBOARD */}
+      {/* TAB 3: REAL-TIME TOP 20 STATE LEADERBOARD */}
       {activeTab === 'leaderboard' && (
-        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
-          <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
-            <Trophy className="w-5 h-5 text-amber-500" /> State Mock Test Leaderboard
-          </h3>
+        <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 space-y-5 shadow-xs">
+          
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-500" />
+                <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white">
+                  Real-Time Top 20 Candidates Leaderboard
+                </h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Current rankings with Candidate Name, District & State across {totalAspirants} candidates.
+              </p>
+            </div>
 
-          <div className="overflow-x-auto">
+            <button
+              onClick={handleRefreshLeaderboard}
+              disabled={isRefreshingBoard}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 text-xs font-bold rounded-xl border border-blue-200 dark:border-blue-800 transition-colors cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshingBoard ? 'animate-spin' : ''}`} />
+              <span>{isRefreshingBoard ? 'Refreshing...' : '🔄 Live Refresh'}</span>
+            </button>
+          </div>
+
+          {/* TOP 3 GOLD, SILVER, BRONZE VISUAL PODIUM */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            {/* 🥈 Silver */}
+            <div className="order-2 sm:order-1 rounded-2xl p-4 bg-slate-50 dark:bg-slate-800/80 border-2 border-slate-300 dark:border-slate-700 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-lg">🥈</span>
+                <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-700 px-2 py-0.5 rounded">
+                  Rank 2 (Silver)
+                </span>
+              </div>
+              <div>
+                <p className="font-black text-sm text-slate-900 dark:text-white truncate">
+                  {top2 ? (top2.attempt_id === attempt.id ? `${top2.student_name} (You)` : top2.student_name) : 'Vacant'}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1 mt-0.5">
+                  <MapPin className="w-3 h-3 text-slate-400" />
+                  {top2 ? `${top2.student_district || 'District'}, ${top2.student_state || 'HP'}` : '-'}
+                </p>
+              </div>
+              <p className="font-black text-slate-900 dark:text-white text-base mt-2 text-right">
+                {top2 ? `${top2.score} pts` : '-'}
+              </p>
+            </div>
+
+            {/* 🥇 Gold */}
+            <div className="order-1 sm:order-2 rounded-2xl p-4 bg-gradient-to-b from-amber-50 to-amber-100/60 dark:from-amber-950/40 dark:to-amber-900/30 border-2 border-amber-400 flex flex-col justify-between shadow-md sm:-mt-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-xl">🥇</span>
+                <span className="text-[10px] font-black uppercase text-amber-900 bg-amber-300/90 px-2.5 py-0.5 rounded">
+                  ★ Rank 1 (Gold) ★
+                </span>
+              </div>
+              <div>
+                <p className="font-black text-base text-amber-950 dark:text-amber-100 truncate">
+                  {top1 ? (top1.attempt_id === attempt.id ? `${top1.student_name} (You)` : top1.student_name) : 'Vacant'}
+                </p>
+                <p className="text-xs text-amber-800 dark:text-amber-300 font-bold flex items-center gap-1 mt-0.5">
+                  <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                  {top1 ? `${top1.student_district || 'District'}, ${top1.student_state || 'HP'}` : '-'}
+                </p>
+              </div>
+              <p className="font-black text-amber-900 dark:text-amber-300 text-lg mt-2 text-right">
+                {top1 ? `${top1.score} pts (${top1.percentage}%)` : '-'}
+              </p>
+            </div>
+
+            {/* 🥉 Bronze */}
+            <div className="order-3 rounded-2xl p-4 bg-orange-50/60 dark:bg-amber-950/30 border-2 border-amber-300 dark:border-amber-900/60 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-lg">🥉</span>
+                <span className="text-[10px] font-black uppercase text-amber-800 dark:text-amber-300 bg-white dark:bg-slate-700 px-2 py-0.5 rounded">
+                  Rank 3 (Bronze)
+                </span>
+              </div>
+              <div>
+                <p className="font-black text-sm text-slate-900 dark:text-white truncate">
+                  {top3 ? (top3.attempt_id === attempt.id ? `${top3.student_name} (You)` : top3.student_name) : 'Vacant'}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-semibold flex items-center gap-1 mt-0.5">
+                  <MapPin className="w-3 h-3 text-amber-600" />
+                  {top3 ? `${top3.student_district || 'District'}, ${top3.student_state || 'HP'}` : '-'}
+                </p>
+              </div>
+              <p className="font-black text-amber-900 dark:text-amber-300 text-base mt-2 text-right">
+                {top3 ? `${top3.score} pts` : '-'}
+              </p>
+            </div>
+          </div>
+
+          {/* TOP 20 FULL REAL-TIME LEADERBOARD TABLE */}
+          <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
             <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-50 dark:bg-slate-800 text-slate-400 font-semibold uppercase">
+              <thead className="bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold uppercase text-[10px]">
                 <tr>
-                  <th className="p-3">Rank</th>
-                  <th className="p-3">Candidate</th>
+                  <th className="p-3 text-center w-14">Rank</th>
+                  <th className="p-3">Candidate Name</th>
                   <th className="p-3">District & State</th>
-                  <th className="p-3">Score</th>
-                  <th className="p-3">Time Taken</th>
+                  <th className="p-3 text-center">Correct / Wrong</th>
+                  <th className="p-3 text-center">Time Taken</th>
+                  <th className="p-3 text-right">Score</th>
+                  <th className="p-3 text-right">Percent</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {leaderboard.map((item) => {
                   const isMe = item.attempt_id === attempt.id;
+                  let rankIcon = `#${item.rank}`;
+                  if (item.rank === 1) rankIcon = '🥇 #1';
+                  if (item.rank === 2) rankIcon = '🥈 #2';
+                  if (item.rank === 3) rankIcon = '🥉 #3';
+
                   return (
-                    <tr key={item.attempt_id} className={isMe ? 'bg-blue-50 dark:bg-blue-950/80 font-bold' : ''}>
-                      <td className="p-3 font-black text-slate-500">#{item.rank}</td>
-                      <td className="p-3 text-slate-900 dark:text-white font-bold">{isMe ? attempt.student_name + ' (You)' : item.masked_name}</td>
-                      <td className="p-3 text-slate-500">{isMe ? `${attempt.student_district}, ${attempt.student_state}` : 'Verified Candidate'}</td>
-                      <td className="p-3 text-emerald-600 font-black text-sm">{item.score} pts</td>
-                      <td className="p-3 text-slate-500">{Math.floor(item.time_taken_seconds / 60)}m {item.time_taken_seconds % 60}s</td>
+                    <tr 
+                      key={item.attempt_id} 
+                      className={
+                        isMe 
+                          ? 'bg-blue-50/90 dark:bg-blue-950 font-black border-l-4 border-blue-600' 
+                          : 'hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors'
+                      }
+                    >
+                      <td className="p-3 text-center font-black text-slate-800 dark:text-slate-200">
+                        {rankIcon}
+                      </td>
+                      <td className="p-3 text-slate-900 dark:text-white font-bold">
+                        <div className="flex items-center gap-1.5">
+                          <span>{item.student_name || item.masked_name}</span>
+                          {isMe && (
+                            <span className="px-1.5 py-0.2 bg-blue-600 text-white rounded text-[10px] font-black">
+                              YOU
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3 text-slate-600 dark:text-slate-400">
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                          <span>{item.student_district || 'District'}, {item.student_state || 'HP'}</span>
+                        </span>
+                      </td>
+                      <td className="p-3 text-center font-semibold">
+                        <span className="text-emerald-600">✓ {item.correct_answers}</span>
+                        <span className="text-slate-300 mx-1">|</span>
+                        <span className="text-rose-500">✗ {item.wrong_answers || 0}</span>
+                      </td>
+                      <td className="p-3 text-center text-slate-500 dark:text-slate-400">
+                        {Math.floor(item.time_taken_seconds / 60)}m {item.time_taken_seconds % 60}s
+                      </td>
+                      <td className="p-3 text-right font-black text-slate-900 dark:text-white text-sm">
+                        {item.score}
+                      </td>
+                      <td className="p-3 text-right font-black text-blue-600 dark:text-blue-400">
+                        {item.percentage ? `${item.percentage}%` : '-'}
+                      </td>
                     </tr>
                   );
                 })}
+
+                {/* If user is not in top 20, show their rank pinned at bottom */}
+                {myRank > 20 && (
+                  <tr className="bg-blue-50 dark:bg-blue-950 font-black border-t-2 border-blue-500">
+                    <td className="p-3 text-center font-black text-blue-600 dark:text-blue-400">#{myRank}</td>
+                    <td className="p-3 text-slate-900 dark:text-white">
+                      {attempt.student_name} <span className="px-1.5 py-0.2 bg-blue-600 text-white rounded text-[10px]">YOU</span>
+                    </td>
+                    <td className="p-3 text-slate-600 dark:text-slate-400">{attempt.student_district}, {attempt.student_state}</td>
+                    <td className="p-3 text-center font-semibold">
+                      <span className="text-emerald-600">✓ {attempt.correct_answers}</span> | <span className="text-rose-500">✗ {attempt.wrong_answers}</span>
+                    </td>
+                    <td className="p-3 text-center text-slate-500">{Math.floor(attempt.time_taken_seconds / 60)}m {attempt.time_taken_seconds % 60}s</td>
+                    <td className="p-3 text-right font-black text-slate-900 dark:text-white text-sm">{attempt.score}</td>
+                    <td className="p-3 text-right font-black text-blue-600 dark:text-blue-400">{attempt.percentage}%</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
+
         </div>
       )}
 

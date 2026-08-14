@@ -15,19 +15,23 @@ import {
   CheckCircle2, 
   Clock, 
   Share2 as ShareIcon, 
-  ArrowUpRight 
+  ArrowUpRight,
+  Sparkles,
+  Zap,
+  FolderPlus
 } from 'lucide-react';
 import { Test, Attempt } from '../../types';
 import { dataService } from '../../services/dataService';
 import { TestManager } from './TestManager';
 import { QuestionManager } from './QuestionManager';
+import { QuestionBankView } from './QuestionBankView';
 import { AttemptsList } from './AttemptsList';
 import { TestAnalytics } from './TestAnalytics';
 import { SocialGateManager } from './SocialGateManager';
 import { AdminSettingsView } from './AdminSettingsView';
 import { BulkImportModal } from './BulkImportModal';
 
-type AdminTab = 'dashboard' | 'tests' | 'questions' | 'attempts' | 'analytics' | 'social' | 'settings';
+export type AdminTab = 'dashboard' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'social' | 'settings';
 
 interface AdminDashboardProps {
   onNavigateTab?: (tab: AdminTab, testId?: string) => void;
@@ -133,7 +137,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="flex items-center gap-1 overflow-x-auto py-1 scrollbar-none max-w-full">
           <button
             onClick={() => handleTabChange('dashboard')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'dashboard'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -145,7 +149,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => handleTabChange('tests')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'tests'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -156,9 +160,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
 
           <button
-            onClick={() => handleTabChange('questions')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
-              activeTab === 'questions'
+            onClick={() => handleTabChange('bank')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'bank' || activeTab === 'questions'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
             }`}
@@ -169,7 +173,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => handleTabChange('attempts')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'attempts'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -181,7 +185,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => handleTabChange('analytics')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'analytics'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -193,7 +197,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => handleTabChange('social')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'social'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -205,7 +209,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           <button
             onClick={() => handleTabChange('settings')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'settings'
                 ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
                 : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
@@ -220,7 +224,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {onOpenSupabaseModal && (
             <button
               onClick={onOpenSupabaseModal}
-              className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors"
+              className="p-2 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
               title="Database Settings"
             >
               <Database className="w-4 h-4" />
@@ -230,7 +234,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {onLogout && (
             <button
               onClick={onLogout}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/60 transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/60 transition-colors cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
               <span>Logout</span>
@@ -239,204 +243,252 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* RENDER VIEW ACCORDING TO ACTIVE TAB */}
+      {/* DASHBOARD TAB CONTENT */}
       {activeTab === 'dashboard' && (
-        <div className="space-y-8">
-          {/* Header Banner */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 p-6 sm:p-8 rounded-2xl text-white shadow-xl">
-            <div>
-              <span className="px-3 py-1 bg-blue-500/20 text-blue-300 text-xs font-semibold rounded-full border border-blue-400/30 uppercase tracking-wider">
-                Gradeup Study Admin
-              </span>
-              <h1 className="text-2xl sm:text-3xl font-black tracking-tight mt-2">
-                Exam Control & Analytics
-              </h1>
-              <p className="text-sm text-slate-300 mt-1 max-w-xl">
-                Create unlimited mock tests, generate custom test share links, manage question banks, and track student results in real-time.
-              </p>
-            </div>
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => handleTabChange('tests')}
-                className="inline-flex items-center gap-2 px-5 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm shadow-lg transition-all"
-              >
-                <Plus className="w-5 h-5" />
-                <span>Create New Mock Test</span>
-              </button>
-            </div>
-          </div>
-
-          {/* KPI Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="space-y-6">
+          
+          {/* STATS OVERVIEW CARDS */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             
+            {/* Total Tests Card */}
             <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3">
-                <FileText className="w-5 h-5" />
-              </div>
-              <p className="text-2xl font-black text-slate-900 dark:text-white">{tests.length}</p>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">Total Mock Tests</p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mb-3">
-                <CheckCircle2 className="w-5 h-5" />
-              </div>
-              <p className="text-2xl font-black text-slate-900 dark:text-white">{publishedTestsCount}</p>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">Published Live</p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mb-3">
-                <Users className="w-5 h-5" />
-              </div>
-              <p className="text-2xl font-black text-slate-900 dark:text-white">{totalStudentsCount}</p>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">Total Students</p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="w-10 h-10 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center mb-3">
-                <Clock className="w-5 h-5" />
-              </div>
-              <p className="text-2xl font-black text-slate-900 dark:text-white">{totalAttemptsCount}</p>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">Total Test Attempts</p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="w-10 h-10 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 flex items-center justify-center mb-3">
-                <TrendingUp className="w-5 h-5" />
-              </div>
-              <p className="text-2xl font-black text-slate-900 dark:text-white">{avgPercentage}%</p>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">Avg Score Rate</p>
-            </div>
-
-            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
-              <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mb-3">
-                <Award className="w-5 h-5" />
-              </div>
-              <p className="text-2xl font-black text-slate-900 dark:text-white">{highestScore}</p>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">Highest Mark</p>
-            </div>
-
-          </div>
-
-          {/* Tests Overview Table & Quick Actions */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* Main Tests Table */}
-            <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">Active Mock Tests</h2>
-                  <p className="text-xs text-slate-500">Manage questions, share links, and status</p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Mock Tests</span>
+                <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400">
+                  <FileText className="w-5 h-5" />
                 </div>
-                <button
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-3xl font-black text-slate-900 dark:text-white">{tests.length}</span>
+                <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                  {publishedTestsCount} Published
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-slate-400 flex items-center justify-between">
+                <span>Active & Ready</span>
+                <button 
                   onClick={() => handleTabChange('tests')}
-                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 flex items-center gap-1"
+                  className="text-blue-600 dark:text-blue-400 hover:underline font-semibold flex items-center gap-0.5"
                 >
-                  View All Tests <ArrowUpRight className="w-3.5 h-3.5" />
+                  Manage <ArrowUpRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Total Attempts Card */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Submissions</span>
+                <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+                  <TrendingUp className="w-5 h-5" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-3xl font-black text-slate-900 dark:text-white">{totalAttemptsCount}</span>
+                <span className="text-xs font-bold text-slate-500">
+                  {completedAttempts.length} Completed
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-slate-400 flex items-center justify-between">
+                <span>Real-time test data</span>
+                <button 
+                  onClick={() => handleTabChange('attempts')}
+                  className="text-emerald-600 dark:text-emerald-400 hover:underline font-semibold flex items-center gap-0.5"
+                >
+                  View <ArrowUpRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Unique Students */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Unique Students</span>
+                <div className="p-2 rounded-xl bg-purple-50 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400">
+                  <Users className="w-5 h-5" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-3xl font-black text-slate-900 dark:text-white">{totalStudentsCount}</span>
+                <span className="text-xs font-bold text-purple-600 dark:text-purple-400">
+                  Verified Mobiles
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-slate-400 flex items-center justify-between">
+                <span>Lead Generation</span>
+                <button 
+                  onClick={() => handleTabChange('attempts')}
+                  className="text-purple-600 dark:text-purple-400 hover:underline font-semibold flex items-center gap-0.5"
+                >
+                  Leads <ArrowUpRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+            {/* Performance Stats */}
+            <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Avg Student Score</span>
+                <div className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400">
+                  <Award className="w-5 h-5" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-3xl font-black text-slate-900 dark:text-white">{avgPercentage}%</span>
+                <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                  High: {highestScore} pts
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-slate-400 flex items-center justify-between">
+                <span>Passing Quality</span>
+                <button 
+                  onClick={() => handleTabChange('analytics')}
+                  className="text-amber-600 dark:text-amber-400 hover:underline font-semibold flex items-center gap-0.5"
+                >
+                  Insights <ArrowUpRight className="w-3 h-3" />
+                </button>
+              </div>
+            </div>
+
+          </div>
+
+          {/* AI SUITE QUICK LAUNCH BANNER */}
+          <div className="p-6 rounded-3xl bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white border border-indigo-500/20 shadow-md">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 fill-slate-950" /> Gemini 3.7 Flash AI Suite
+                  </span>
+                </div>
+                <h3 className="text-xl font-black text-white">
+                  Smart Question Bank & 360° AI Quality Engine
+                </h3>
+                <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
+                  Generate exam-targeted MCQs with distinct Subject, Section, Chapter, and Topic fields, audit grammar and factual accuracy with 360° MCQ Inspection, and build new Mock Tests in 1-click.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={() => handleTabChange('bank')}
+                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <HelpCircle className="w-4 h-4 text-blue-200" />
+                  <span>Open Master Question Bank</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* RECENT TESTS & QUICK ACTIONS ROW */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Recent Mock Tests List (2 cols) */}
+            <div className="lg:col-span-2 bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-base text-slate-900 dark:text-white">Active Mock Tests</h3>
+                  <p className="text-xs text-slate-500">Live tests available for students</p>
+                </div>
+                <button 
+                  onClick={() => handleTabChange('tests')}
+                  className="px-3.5 py-1.5 text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/60 rounded-xl hover:bg-blue-100 transition-colors"
+                >
+                  View All ({tests.length})
                 </button>
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-semibold uppercase text-slate-400">
-                      <th className="py-3 px-3">Test Title</th>
-                      <th className="py-3 px-3">Questions</th>
-                      <th className="py-3 px-3">Duration</th>
-                      <th className="py-3 px-3">Status</th>
-                      <th className="py-3 px-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {tests.slice(0, 5).map((test) => (
-                      <tr key={test.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors">
-                        <td className="py-3.5 px-3">
-                          <p className="font-bold text-slate-900 dark:text-white line-clamp-1">{test.title}</p>
-                          <span className="text-[11px] text-slate-400">Code: {test.test_code}</span>
-                        </td>
-                        <td className="py-3.5 px-3 font-semibold text-slate-700 dark:text-slate-300">
-                          {test.total_questions} Qs
-                        </td>
-                        <td className="py-3.5 px-3 text-slate-600 dark:text-slate-400">
-                          {test.duration_minutes} mins
-                        </td>
-                        <td className="py-3.5 px-3">
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-                            test.is_published
-                              ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                              : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                          }`}>
-                            {test.is_published ? 'Published' : 'Draft'}
-                          </span>
-                        </td>
-                        <td className="py-3.5 px-3 text-right space-x-1">
-                          <button
-                            onClick={() => handleOpenAttemptsForTest(test.id)}
-                            className="px-2 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950 dark:text-emerald-300 text-xs font-semibold transition-colors"
-                            title="View Student Results for this Mock Test"
-                          >
-                            Results
-                          </button>
-                          <button
-                            onClick={() => handleOpenQuestionsForTest(test.id)}
-                            className="px-2 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-300 text-xs font-semibold transition-colors"
-                            title="Manage Questions"
-                          >
-                            Questions
-                          </button>
-                          <button
-                            onClick={() => handleCopyLink(test.slug)}
-                            className="p-1.5 rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 text-xs font-semibold transition-colors"
-                            title="Copy Share Link"
-                          >
-                            <ShareIcon className="w-3.5 h-3.5 inline" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {tests.slice(0, 4).map((test) => (
+                  <div key={test.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 first:pt-0 last:pb-0">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                          {test.category}
+                        </span>
+                        <h4 className="font-bold text-sm text-slate-900 dark:text-white">{test.title}</h4>
+                      </div>
+                      <div className="text-xs text-slate-400 mt-1 flex items-center gap-3">
+                        <span>Code: <b>{test.test_code}</b></span>
+                        <span>•</span>
+                        <span>{test.total_questions || 0} Questions</span>
+                        <span>•</span>
+                        <span>{test.duration_minutes} Mins</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => handleCopyLink(test.slug)}
+                        className="px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-1.5"
+                        title="Copy Public Test Link"
+                      >
+                        <ShareIcon className="w-3.5 h-3.5" />
+                        <span>Share</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleOpenQuestionsForTest(test.id)}
+                        className="px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 text-xs font-bold hover:bg-blue-100 transition-colors"
+                      >
+                        Questions
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {tests.length === 0 && (
+                  <div className="py-8 text-center text-slate-400 text-xs">
+                    No mock tests created yet. Click "Mock Tests" tab to create your first test.
+                  </div>
+                )}
               </div>
             </div>
 
-            {/* Side Panel: Recent Student Attempts & Quick Tools */}
+            {/* QUICK ACTIONS & SYSTEM STATUS (1 col) */}
             <div className="space-y-6">
-              <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-xs">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-slate-900 dark:text-white text-base">Recent Attempts</h3>
-                  <button
-                    onClick={() => handleTabChange('attempts')}
-                    className="text-xs font-semibold text-blue-600 hover:underline"
-                  >
-                    View All
-                  </button>
+              
+              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 text-white rounded-2xl p-6 shadow-md space-y-4">
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-widest text-blue-200">
+                    GradeUp Engine
+                  </span>
+                  <h3 className="text-lg font-black mt-0.5">Quick Actions</h3>
                 </div>
 
-                <div className="space-y-3">
-                  {attempts.slice(0, 5).map((att) => (
-                    <div key={att.id} className="p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                      <div>
-                        <p className="font-bold text-sm text-slate-900 dark:text-white">{att.student_name}</p>
-                        <p className="text-xs text-slate-500">{att.student_district}, {att.student_state}</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="font-black text-sm text-emerald-600 dark:text-emerald-400">
-                          {att.score} pts
-                        </span>
-                        <p className="text-[10px] text-slate-400">{att.percentage}% Score</p>
-                      </div>
-                    </div>
-                  ))}
-                  {attempts.length === 0 && (
-                    <p className="text-xs text-slate-400 text-center py-4">No student attempts recorded yet.</p>
-                  )}
+                <div className="space-y-2">
+                  <button
+                    onClick={() => handleTabChange('tests')}
+                    className="w-full p-3 bg-white/10 hover:bg-white/20 rounded-xl text-left text-xs font-bold transition-all flex items-center justify-between backdrop-blur-xs"
+                  >
+                    <span>+ Create New Mock Test</span>
+                    <ArrowUpRight className="w-4 h-4 text-blue-200" />
+                  </button>
+
+                  <button
+                    onClick={() => handleTabChange('bank')}
+                    className="w-full p-3 bg-white/10 hover:bg-white/20 rounded-xl text-left text-xs font-bold transition-all flex items-center justify-between backdrop-blur-xs"
+                  >
+                    <span>✦ Question Bank & 360° AI QA</span>
+                    <ArrowUpRight className="w-4 h-4 text-blue-200" />
+                  </button>
+
+                  <button
+                    onClick={() => handleTabChange('attempts')}
+                    className="w-full p-3 bg-white/10 hover:bg-white/20 rounded-xl text-left text-xs font-bold transition-all flex items-center justify-between backdrop-blur-xs"
+                  >
+                    <span>📊 View Recent Attempts & Leads</span>
+                    <ArrowUpRight className="w-4 h-4 text-blue-200" />
+                  </button>
                 </div>
               </div>
 
-              {/* Quick Shortcuts */}
-              <div className="bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-slate-800 dark:to-slate-900 p-6 rounded-2xl border border-indigo-100 dark:border-slate-800">
-                <h3 className="font-bold text-slate-900 dark:text-white mb-3 text-sm">Quick Admin Shortcuts</h3>
+              {/* QUICK LINKS */}
+              <div className="bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-3">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Admin Navigation
+                </h4>
                 <div className="grid grid-cols-2 gap-2 text-xs font-semibold">
                   <button
                     onClick={() => handleTabChange('social')}
@@ -479,6 +531,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onPreviewTest={(slug) => {
             window.open(`/test/${slug}`, '_blank');
           }}
+          onToast={safeToast}
+        />
+      )}
+
+      {activeTab === 'bank' && (
+        <QuestionBankView
+          onNavigateToTest={(testId) => handleOpenQuestionsForTest(testId)}
           onToast={safeToast}
         />
       )}
