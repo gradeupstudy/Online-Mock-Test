@@ -169,6 +169,10 @@ export interface AdminSettings {
   mask_leaderboard_names: boolean;
   admin_email?: string;
   admin_password?: string;
+  social_gate_title?: string;
+  social_gate_description?: string;
+  social_platforms?: SocialPlatform[];
+  social_gate_enabled?: boolean;
 }
 
 export interface PublicLeaderboardEntry {

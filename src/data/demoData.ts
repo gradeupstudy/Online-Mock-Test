@@ -12,7 +12,10 @@ export const DEMO_ADMIN_SETTINGS: AdminSettings = {
   default_test_duration: 90,
   default_marks: 1.0,
   default_negative_marking: 0.25,
-  mask_leaderboard_names: true
+  mask_leaderboard_names: true,
+  social_gate_enabled: true,
+  social_gate_title: "Gradeup Study Official Community Requirement",
+  social_gate_description: "Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications."
 };
 
 export const DEMO_SOCIAL_PLATFORMS: SocialPlatform[] = [

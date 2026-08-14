@@ -263,6 +263,57 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
           </div>
         </div>
 
+        {/* Global Social Gate & Community Section */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Official Community Requirement (Social Gate)
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Configure default heading and description displayed to students before starting tests.
+              </p>
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.social_gate_enabled ?? true}
+                onChange={(e) => setSettings({ ...settings, social_gate_enabled: e.target.checked })}
+                className="rounded text-blue-600 focus:ring-blue-500"
+              />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                {settings.social_gate_enabled ?? true ? '🟢 Enabled' : '🔴 Disabled'}
+              </span>
+            </label>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                Community Requirement Title
+              </label>
+              <input
+                type="text"
+                value={settings.social_gate_title || 'Gradeup Study Official Community Requirement'}
+                onChange={(e) => setSettings({ ...settings, social_gate_title: e.target.value })}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                Community Instructions / Subtitle
+              </label>
+              <textarea
+                rows={2}
+                value={settings.social_gate_description || 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.'}
+                onChange={(e) => setSettings({ ...settings, social_gate_description: e.target.value })}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium"
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Exam Defaults */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
           <h2 className="text-base font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-800 pb-3">

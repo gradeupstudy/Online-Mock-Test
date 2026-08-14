@@ -16,7 +16,9 @@ import {
   Share2, 
   Users, 
   MapPin,
-  ChevronRight 
+  ChevronRight,
+  RefreshCw,
+  Database
 } from 'lucide-react';
 import { Attempt, Test } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -38,6 +40,7 @@ export const AttemptsList: React.FC<AttemptsListProps> = ({ initialTestId = 'all
   const [sortBy, setSortBy] = useState<'rank' | 'date_desc' | 'date_asc' | 'name'>('rank');
   const [selectedAttempt, setSelectedAttempt] = useState<Attempt | null>(null);
   const [isToppersModalOpen, setIsToppersModalOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   useEffect(() => {
     if (initialTestId) {
@@ -47,13 +50,23 @@ export const AttemptsList: React.FC<AttemptsListProps> = ({ initialTestId = 'all
 
   useEffect(() => {
     loadData();
+    // Auto-refresh every 20 seconds
+    const interval = setInterval(() => {
+      loadData(false);
+    }, 20000);
+    return () => clearInterval(interval);
   }, []);
 
-  const loadData = async () => {
+  const loadData = async (showToast = false) => {
+    if (showToast) setIsRefreshing(true);
     const fetchedAttempts = await dataService.getAttempts();
     const fetchedTests = await dataService.getTests(true);
     setAttempts(fetchedAttempts);
     setTests(fetchedTests);
+    if (showToast) {
+      setIsRefreshing(false);
+      onToast?.('success', `Refreshed! Loaded ${fetchedAttempts.length} total attempts from database.`);
+    }
   };
 
   const states = Array.from(new Set(attempts.map(a => a.student_state))).filter(Boolean);
@@ -161,6 +174,16 @@ export const AttemptsList: React.FC<AttemptsListProps> = ({ initialTestId = 'all
         </div>
 
         <div className="flex items-center flex-wrap gap-2 shrink-0">
+          <button
+            onClick={() => loadData(true)}
+            disabled={isRefreshing}
+            className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs sm:text-sm rounded-xl border border-slate-300 dark:border-slate-700 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+            title="Fetch latest student results from Supabase database"
+          >
+            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-blue-600' : ''}`} />
+            <span>{isRefreshing ? 'Syncing...' : 'Refresh Results'}</span>
+          </button>
+
           <button
             onClick={() => setIsToppersModalOpen(true)}
             className="inline-flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-400 hover:from-amber-600 hover:to-yellow-500 text-slate-950 font-black text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer border border-amber-400"

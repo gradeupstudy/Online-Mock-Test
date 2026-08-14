@@ -23,6 +23,11 @@ CREATE TABLE IF NOT EXISTS public.tests (
     status VARCHAR(20) DEFAULT 'published' CHECK (status IN ('draft', 'published', 'unpublished', 'archived')),
     is_published BOOLEAN DEFAULT true,
     social_gate_enabled BOOLEAN DEFAULT true,
+    social_gate_mode VARCHAR(50) DEFAULT 'global' CHECK (social_gate_mode IN ('global', 'custom_selection', 'custom_links')),
+    social_platform_ids JSONB DEFAULT '[]'::jsonb,
+    custom_social_platforms JSONB DEFAULT '[]'::jsonb,
+    social_gate_title VARCHAR(255) DEFAULT 'Gradeup Study Official Community Requirement',
+    social_gate_description TEXT DEFAULT 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.',
     anti_cheating_enabled BOOLEAN DEFAULT true,
     randomize_questions BOOLEAN DEFAULT false,
     randomize_options BOOLEAN DEFAULT false,
@@ -154,6 +159,12 @@ CREATE TABLE IF NOT EXISTS public.admin_settings (
     default_marks DECIMAL(5,2) DEFAULT 1.00,
     default_negative_marking DECIMAL(5,2) DEFAULT 0.25,
     mask_leaderboard_names BOOLEAN DEFAULT true,
+    social_gate_enabled BOOLEAN DEFAULT true,
+    social_gate_title VARCHAR(255) DEFAULT 'Gradeup Study Official Community Requirement',
+    social_gate_description TEXT DEFAULT 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.',
+    social_platforms JSONB DEFAULT '[]'::jsonb,
+    admin_email VARCHAR(255) DEFAULT 'admin@gradeupstudy.com',
+    admin_password VARCHAR(255) DEFAULT 'gradeup123',
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -436,22 +447,79 @@ CREATE POLICY "Questions viewable for published tests" ON public.questions FOR S
 CREATE POLICY "Admin write questions" ON public.questions FOR ALL USING (auth.role() = 'authenticated');
 
 -- Students Policy
-CREATE POLICY "Anyone register student" ON public.students FOR INSERT WITH CHECK (true);
-CREATE POLICY "Admin read students" ON public.students FOR SELECT USING (auth.role() = 'authenticated');
+DROP POLICY IF EXISTS "Anyone register student" ON public.students;
+DROP POLICY IF EXISTS "Admin read students" ON public.students;
+CREATE POLICY "Anyone register student" ON public.students FOR ALL USING (true);
 
 -- Attempts Policy
-CREATE POLICY "Anyone start attempt" ON public.attempts FOR INSERT WITH CHECK (true);
-CREATE POLICY "Read attempt own or admin" ON public.attempts FOR SELECT USING (true);
-CREATE POLICY "Admin write attempts" ON public.attempts FOR ALL USING (auth.role() = 'authenticated');
+DROP POLICY IF EXISTS "Anyone start attempt" ON public.attempts;
+DROP POLICY IF EXISTS "Read attempt own or admin" ON public.attempts;
+DROP POLICY IF EXISTS "Admin write attempts" ON public.attempts;
+CREATE POLICY "Anyone manage attempts" ON public.attempts FOR ALL USING (true);
 
 -- Answers Policy
-CREATE POLICY "Anyone insert answer" ON public.answers FOR INSERT WITH CHECK (true);
-CREATE POLICY "Read answers own attempt" ON public.answers FOR SELECT USING (true);
-CREATE POLICY "Admin write answers" ON public.answers FOR ALL USING (auth.role() = 'authenticated');
+DROP POLICY IF EXISTS "Anyone insert answer" ON public.answers;
+DROP POLICY IF EXISTS "Read answers own attempt" ON public.answers;
+DROP POLICY IF EXISTS "Admin write answers" ON public.answers;
+CREATE POLICY "Anyone manage answers" ON public.answers FOR ALL USING (true);
 
 -- Social & Settings Policy
-CREATE POLICY "Anyone view active social" ON public.social_platforms FOR SELECT USING (is_active = true OR auth.role() = 'authenticated');
-CREATE POLICY "Admin manage social" ON public.social_platforms FOR ALL USING (auth.role() = 'authenticated');
+DROP POLICY IF EXISTS "Anyone view active social" ON public.social_platforms;
+DROP POLICY IF EXISTS "Admin manage social" ON public.social_platforms;
+CREATE POLICY "Anyone view active social" ON public.social_platforms FOR SELECT USING (true);
+CREATE POLICY "Admin manage social" ON public.social_platforms FOR ALL USING (true);
 
+DROP POLICY IF EXISTS "Anyone view settings" ON public.admin_settings;
+DROP POLICY IF EXISTS "Admin manage settings" ON public.admin_settings;
 CREATE POLICY "Anyone view settings" ON public.admin_settings FOR SELECT USING (true);
-CREATE POLICY "Admin manage settings" ON public.admin_settings FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "Admin manage settings" ON public.admin_settings FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Public tests viewable" ON public.tests;
+DROP POLICY IF EXISTS "Admin write tests" ON public.tests;
+CREATE POLICY "Public tests viewable" ON public.tests FOR ALL USING (true);
+CREATE POLICY "Admin write tests" ON public.tests FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Questions viewable for published tests" ON public.questions;
+DROP POLICY IF EXISTS "Admin write questions" ON public.questions;
+CREATE POLICY "Questions viewable for published tests" ON public.questions FOR ALL USING (true);
+CREATE POLICY "Admin write questions" ON public.questions FOR ALL USING (true);
+
+-- ========================================================
+-- MIGRATION SCRIPT FOR EXISTING SUPABASE DATABASES
+-- Run this block if your tables were already created previously:
+-- ========================================================
+/*
+-- 1. Ensure students unique mobile constraint
+ALTER TABLE public.students DROP CONSTRAINT IF EXISTS unique_student_mobile;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_students_mobile ON public.students(mobile);
+
+-- 2. Ensure RLS policies allow seamless student submissions
+DROP POLICY IF EXISTS "Anyone register student" ON public.students;
+DROP POLICY IF EXISTS "Admin read students" ON public.students;
+CREATE POLICY "Anyone register student" ON public.students FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Anyone start attempt" ON public.attempts;
+DROP POLICY IF EXISTS "Read attempt own or admin" ON public.attempts;
+DROP POLICY IF EXISTS "Admin write attempts" ON public.attempts;
+CREATE POLICY "Anyone manage attempts" ON public.attempts FOR ALL USING (true);
+
+DROP POLICY IF EXISTS "Anyone insert answer" ON public.answers;
+DROP POLICY IF EXISTS "Read answers own attempt" ON public.answers;
+DROP POLICY IF EXISTS "Admin write answers" ON public.answers;
+CREATE POLICY "Anyone manage answers" ON public.answers FOR ALL USING (true);
+
+-- 3. Ensure Social Gate columns
+ALTER TABLE public.tests ADD COLUMN IF NOT EXISTS social_gate_enabled BOOLEAN DEFAULT true;
+ALTER TABLE public.tests ADD COLUMN IF NOT EXISTS social_gate_mode VARCHAR(50) DEFAULT 'global';
+ALTER TABLE public.tests ADD COLUMN IF NOT EXISTS social_platform_ids JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.tests ADD COLUMN IF NOT EXISTS custom_social_platforms JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.tests ADD COLUMN IF NOT EXISTS social_gate_title VARCHAR(255) DEFAULT 'Gradeup Study Official Community Requirement';
+ALTER TABLE public.tests ADD COLUMN IF NOT EXISTS social_gate_description TEXT DEFAULT 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.';
+
+ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS social_gate_title VARCHAR(255) DEFAULT 'Gradeup Study Official Community Requirement';
+ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS social_gate_description TEXT DEFAULT 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.';
+ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS social_gate_enabled BOOLEAN DEFAULT true;
+ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS social_platforms JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS admin_email VARCHAR(255) DEFAULT 'admin@gradeupstudy.com';
+ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS admin_password VARCHAR(255) DEFAULT 'gradeup123';
+*/

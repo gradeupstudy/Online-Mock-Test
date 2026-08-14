@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Youtube, Send, Instagram, CheckCircle2, ExternalLink, ShieldCheck, ArrowRight, Lock, Loader2, Globe, CheckSquare, Square, MessageCircle } from 'lucide-react';
-import { SocialPlatform, Test } from '../../types';
+import { SocialPlatform, Test, AdminSettings } from '../../types';
 import { dataService } from '../../services/dataService';
 
 interface SocialGateProps {
@@ -11,6 +11,7 @@ interface SocialGateProps {
 
 export const SocialGate: React.FC<SocialGateProps> = ({ test, onSuccessGate, onToast }) => {
   const [platforms, setPlatforms] = useState<SocialPlatform[]>([]);
+  const [globalSettings, setGlobalSettings] = useState<AdminSettings | null>(null);
   const [visited, setVisited] = useState<Record<string, boolean>>({});
   const [verifying, setVerifying] = useState<Record<string, number>>({});
   const [confirmedDeclaration, setConfirmedDeclaration] = useState(false);
@@ -29,6 +30,14 @@ export const SocialGate: React.FC<SocialGateProps> = ({ test, onSuccessGate, onT
   const loadPlatforms = async () => {
     setLoading(true);
     
+    // Load backend global settings
+    try {
+      const s = await dataService.getSettings();
+      setGlobalSettings(s);
+    } catch {
+      // Fallback
+    }
+
     // If social gate is disabled for this test, bypass directly
     if (test && test.social_gate_enabled === false) {
       onSuccessGate();
@@ -148,8 +157,8 @@ export const SocialGate: React.FC<SocialGateProps> = ({ test, onSuccessGate, onT
     return null;
   }
 
-  const heading = test?.social_gate_title || "Gradeup Study Official Community Requirement";
-  const subtitle = test?.social_gate_description || "Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.";
+  const heading = test?.social_gate_title || globalSettings?.social_gate_title || "Gradeup Study Official Community Requirement";
+  const subtitle = test?.social_gate_description || globalSettings?.social_gate_description || "Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.";
 
   return (
     <div className="max-w-xl mx-auto space-y-6 my-6">

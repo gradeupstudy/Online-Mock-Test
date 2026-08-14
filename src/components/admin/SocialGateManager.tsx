@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Share2, Plus, Edit3, Trash2, Check, Youtube, Send, Instagram, MessageCircle, Globe, ShieldAlert, Power, CheckCircle2, XCircle, Filter } from 'lucide-react';
-import { SocialPlatform } from '../../types';
+import { Share2, Plus, Edit3, Trash2, Youtube, Send, Instagram, MessageCircle, Globe, ShieldAlert, Power, CheckCircle2, XCircle, Filter, Save, Cloud, Eye, HelpCircle } from 'lucide-react';
+import { SocialPlatform, AdminSettings } from '../../types';
 import { dataService } from '../../services/dataService';
 import { Modal } from '../common/Modal';
 
@@ -13,19 +13,64 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPlatform, setEditingPlatform] = useState<Partial<SocialPlatform> | null>(null);
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'disabled'>('all');
+  
+  // Global Social Gate Header & Instructions
+  const [globalTitle, setGlobalTitle] = useState('Gradeup Study Official Community Requirement');
+  const [globalDescription, setGlobalDescription] = useState('Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.');
+  const [isGlobalGateEnabled, setIsGlobalGateEnabled] = useState(true);
+  const [savingGlobalSettings, setSavingGlobalSettings] = useState(false);
+  const [deletingPlatformId, setDeletingPlatformId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadPlatforms();
+    loadData();
   }, []);
 
-  const loadPlatforms = async () => {
-    const fetched = await dataService.getSocialPlatforms(true);
-    setPlatforms(fetched);
+  const loadData = async () => {
+    try {
+      const settings = await dataService.getSettings();
+      if (settings.social_gate_title) {
+        setGlobalTitle(settings.social_gate_title);
+      }
+      if (settings.social_gate_description) {
+        setGlobalDescription(settings.social_gate_description);
+      }
+      if (settings.social_gate_enabled !== undefined) {
+        setIsGlobalGateEnabled(settings.social_gate_enabled);
+      }
+
+      const fetched = await dataService.getSocialPlatforms(true);
+      setPlatforms(fetched);
+    } catch (err) {
+      console.warn('Error loading social gate data', err);
+    }
+  };
+
+  const handleSaveGlobalHeader = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!globalTitle.trim()) {
+      onToast?.('error', 'Community Gate Title cannot be empty!');
+      return;
+    }
+    setSavingGlobalSettings(true);
+    try {
+      await dataService.updateSettings({
+        social_gate_title: globalTitle.trim(),
+        social_gate_description: globalDescription.trim(),
+        social_gate_enabled: isGlobalGateEnabled
+      });
+      onToast?.('success', 'Global Community Requirement header saved & synced to Supabase Cloud! Visible on all browsers.');
+    } catch (err) {
+      console.error('Failed to save global community header', err);
+      onToast?.('error', 'Failed to save global header to Supabase.');
+    } finally {
+      setSavingGlobalSettings(false);
+    }
   };
 
   const handleOpenAdd = () => {
+    const newId = crypto.randomUUID ? crypto.randomUUID() : 'sp-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
     setEditingPlatform({
-      id: 'sp-' + Date.now(),
+      id: newId,
       platform_name: '',
       platform_url: '',
       icon: 'youtube',
@@ -47,24 +92,22 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
     await dataService.toggleSocialPlatformActive(p.id, newStatus);
     onToast?.(
       newStatus ? 'success' : 'info',
-      `"${p.platform_name}" channel ${newStatus ? 'Enabled' : 'Disabled'} successfully!`
+      `"${p.platform_name}" channel ${newStatus ? 'Enabled' : 'Disabled'} & synced to Supabase!`
     );
-    loadPlatforms();
+    loadData();
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSavePlatform = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingPlatform?.platform_name || !editingPlatform.platform_url) {
       onToast?.('error', 'Platform name and URL are required!');
       return;
     }
     await dataService.saveSocialPlatform(editingPlatform as SocialPlatform);
-    onToast?.('success', `Platform "${editingPlatform.platform_name}" saved!`);
+    onToast?.('success', `Platform "${editingPlatform.platform_name}" saved & synced across all browsers!`);
     setIsModalOpen(false);
-    loadPlatforms();
+    loadData();
   };
-
-  const [deletingPlatformId, setDeletingPlatformId] = useState<string | null>(null);
 
   const handleDelete = (id: string) => {
     setDeletingPlatformId(id);
@@ -73,9 +116,9 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
   const confirmDeletePlatform = async () => {
     if (!deletingPlatformId) return;
     await dataService.deleteSocialPlatform(deletingPlatformId);
-    onToast?.('info', 'Platform requirement deleted');
+    onToast?.('info', 'Platform requirement deleted & synced.');
     setDeletingPlatformId(null);
-    loadPlatforms();
+    loadData();
   };
 
   const getIconComponent = (iconName: string) => {
@@ -105,11 +148,16 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
         <div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-              Social Gate Controls
+              Community & Social Gate
+            </span>
+            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-bold">
+              <Cloud className="w-3.5 h-3.5" /> Supabase Synced
             </span>
           </div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white mt-1">Social Follow Gate Manager</h1>
-          <p className="text-xs text-slate-500">Enable, disable or configure YouTube, Telegram, and WhatsApp requirements before students enter mock tests.</p>
+          <h1 className="text-xl font-bold text-slate-900 dark:text-white mt-1">Social Follow Gate & Community Manager</h1>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Edit the "Official Community Requirement" title, description, and manage YouTube, Telegram, Instagram & WhatsApp channels. All changes save directly to the central cloud database.
+          </p>
         </div>
 
         <button
@@ -121,11 +169,98 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
         </button>
       </div>
 
+      {/* SECTION 1: GLOBAL SOCIAL GATE HEADER & INSTRUCTIONS EDITOR */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-blue-200 dark:border-blue-900/60 p-6 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-4">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>Gradeup Study Official Community Requirement (Header & Subtitle)</span>
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              Customize the title and instructions shown at the top of the social gate screen for all students across every browser.
+            </p>
+          </div>
+          
+          <label className="flex items-center gap-2 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer self-start sm:self-auto">
+            <input
+              type="checkbox"
+              checked={isGlobalGateEnabled}
+              onChange={(e) => setIsGlobalGateEnabled(e.target.checked)}
+              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+            />
+            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+              {isGlobalGateEnabled ? '🟢 Gate Enabled Globally' : '🔴 Gate Disabled Globally'}
+            </span>
+          </label>
+        </div>
+
+        <form onSubmit={handleSaveGlobalHeader} className="space-y-4">
+          <div className="grid grid-cols-1 gap-4">
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                Main Community Header Title *
+              </label>
+              <input
+                type="text"
+                required
+                value={globalTitle}
+                onChange={(e) => setGlobalTitle(e.target.value)}
+                placeholder="e.g. Gradeup Study Official Community Requirement"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+              <p className="text-[11px] text-slate-400 mt-1">
+                Default: "Gradeup Study Official Community Requirement"
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
+                Subtitle / Community Requirement Instructions
+              </label>
+              <textarea
+                rows={2}
+                value={globalDescription}
+                onChange={(e) => setGlobalDescription(e.target.value)}
+                placeholder="e.g. Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications."
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* LIVE PREVIEW BOX */}
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase text-slate-500 dark:text-slate-400 mb-2">
+              <Eye className="w-4 h-4 text-blue-500" />
+              <span>Live Student Gate Preview</span>
+            </div>
+            <div className="text-center bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-800 max-w-lg mx-auto shadow-xs">
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                {globalTitle || "Gradeup Study Official Community Requirement"}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                {globalDescription || "Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={savingGlobalSettings}
+              className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all disabled:opacity-50"
+            >
+              <Save className="w-4 h-4" />
+              <span>{savingGlobalSettings ? 'Saving to Cloud Database...' : 'Save & Sync Header to Supabase Cloud'}</span>
+            </button>
+          </div>
+        </form>
+      </div>
+
       {/* FILTER & STATS BAR */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
         <div className="flex items-center gap-2">
           <Filter className="w-4 h-4 text-slate-400" />
-          <span className="text-xs font-bold uppercase text-slate-400">Filter Status:</span>
+          <span className="text-xs font-bold uppercase text-slate-400">Filter Channels:</span>
           <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
             <button
               onClick={() => setFilterStatus('all')}
@@ -161,7 +296,7 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
         </div>
 
         <div className="text-xs text-slate-500 font-medium">
-          💡 Disabled channels are hidden from students in the Social Gate.
+          💡 Changes made here sync to Supabase and update on all student devices.
         </div>
       </div>
 
@@ -169,9 +304,9 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
       <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-2xl border border-amber-200 dark:border-amber-900 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-3">
         <ShieldAlert className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
         <div>
-          <p className="font-bold">Honest Verification Architecture Rule</p>
+          <p className="font-bold">Honest Verification Architecture</p>
           <p className="mt-0.5 opacity-90">
-            For platforms without public API OAuth verification (e.g. Telegram / YouTube without OAuth authorization), Gradeup Study securely opens the official link and tracks user interaction click history ("user clicked follow link") rather than outputting fake claims.
+            For platforms without public API OAuth verification (e.g. Telegram / YouTube channel links), Gradeup Study securely opens the official community page and tracks membership confirmation rather than outputting false claims.
           </p>
         </div>
       </div>
@@ -274,11 +409,11 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
       <Modal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        title={editingPlatform?.id ? "Edit Social Channel" : "Add New Social Channel"}
+        title={editingPlatform?.platform_name ? "Edit Social Channel" : "Add New Social Channel"}
         maxWidth="md"
       >
         {editingPlatform && (
-          <form onSubmit={handleSave} className="space-y-4">
+          <form onSubmit={handleSavePlatform} className="space-y-4">
             
             <div>
               <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">

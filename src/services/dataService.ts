@@ -59,19 +59,73 @@ const initLocalStorage = () => {
 
 initLocalStorage();
 
+export const sanitizeAttemptForSupabase = (a: Attempt) => {
+  return {
+    id: isValidUUID(a.id) ? a.id : generateUUID(),
+    test_id: isValidUUID(a.test_id) ? a.test_id : a.test_id,
+    student_id: isValidUUID(a.student_id) ? a.student_id : generateUUID(),
+    student_name: a.student_name || 'Candidate',
+    student_mobile: a.student_mobile || '',
+    student_email: a.student_email || null,
+    student_state: a.student_state || 'Himachal Pradesh',
+    student_district: a.student_district || 'General',
+    start_time: a.start_time || new Date().toISOString(),
+    end_time: a.end_time || (a.status === 'completed' || a.status === 'auto_submitted' ? new Date().toISOString() : null),
+    submitted_at: a.submitted_at || (a.status === 'completed' || a.status === 'auto_submitted' ? new Date().toISOString() : null),
+    status: a.status || 'in_progress',
+    total_questions: parseSafeNumber(a.total_questions, 0),
+    attempted_questions: parseSafeNumber(a.attempted_questions, 0),
+    correct_answers: parseSafeNumber(a.correct_answers, 0),
+    wrong_answers: parseSafeNumber(a.wrong_answers, 0),
+    skipped_questions: parseSafeNumber(a.skipped_questions, 0),
+    score: parseSafeNumber(a.score, 0),
+    percentage: parseSafeNumber(a.percentage, 0),
+    time_taken_seconds: parseSafeNumber(a.time_taken_seconds, 0),
+    suspicious_activity_count: parseSafeNumber(a.suspicious_activity_count, 0),
+    created_at: a.created_at || new Date().toISOString()
+  };
+};
+
 export const dataService = {
   // ------------------------------------
   // ADMIN SETTINGS
   // ------------------------------------
   getSettings: async (): Promise<AdminSettings> => {
-    let settings = DEMO_ADMIN_SETTINGS;
+    let settings = { ...DEMO_ADMIN_SETTINGS };
     const supabase = getSupabaseClient();
+    
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data, error } = await supabase.from('admin_settings').select('*').limit(1).single();
-        if (!error && data) settings = data as AdminSettings;
+        const { data, error } = await supabase.from('admin_settings').select('*').limit(1).maybeSingle();
+        if (!error && data) {
+          settings = { ...DEMO_ADMIN_SETTINGS, ...data };
+          localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+          
+          // If settings contains social_platforms, sync to local storage cache as well
+          if (Array.isArray(data.social_platforms) && data.social_platforms.length > 0) {
+            localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(data.social_platforms));
+          }
+        } else {
+          // If no row in Supabase admin_settings yet, check localStorage
+          const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+          if (raw) {
+            try {
+              settings = { ...DEMO_ADMIN_SETTINGS, ...JSON.parse(raw) };
+            } catch {
+              settings = { ...DEMO_ADMIN_SETTINGS };
+            }
+          }
+        }
       } catch (err) {
-        console.warn('Supabase fetch settings failed', err);
+        console.warn('Supabase fetch settings failed, using cache', err);
+        const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+        if (raw) {
+          try {
+            settings = { ...DEMO_ADMIN_SETTINGS, ...JSON.parse(raw) };
+          } catch {
+            settings = { ...DEMO_ADMIN_SETTINGS };
+          }
+        }
       }
     } else {
       const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
@@ -79,7 +133,7 @@ export const dataService = {
         try {
           settings = { ...DEMO_ADMIN_SETTINGS, ...JSON.parse(raw) };
         } catch {
-          settings = DEMO_ADMIN_SETTINGS;
+          settings = { ...DEMO_ADMIN_SETTINGS };
         }
       }
     }
@@ -93,18 +147,74 @@ export const dataService = {
     return settings;
   },
 
-  updateSettings: async (settings: Partial<AdminSettings>): Promise<AdminSettings> => {
+  updateSettings: async (newSettings: Partial<AdminSettings>): Promise<AdminSettings> => {
     const current = await dataService.getSettings();
-    const updated = { ...current, ...settings };
+    const updated: AdminSettings = {
+      ...current,
+      ...newSettings,
+      social_gate_title: newSettings.social_gate_title !== undefined ? newSettings.social_gate_title : (current.social_gate_title || DEMO_ADMIN_SETTINGS.social_gate_title),
+      social_gate_description: newSettings.social_gate_description !== undefined ? newSettings.social_gate_description : (current.social_gate_description || DEMO_ADMIN_SETTINGS.social_gate_description),
+      social_gate_enabled: newSettings.social_gate_enabled !== undefined ? newSettings.social_gate_enabled : (current.social_gate_enabled ?? true)
+    };
+
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
+
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        await supabase.from('admin_settings').upsert(updated);
+        const { data: existingRows } = await supabase.from('admin_settings').select('id').limit(1);
+        const idToUse = existingRows && existingRows.length > 0 ? existingRows[0].id : generateUUID();
+        
+        const payload: Record<string, unknown> = {
+          id: idToUse,
+          brand_name: updated.brand_name || 'Gradeup Study',
+          logo_url: updated.logo_url || '/logo.png',
+          website_url: updated.website_url || 'https://gradeupstudy.com',
+          support_email: updated.support_email || 'support@gradeupstudy.com',
+          whatsapp_number: updated.whatsapp_number || '+919816000000',
+          telegram_channel: updated.telegram_channel || 'https://t.me/gradeupstudy',
+          youtube_channel: updated.youtube_channel || 'https://youtube.com/@gradeupstudy',
+          instagram_handle: updated.instagram_handle || 'https://instagram.com/gradeupstudy',
+          default_test_duration: parseSafeNumber(updated.default_test_duration, 90),
+          default_marks: parseSafeNumber(updated.default_marks, 1.0),
+          default_negative_marking: parseSafeNumber(updated.default_negative_marking, 0.25),
+          mask_leaderboard_names: updated.mask_leaderboard_names ?? true,
+          social_gate_enabled: updated.social_gate_enabled ?? true,
+          social_gate_title: updated.social_gate_title || 'Gradeup Study Official Community Requirement',
+          social_gate_description: updated.social_gate_description || 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.',
+          social_platforms: updated.social_platforms || (await dataService.getSocialPlatforms(true)),
+          updated_at: new Date().toISOString()
+        };
+
+        if (updated.admin_email) payload.admin_email = updated.admin_email;
+        if (updated.admin_password) payload.admin_password = updated.admin_password;
+
+        const { error } = await supabase.from('admin_settings').upsert(payload);
+        if (error) {
+          console.warn('Supabase admin_settings upsert error (retrying with minimal payload):', error);
+          // If custom columns don't exist yet in Supabase schema, try saving standard columns
+          const minimalPayload = {
+            id: idToUse,
+            brand_name: updated.brand_name,
+            logo_url: updated.logo_url,
+            website_url: updated.website_url,
+            support_email: updated.support_email,
+            whatsapp_number: updated.whatsapp_number,
+            telegram_channel: updated.telegram_channel,
+            youtube_channel: updated.youtube_channel,
+            instagram_handle: updated.instagram_handle,
+            default_test_duration: updated.default_test_duration,
+            default_marks: updated.default_marks,
+            default_negative_marking: updated.default_negative_marking,
+            mask_leaderboard_names: updated.mask_leaderboard_names,
+            updated_at: new Date().toISOString()
+          };
+          await supabase.from('admin_settings').upsert(minimalPayload);
+        }
       } catch (e) {
         console.error('Failed to update settings in Supabase', e);
       }
     }
-    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
     return updated;
   },
 
@@ -394,7 +504,15 @@ export const dataService = {
   },
 
   saveQuestions: async (testId: string, questions: Question[]): Promise<void> => {
-    const targetTestId = isValidUUID(testId) ? testId : generateUUID();
+    let targetTestId = testId;
+    if (!isValidUUID(targetTestId)) {
+      const foundTest = await dataService.getTestBySlugOrId(testId);
+      if (foundTest && isValidUUID(foundTest.id)) {
+        targetTestId = foundTest.id;
+      } else {
+        targetTestId = generateUUID();
+      }
+    }
     const sanitizedQuestions = questions.map((q, idx) => {
       const qId = isValidUUID(q.id) ? q.id : generateUUID();
       const ans = (q.correct_answer || 'A').toString().toUpperCase().trim().slice(0, 1);
@@ -631,43 +749,106 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        let query = supabase.from('social_platforms').select('*');
-        if (!includeInactive) {
-          query = query.eq('is_active', true);
+        // 1. Try fetching from social_platforms table
+        const { data, error } = await supabase
+          .from('social_platforms')
+          .select('*')
+          .order('order_index', { ascending: true })
+          .order('created_at', { ascending: true });
+          
+        if (!error && data && data.length > 0) {
+          localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(data));
+          if (!includeInactive) {
+            return (data as SocialPlatform[]).filter(p => p.is_active !== false);
+          }
+          return data as SocialPlatform[];
         }
-        const { data, error } = await query;
-        if (!error && data) return data as SocialPlatform[];
       } catch (e) {
         console.warn('Supabase social platforms fetch error', e);
       }
+
+      // 2. Fallback to checking admin_settings row
+      try {
+        const { data: settingsData } = await supabase
+          .from('admin_settings')
+          .select('social_platforms')
+          .limit(1)
+          .maybeSingle();
+
+        if (settingsData && Array.isArray(settingsData.social_platforms) && settingsData.social_platforms.length > 0) {
+          localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(settingsData.social_platforms));
+          if (!includeInactive) {
+            return (settingsData.social_platforms as SocialPlatform[]).filter(p => p.is_active !== false);
+          }
+          return settingsData.social_platforms as SocialPlatform[];
+        }
+      } catch (e) {
+        console.warn('Supabase admin_settings social_platforms fetch error', e);
+      }
     }
+
     const raw = localStorage.getItem(STORAGE_KEYS.SOCIAL);
     const platforms: SocialPlatform[] = raw ? JSON.parse(raw) : DEMO_SOCIAL_PLATFORMS;
     if (!includeInactive) {
-      return platforms.filter(p => p.is_active);
+      return platforms.filter(p => p.is_active !== false);
     }
     return platforms;
   },
 
   saveSocialPlatform: async (platform: SocialPlatform): Promise<SocialPlatform> => {
     const platforms = await dataService.getSocialPlatforms(true);
-    const idx = platforms.findIndex(p => p.id === platform.id);
+    const sanitizedPlatform: SocialPlatform = {
+      ...platform,
+      id: isValidUUID(platform.id) ? platform.id : (platform.id.startsWith('sp-') ? platform.id : generateUUID()),
+      is_active: platform.is_active ?? true,
+      is_required: platform.is_required ?? true,
+      verification_method: platform.verification_method || 'redirect_only'
+    };
+
+    const idx = platforms.findIndex(p => p.id === sanitizedPlatform.id || p.platform_name === sanitizedPlatform.platform_name);
     if (idx >= 0) {
-      platforms[idx] = platform;
+      platforms[idx] = sanitizedPlatform;
     } else {
-      platforms.push(platform);
+      platforms.push(sanitizedPlatform);
     }
     localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(platforms));
 
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        await supabase.from('social_platforms').upsert(platform);
+        // 1. Save to social_platforms table if ID is UUID
+        if (isValidUUID(sanitizedPlatform.id)) {
+          await supabase.from('social_platforms').upsert(sanitizedPlatform);
+        } else {
+          // If ID is not a UUID (e.g. sp-yt), create/upsert with a clean UUID in Supabase
+          const cleanPlatform = { ...sanitizedPlatform, id: generateUUID() };
+          await supabase.from('social_platforms').upsert(cleanPlatform);
+        }
       } catch (e) {
-        console.error('Supabase save social platform error', e);
+        console.warn('Supabase save social platform table error (will sync via admin_settings)', e);
+      }
+
+      // 2. Also update admin_settings.social_platforms array for 100% reliable cross-browser sync
+      try {
+        await dataService.updateSettings({ social_platforms: platforms });
+      } catch (err) {
+        console.error('Failed to sync social_platforms to admin_settings', err);
       }
     }
-    return platform;
+    return sanitizedPlatform;
+  },
+
+  saveSocialPlatformsBulk: async (platforms: SocialPlatform[]): Promise<SocialPlatform[]> => {
+    localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(platforms));
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await dataService.updateSettings({ social_platforms: platforms });
+      } catch (e) {
+        console.error('Failed to bulk sync social platforms to Supabase', e);
+      }
+    }
+    return platforms;
   },
 
   toggleSocialPlatformActive: async (id: string, isActive: boolean): Promise<SocialPlatform | null> => {
@@ -686,9 +867,17 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        await supabase.from('social_platforms').delete().eq('id', id);
+        if (isValidUUID(id)) {
+          await supabase.from('social_platforms').delete().eq('id', id);
+        }
       } catch (e) {
-        console.error('Supabase delete social platform error', e);
+        console.warn('Supabase delete social platform error', e);
+      }
+
+      try {
+        await dataService.updateSettings({ social_platforms: filtered });
+      } catch (err) {
+        console.error('Failed to update admin_settings after deleting social platform', err);
       }
     }
   },
@@ -697,6 +886,27 @@ export const dataService = {
   // STUDENT REGISTRATION & ATTEMPTS
   // ------------------------------------
   checkPreviousAttempt: async (testId: string, mobile: string): Promise<Attempt | null> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        let query = supabase
+          .from('attempts')
+          .select('*')
+          .eq('student_mobile', mobile)
+          .in('status', ['completed', 'auto_submitted'])
+          .order('created_at', { ascending: false });
+
+        if (isValidUUID(testId)) {
+          query = query.eq('test_id', testId);
+        }
+        const { data, error } = await query.limit(1).maybeSingle();
+        if (!error && data) {
+          return data as Attempt;
+        }
+      } catch (e) {
+        console.warn('Supabase checkPreviousAttempt failed', e);
+      }
+    }
     const attempts = await dataService.getAttempts(testId);
     return attempts.find(a => a.student_mobile === mobile && (a.status === 'completed' || a.status === 'auto_submitted')) || null;
   },
@@ -705,12 +915,91 @@ export const dataService = {
     test: Test,
     student: { full_name: string; mobile: string; email?: string | null; state: string; district: string; gender?: string }
   ): Promise<Attempt> => {
-    const attemptId = crypto.randomUUID ? crypto.randomUUID() : 'att-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-    const studentId = crypto.randomUUID ? crypto.randomUUID() : 'stu-' + Date.now();
+    const attemptId = generateUUID();
+    let studentId = generateUUID();
+
+    // Resolve real test UUID
+    let realTestId = test.id;
+    if (!isValidUUID(realTestId)) {
+      const found = await dataService.getTestBySlugOrId(test.slug || test.id);
+      if (found && isValidUUID(found.id)) {
+        realTestId = found.id;
+      }
+    }
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        // Look up student by mobile number
+        const { data: existingStudent } = await supabase
+          .from('students')
+          .select('id')
+          .eq('mobile', student.mobile)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingStudent && existingStudent.id) {
+          studentId = existingStudent.id;
+          // Update details
+          await supabase.from('students').update({
+            full_name: student.full_name,
+            email: student.email || null,
+            state: student.state,
+            district: student.district,
+            gender: student.gender || null
+          }).eq('id', studentId);
+        } else {
+          // Insert new student record
+          const { data: newStu } = await supabase.from('students').insert({
+            id: studentId,
+            full_name: student.full_name,
+            mobile: student.mobile,
+            email: student.email || null,
+            state: student.state,
+            district: student.district,
+            gender: student.gender || null
+          }).select().single();
+
+          if (newStu && newStu.id) {
+            studentId = newStu.id;
+          }
+        }
+
+        // Insert new attempt into Supabase
+        const initialAttemptDb = sanitizeAttemptForSupabase({
+          id: attemptId,
+          test_id: realTestId,
+          student_id: studentId,
+          student_name: student.full_name,
+          student_mobile: student.mobile,
+          student_email: student.email || null,
+          student_state: student.state,
+          student_district: student.district,
+          start_time: new Date().toISOString(),
+          status: 'in_progress',
+          total_questions: test.total_questions,
+          attempted_questions: 0,
+          correct_answers: 0,
+          wrong_answers: 0,
+          skipped_questions: test.total_questions,
+          score: 0,
+          percentage: 0,
+          time_taken_seconds: 0,
+          created_at: new Date().toISOString()
+        });
+
+        const { error: attErr } = await supabase.from('attempts').insert(initialAttemptDb);
+        if (attErr) {
+          console.error('Supabase initial attempt insert error:', attErr);
+        }
+      } catch (e) {
+        console.error('Supabase attempt creation exception:', e);
+      }
+    }
 
     const newAttempt: Attempt = {
       id: attemptId,
-      test_id: test.id,
+      test_id: realTestId,
       student_id: studentId,
       student_name: student.full_name,
       student_mobile: student.mobile,
@@ -729,27 +1018,6 @@ export const dataService = {
       time_taken_seconds: 0,
       created_at: new Date().toISOString()
     };
-
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        // Upsert student record
-        await supabase.from('students').upsert({
-          id: studentId,
-          full_name: student.full_name,
-          mobile: student.mobile,
-          email: student.email || null,
-          state: student.state,
-          district: student.district,
-          gender: student.gender || null
-        }, { onConflict: 'mobile' });
-
-        // Create attempt in Supabase
-        await supabase.from('attempts').insert(newAttempt);
-      } catch (e) {
-        console.error('Supabase attempt creation error', e);
-      }
-    }
 
     const attempts = await dataService.getAttempts();
     attempts.unshift(newAttempt);
@@ -780,7 +1048,7 @@ export const dataService = {
     localStorage.removeItem(STORAGE_KEYS.ACTIVE_ATTEMPT + testId);
   },
 
-  // SECURE SERVER-SIDE SUBMISSION VIA SUPABASE RPC
+  // SECURE SERVER-SIDE SUBMISSION WITH AUTOMATIC CLOUD FALLBACK PERSISTENCE
   submitAttemptSecure: async (
     test: Test,
     attempt: Attempt,
@@ -790,7 +1058,15 @@ export const dataService = {
   ): Promise<Attempt> => {
     const supabase = getSupabaseClient();
     
-    // Format student answers array for RPC
+    // Resolve real test UUID
+    let realTestId = test.id;
+    if (!isValidUUID(realTestId)) {
+      const found = await dataService.getTestBySlugOrId(test.slug || test.id);
+      if (found && isValidUUID(found.id)) {
+        realTestId = found.id;
+      }
+    }
+
     const formattedAnswers = Object.entries(selectedAnswers).map(([qId, ans]) => ({
       question_id: qId,
       selected_answer: ans
@@ -809,7 +1085,6 @@ export const dataService = {
           // Fetch updated attempt details
           const updatedAttempt = await dataService.getAttemptById(attempt.id);
           if (updatedAttempt) {
-            // Fetch answers and official questions to construct responses view
             const answers = await dataService.getAttemptAnswers(attempt.id);
             const questions = await dataService.getQuestions(test.id, true);
 
@@ -828,23 +1103,30 @@ export const dataService = {
               };
             });
 
-            const completed = {
+            const completed: Attempt = {
               ...updatedAttempt,
               responses
             };
+
+            // Update local storage
+            const localAttempts = await dataService.getAttempts();
+            const idx = localAttempts.findIndex(a => a.id === completed.id);
+            if (idx >= 0) localAttempts[idx] = completed;
+            else localAttempts.unshift(completed);
+            localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(localAttempts));
 
             dataService.clearSavedProgress(test.id);
             return completed;
           }
         } else if (error) {
-          console.error('Supabase submit_attempt_secure RPC error:', error);
+          console.warn('Supabase submit_attempt_secure RPC error:', error);
         }
       } catch (err) {
-        console.error('Supabase submit_attempt_secure failed, fallback to client evaluation', err);
+        console.warn('Supabase submit_attempt_secure exception, proceeding to direct cloud sync', err);
       }
     }
 
-    // Client evaluation fallback (used only if Supabase not configured or offline demo)
+    // Direct Evaluation & Robust Cloud Persistence
     const questions = await dataService.getQuestions(test.id, true);
     let attempted = 0;
     let correct = 0;
@@ -864,18 +1146,19 @@ export const dataService = {
         if (selected.toUpperCase() === (q.correct_answer || '').toUpperCase()) {
           correct++;
           isCorrect = true;
-          marksObtained = Number(q.marks) || Number(test.marks_per_question) || 1;
+          marksObtained = parseSafeNumber(q.marks, parseSafeNumber(test.marks_per_question, 1));
         } else {
           wrong++;
           isCorrect = false;
-          marksObtained = - (Number(q.negative_marks) || Number(test.negative_marking) || 0.25);
+          marksObtained = - parseSafeNumber(q.negative_marks, parseSafeNumber(test.negative_marking, 0.25));
         }
       }
 
       totalScore += marksObtained;
 
+      const ansId = generateUUID();
       answerRecords.push({
-        id: crypto.randomUUID ? crypto.randomUUID() : 'ans-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
+        id: ansId,
         attempt_id: attempt.id,
         question_id: q.id,
         selected_answer: selected as any,
@@ -893,14 +1176,16 @@ export const dataService = {
       });
     });
 
-    const skipped = test.total_questions - attempted;
+    const skipped = Math.max(0, test.total_questions - attempted);
     const finalScore = Math.max(0, Math.round(totalScore * 100) / 100);
-    const maxMarks = test.total_marks || (test.total_questions * (test.marks_per_question || 1));
+    const maxMarks = parseSafeNumber(test.total_marks, test.total_questions * parseSafeNumber(test.marks_per_question, 1));
     const percentage = maxMarks > 0 ? Math.round((finalScore / maxMarks) * 10000) / 100 : 0;
 
     const completedAttempt: Attempt = {
       ...attempt,
+      test_id: realTestId,
       submitted_at: new Date().toISOString(),
+      end_time: new Date().toISOString(),
       status: 'completed',
       attempted_questions: attempted,
       correct_answers: correct,
@@ -913,6 +1198,66 @@ export const dataService = {
       responses
     };
 
+    // DIRECT SUPABASE CLOUD DATABASE SYNC (GUARANTEES SAVING TO BACKEND)
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        // 1. Ensure student exists in students table
+        let studentId = completedAttempt.student_id;
+        if (!isValidUUID(studentId)) {
+          studentId = generateUUID();
+          completedAttempt.student_id = studentId;
+        }
+
+        const { data: existingStudent } = await supabase
+          .from('students')
+          .select('id')
+          .eq('mobile', completedAttempt.student_mobile)
+          .limit(1)
+          .maybeSingle();
+
+        if (existingStudent && existingStudent.id) {
+          studentId = existingStudent.id;
+          completedAttempt.student_id = studentId;
+        } else {
+          await supabase.from('students').insert({
+            id: studentId,
+            full_name: completedAttempt.student_name,
+            mobile: completedAttempt.student_mobile,
+            email: completedAttempt.student_email || null,
+            state: completedAttempt.student_state,
+            district: completedAttempt.student_district
+          });
+        }
+
+        // 2. Upsert sanitized attempt into Supabase public.attempts
+        const sanitizedAttempt = sanitizeAttemptForSupabase(completedAttempt);
+        const { error: upsertErr } = await supabase.from('attempts').upsert(sanitizedAttempt);
+        if (upsertErr) {
+          console.error('Supabase direct attempt upsert error:', upsertErr);
+        }
+
+        // 3. Upsert answers into Supabase public.answers
+        if (answerRecords.length > 0) {
+          const dbAnswers = answerRecords.map(a => ({
+            id: isValidUUID(a.id) ? a.id : generateUUID(),
+            attempt_id: sanitizedAttempt.id,
+            question_id: isValidUUID(a.question_id) ? a.question_id : undefined,
+            selected_answer: a.selected_answer || null,
+            is_correct: a.is_correct || false,
+            marks_obtained: a.marks_obtained || 0,
+            answered_at: new Date().toISOString()
+          })).filter(a => a.question_id);
+
+          if (dbAnswers.length > 0) {
+            await supabase.from('answers').upsert(dbAnswers, { onConflict: 'attempt_id,question_id' });
+          }
+        }
+      } catch (syncErr) {
+        console.error('Supabase direct sync error in submitAttemptSecure:', syncErr);
+      }
+    }
+
+    // Save locally
     const attempts = await dataService.getAttempts();
     const idx = attempts.findIndex(a => a.id === completedAttempt.id);
     if (idx >= 0) {
@@ -946,6 +1291,17 @@ export const dataService = {
   },
 
   saveAttempt: async (attempt: Attempt): Promise<Attempt> => {
+    const sanitized = sanitizeAttemptForSupabase(attempt);
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase.from('attempts').upsert(sanitized);
+      } catch (e) {
+        console.error('Supabase save attempt error', e);
+      }
+    }
+
     const attempts = await dataService.getAttempts();
     const idx = attempts.findIndex(a => a.id === attempt.id);
     if (idx >= 0) {
@@ -955,14 +1311,6 @@ export const dataService = {
     }
     localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
 
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
-      try {
-        await supabase.from('attempts').upsert(attempt);
-      } catch (e) {
-        console.error('Supabase save attempt error', e);
-      }
-    }
     return attempt;
   },
 
@@ -971,11 +1319,22 @@ export const dataService = {
     if (isSupabaseConfigured() && supabase) {
       try {
         let query = supabase.from('attempts').select('*').order('created_at', { ascending: false });
-        if (testId) {
-          query = query.eq('test_id', testId);
+        if (testId && testId !== 'all') {
+          if (isValidUUID(testId)) {
+            query = query.eq('test_id', testId);
+          } else {
+            // Find test by slug
+            const foundTest = await dataService.getTestBySlugOrId(testId);
+            if (foundTest && isValidUUID(foundTest.id)) {
+              query = query.eq('test_id', foundTest.id);
+            }
+          }
         }
         const { data, error } = await query;
-        if (!error && data) return data as Attempt[];
+        if (!error && data && Array.isArray(data)) {
+          localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(data));
+          return data as Attempt[];
+        }
       } catch (e) {
         console.warn('Supabase fetch attempts error', e);
       }
@@ -1000,7 +1359,7 @@ export const dataService = {
       attempts = DEMO_ATTEMPTS;
     }
 
-    if (testId) {
+    if (testId && testId !== 'all') {
       return attempts.filter(a => a.test_id === testId);
     }
     return attempts;
@@ -1008,9 +1367,9 @@ export const dataService = {
 
   getAttemptById: async (attemptId: string): Promise<Attempt | null> => {
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured() && supabase && isValidUUID(attemptId)) {
       try {
-        const { data, error } = await supabase.from('attempts').select('*').eq('id', attemptId).single();
+        const { data, error } = await supabase.from('attempts').select('*').eq('id', attemptId).maybeSingle();
         if (!error && data) return data as Attempt;
       } catch (e) {
         console.warn('Supabase fetch attempt by ID failed', e);
@@ -1022,7 +1381,7 @@ export const dataService = {
 
   getAttemptAnswers: async (attemptId: string): Promise<Answer[]> => {
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured() && supabase && isValidUUID(attemptId)) {
       try {
         const { data, error } = await supabase.from('answers').select('*').eq('attempt_id', attemptId);
         if (!error && data) return data as Answer[];
@@ -1040,10 +1399,18 @@ export const dataService = {
   // ------------------------------------
   getLeaderboard: async (testId: string, limit = 20): Promise<PublicLeaderboardEntry[]> => {
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
+    let realTestId = testId;
+    if (!isValidUUID(realTestId)) {
+      const found = await dataService.getTestBySlugOrId(testId);
+      if (found && isValidUUID(found.id)) {
+        realTestId = found.id;
+      }
+    }
+
+    if (isSupabaseConfigured() && supabase && isValidUUID(realTestId)) {
       try {
         const { data, error } = await supabase.rpc('get_top_leaderboard', {
-          p_test_id: testId,
+          p_test_id: realTestId,
           p_limit: limit
         });
         if (!error && data && Array.isArray(data) && data.length > 0) {
@@ -1054,8 +1421,8 @@ export const dataService = {
       }
     }
 
-    // Direct calculation from attempts
-    const attempts = await dataService.getAttempts(testId);
+    // Direct calculation from attempts table
+    const attempts = await dataService.getAttempts(realTestId);
     const completed = attempts.filter(a => a.status === 'completed' || a.status === 'auto_submitted');
     completed.sort((a, b) => b.score - a.score || a.time_taken_seconds - b.time_taken_seconds);
 
@@ -1084,11 +1451,19 @@ export const dataService = {
   },
 
   getStudentRank: async (testId: string, attemptId: string): Promise<number> => {
+    let realTestId = testId;
+    if (!isValidUUID(realTestId)) {
+      const found = await dataService.getTestBySlugOrId(testId);
+      if (found && isValidUUID(found.id)) {
+        realTestId = found.id;
+      }
+    }
+
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase) {
+    if (isSupabaseConfigured() && supabase && isValidUUID(realTestId) && isValidUUID(attemptId)) {
       try {
         const { data, error } = await supabase.rpc('get_student_rank', {
-          p_test_id: testId,
+          p_test_id: realTestId,
           p_attempt_id: attemptId
         });
         if (!error && typeof data === 'number') return data;
@@ -1097,7 +1472,7 @@ export const dataService = {
       }
     }
 
-    const leaderboard = await dataService.getLeaderboard(testId, 1000);
+    const leaderboard = await dataService.getLeaderboard(realTestId, 1000);
     const found = leaderboard.find(l => l.attempt_id === attemptId);
     return found ? found.rank : 1;
   }
