@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
 import { Database, CheckCircle, Copy, Check, ExternalLink } from 'lucide-react';
-import { isSupabaseConfigured, getSupabaseClient } from '../../lib/supabase';
+import { isSupabaseConfigured, getSupabaseClient, getStoredSupabaseConfig } from '../../lib/supabase';
 
 interface SupabaseSetupModalProps {
   isOpen: boolean;
@@ -23,8 +23,9 @@ export const SupabaseSetupModal: React.FC<SupabaseSetupModalProps> = ({
       onSuccessToast(msg);
     }
   };
-  const [url, setUrl] = useState(localStorage.getItem('gradeup_supabase_url') || '');
-  const [key, setKey] = useState(localStorage.getItem('gradeup_supabase_key') || '');
+  const config = getStoredSupabaseConfig();
+  const [url, setUrl] = useState(config.url || '');
+  const [key, setKey] = useState(config.key || '');
   const [isTesting, setIsTesting] = useState(false);
   const [testStatus, setTestStatus] = useState<'none' | 'success' | 'error'>('none');
   const [copiedSql, setCopiedSql] = useState(false);
