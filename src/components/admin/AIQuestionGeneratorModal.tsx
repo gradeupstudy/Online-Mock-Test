@@ -179,22 +179,25 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="AI Mock Test Question Generator (Multi-Key Rotation)" maxWidth="4xl">
+    <Modal isOpen={isOpen} onClose={onClose} title="AI Mock Test Question Generator (Gemini 3.7 Flash + Fallback)" maxWidth="4xl">
       <div className="space-y-6">
 
-        {/* GEMINI MULTI-KEY ROTATION HEADER & MANAGER TOGGLE */}
+        {/* GEMINI MULTI-KEY & MULTI-MODEL ROTATION HEADER */}
         <div className="bg-gradient-to-r from-indigo-900 via-blue-900 to-slate-900 p-5 rounded-2xl text-white shadow-md relative overflow-hidden">
           <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider flex items-center gap-1">
-                  <Zap className="w-3 h-3 fill-slate-950" /> Gemini 3.7 Flash Engine
+                  <Zap className="w-3 h-3 fill-slate-950" /> Gemini 3.7 Flash Primary
+                </span>
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold uppercase tracking-wider">
+                  Auto Model Fallback
                 </span>
               </div>
-              <h3 className="text-lg font-black mt-1">Automatic Multi-Key Rotation Connected</h3>
+              <h3 className="text-lg font-black mt-1">Multi-Model & Multi-Key Failover Engine</h3>
               <p className="text-xs text-blue-200 mt-0.5">
                 {savedKeys.length > 0
-                  ? `Connected to ${savedKeys.length} Gemini API Key(s). If Key #1 expires or hits quota limit, Key #2 takes over automatically.`
+                  ? `Active on ${savedKeys.length} Gemini API Key(s). Uses Gemini 3.7 Flash first; if 3.7 Flash experiences high demand (503/429), it auto-cascades to fallback models instantly.`
                   : 'No Gemini API Keys added yet. Click Manage Keys below to paste your Gemini API Keys.'}
               </p>
             </div>
@@ -220,12 +223,12 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
                 </h4>
               </div>
               <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 dark:bg-indigo-950 px-2.5 py-1 rounded-lg">
-                Auto-Fallback Enabled
+                Multi-Key & Model Cascade Active
               </span>
             </div>
 
             <p className="text-xs text-slate-500">
-              Paste your Gemini API Keys below (one key per line or separated by comma). The system will automatically switch to the next key whenever an expired or quota error happens.
+              Paste your Gemini API Keys below (one key per line or separated by comma). The system prioritizes Gemini 3.7 Flash and automatically shifts to fallback models and rotates through your API keys if high demand (503/429) or quota errors occur.
             </p>
 
             <textarea

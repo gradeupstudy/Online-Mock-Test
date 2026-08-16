@@ -3,6 +3,18 @@ import { Question } from '../types';
 
 const STORAGE_KEY = 'gradeup_gemini_api_keys';
 
+/**
+ * Model Cascade Priority:
+ * 1. 'gemini-3.7-flash' (Primary model: Highest quality & speed, always tried FIRST)
+ * 2. 'gemini-flash-latest' (Secondary fallback: Stable flash alias)
+ * 3. 'gemini-3.1-flash-lite' (Tertiary fallback: High availability, fast, ultra-resilient)
+ */
+export const GEMINI_MODEL_CASCADE = [
+  'gemini-3.7-flash',
+  'gemini-flash-latest',
+  'gemini-3.1-flash-lite',
+] as const;
+
 export interface AIGenerateParams {
   subject: string;
   section?: string;
@@ -103,7 +115,78 @@ export const aiService = {
   },
 
   /**
-   * Execute with automatic Multi-Key rotation fallback
+   * Robust Model Cascade Engine:
+   * Always executes with 'gemini-3.7-flash' FIRST.
+   * If 'gemini-3.7-flash' experiences high demand (503 / 429 / overloaded),
+   * it automatically cascades to 'gemini-flash-latest' and 'gemini-3.1-flash-lite'.
+   */
+  generateWithModelFallback: async (
+    ai: GoogleGenAI,
+    requestParams: {
+      contents: any;
+      config?: any;
+    },
+    onLog?: (msg: string) => void,
+    operationName: string = 'AI Operation'
+  ) => {
+    let lastError: any = null;
+
+    for (let mIdx = 0; mIdx < GEMINI_MODEL_CASCADE.length; mIdx++) {
+      const currentModel = GEMINI_MODEL_CASCADE[mIdx];
+      const isPrimary = mIdx === 0;
+
+      try {
+        if (!isPrimary) {
+          onLog?.(`⚡ [Model Cascade] Switched to fallback engine: '${currentModel}'...`);
+        }
+
+        const response = await ai.models.generateContent({
+          model: currentModel,
+          contents: requestParams.contents,
+          config: requestParams.config,
+        });
+
+        if (!isPrimary) {
+          onLog?.(`✅ [Model Success] Generated successfully using fallback engine '${currentModel}'!`);
+        }
+
+        return response;
+      } catch (err: any) {
+        lastError = err;
+        const errMsg = err?.message || String(err);
+        console.warn(`Model '${currentModel}' failed for ${operationName}:`, errMsg);
+
+        const isLastModel = mIdx === GEMINI_MODEL_CASCADE.length - 1;
+        if (!isLastModel) {
+          const nextModel = GEMINI_MODEL_CASCADE[mIdx + 1];
+          if (
+            errMsg.includes('503') ||
+            errMsg.includes('high demand') ||
+            errMsg.includes('overloaded') ||
+            errMsg.includes('Resource has been exhausted') ||
+            errMsg.includes('429') ||
+            errMsg.includes('quota') ||
+            errMsg.includes('unavailable') ||
+            errMsg.includes('temporarily unavailable') ||
+            errMsg.includes('The model is overloaded')
+          ) {
+            onLog?.(
+              `⚠️ [Model Busy] '${currentModel}' is experiencing high demand (503/429). Auto-shifting to lower fallback engine '${nextModel}'...`
+            );
+          } else {
+            onLog?.(
+              `⚠️ [Model Failover] '${currentModel}' error (${errMsg.substring(0, 50)}...). Shifting to fallback engine '${nextModel}'...`
+            );
+          }
+        }
+      }
+    }
+
+    throw lastError || new Error(`All fallback models failed for ${operationName}.`);
+  },
+
+  /**
+   * Execute with automatic Multi-Key rotation & Multi-Model fallback
    */
   executeWithKeyRotation: async <T>(
     operationName: string,
@@ -128,7 +211,7 @@ export const aiService = {
           ? `${currentKey.substring(0, 4)}...${currentKey.substring(currentKey.length - 4)}`
           : 'Key #' + (i + 1);
 
-      onLog?.(`🔑 [${operationName}] Trying Gemini API Key #${i + 1} (${maskedKey})...`);
+      onLog?.(`🔑 [${operationName}] Trying Gemini API Key #${i + 1} (${maskedKey}) with Gemini 3.7 Flash Engine...`);
 
       try {
         const ai = new GoogleGenAI({
@@ -164,7 +247,7 @@ export const aiService = {
   },
 
   /**
-   * Generate questions using Gemini AI with automatic API Key rotation.
+   * Generate questions using Gemini AI with automatic Model Cascade & Multi-Key rotation.
    */
   generateQuestions: async (params: AIGenerateParams): Promise<Question[]> => {
     const targetCount = Math.max(1, Number(params.count) || 5);
@@ -199,41 +282,45 @@ CRITICAL RULES:
 9. Output JSON array with EXACTLY ${targetCount} items.
         `.trim();
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: promptText,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  question_text: { type: Type.STRING },
-                  option_a: { type: Type.STRING },
-                  option_b: { type: Type.STRING },
-                  option_c: { type: Type.STRING },
-                  option_d: { type: Type.STRING },
-                  correct_answer: { type: Type.STRING },
-                  explanation: { type: Type.STRING },
-                  subject: { type: Type.STRING },
-                  section: { type: Type.STRING },
-                  chapter: { type: Type.STRING },
-                  topic: { type: Type.STRING },
-                  difficulty: { type: Type.STRING },
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question_text: { type: Type.STRING },
+                    option_a: { type: Type.STRING },
+                    option_b: { type: Type.STRING },
+                    option_c: { type: Type.STRING },
+                    option_d: { type: Type.STRING },
+                    correct_answer: { type: Type.STRING },
+                    explanation: { type: Type.STRING },
+                    subject: { type: Type.STRING },
+                    section: { type: Type.STRING },
+                    chapter: { type: Type.STRING },
+                    topic: { type: Type.STRING },
+                    difficulty: { type: Type.STRING },
+                  },
+                  required: [
+                    'question_text',
+                    'option_a',
+                    'option_b',
+                    'option_c',
+                    'option_d',
+                    'correct_answer',
+                  ],
                 },
-                required: [
-                  'question_text',
-                  'option_a',
-                  'option_b',
-                  'option_c',
-                  'option_d',
-                  'correct_answer',
-                ],
               },
             },
           },
-        });
+          params.onLog,
+          'Generate Questions'
+        );
 
         const rawText = response.text || '';
         if (!rawText) {
@@ -319,41 +406,45 @@ PARSING INSTRUCTIONS:
 Strict JSON Output Schema: Return a JSON ARRAY of parsed question objects.
         `.trim();
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: promptText,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  question_text: { type: Type.STRING },
-                  option_a: { type: Type.STRING },
-                  option_b: { type: Type.STRING },
-                  option_c: { type: Type.STRING },
-                  option_d: { type: Type.STRING },
-                  correct_answer: { type: Type.STRING },
-                  explanation: { type: Type.STRING },
-                  subject: { type: Type.STRING },
-                  section: { type: Type.STRING },
-                  chapter: { type: Type.STRING },
-                  topic: { type: Type.STRING },
-                  difficulty: { type: Type.STRING },
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question_text: { type: Type.STRING },
+                    option_a: { type: Type.STRING },
+                    option_b: { type: Type.STRING },
+                    option_c: { type: Type.STRING },
+                    option_d: { type: Type.STRING },
+                    correct_answer: { type: Type.STRING },
+                    explanation: { type: Type.STRING },
+                    subject: { type: Type.STRING },
+                    section: { type: Type.STRING },
+                    chapter: { type: Type.STRING },
+                    topic: { type: Type.STRING },
+                    difficulty: { type: Type.STRING },
+                  },
+                  required: [
+                    'question_text',
+                    'option_a',
+                    'option_b',
+                    'option_c',
+                    'option_d',
+                    'correct_answer',
+                  ],
                 },
-                required: [
-                  'question_text',
-                  'option_a',
-                  'option_b',
-                  'option_c',
-                  'option_d',
-                  'correct_answer',
-                ],
               },
             },
           },
-        });
+          params.onLog,
+          'Smart Parse Questions'
+        );
 
         const rawText = response.text || '';
         if (!rawText) {
@@ -458,10 +549,14 @@ INSTRUCTIONS:
 4. Output ONLY the raw explanation text (no extra greetings, no markdown backticks enclosing the entire response).
         `.trim();
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: promptText,
-        });
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+          },
+          onLog,
+          'Single Explanation'
+        );
 
         const text = response.text?.trim() || '';
         if (!text) {
@@ -549,25 +644,29 @@ OUTPUT REQUIREMENT:
 Return a JSON array containing an explanation object for each question matching its ID.
 `           .trim();
 
-            const response = await ai.models.generateContent({
-              model: 'gemini-3.7-flash',
-              contents: promptText,
-              config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      id: { type: Type.STRING },
-                      explanation: { type: Type.STRING },
-                      confirmedAnswer: { type: Type.STRING },
+            const response = await aiService.generateWithModelFallback(
+              ai,
+              {
+                contents: promptText,
+                config: {
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        explanation: { type: Type.STRING },
+                        confirmedAnswer: { type: Type.STRING },
+                      },
+                      required: ['id', 'explanation'],
                     },
-                    required: ['id', 'explanation'],
                   },
                 },
               },
-            });
+              (msg) => onProgress?.(i, total, msg),
+              `Bulk Explanations (${startIdx}-${endIdx})`
+            );
 
             const rawText = response.text || '';
             let parsed = JSON.parse(rawText);
@@ -696,118 +795,122 @@ FOR EACH MCQ:
 Return a JSON array where each object has "id" matching the MCQ ID and the full audit "report".
 `.trim();
 
-            const response = await ai.models.generateContent({
-              model: 'gemini-3.7-flash',
-              contents: promptText,
-              config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      id: { type: Type.STRING },
-                      overallQualityScore: { type: Type.INTEGER },
-                      qualityRating: { type: Type.STRING },
-                      factualAccuracy: {
-                        type: Type.OBJECT,
-                        properties: {
-                          status: { type: Type.STRING },
-                          confirmedAnswer: { type: Type.STRING },
-                          remarks: { type: Type.STRING },
+            const response = await aiService.generateWithModelFallback(
+              ai,
+              {
+                contents: promptText,
+                config: {
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        id: { type: Type.STRING },
+                        overallQualityScore: { type: Type.INTEGER },
+                        qualityRating: { type: Type.STRING },
+                        factualAccuracy: {
+                          type: Type.OBJECT,
+                          properties: {
+                            status: { type: Type.STRING },
+                            confirmedAnswer: { type: Type.STRING },
+                            remarks: { type: Type.STRING },
+                          },
+                          required: ['status', 'confirmedAnswer', 'remarks'],
                         },
-                        required: ['status', 'confirmedAnswer', 'remarks'],
-                      },
-                      linguisticQuality: {
-                        type: Type.OBJECT,
-                        properties: {
-                          score: { type: Type.INTEGER },
-                          clarity: { type: Type.STRING },
-                          grammarFeedback: { type: Type.STRING },
+                        linguisticQuality: {
+                          type: Type.OBJECT,
+                          properties: {
+                            score: { type: Type.INTEGER },
+                            clarity: { type: Type.STRING },
+                            grammarFeedback: { type: Type.STRING },
+                          },
+                          required: ['score', 'clarity', 'grammarFeedback'],
                         },
-                        required: ['score', 'clarity', 'grammarFeedback'],
-                      },
-                      distractorAnalysis: {
-                        type: Type.OBJECT,
-                        properties: {
-                          quality: { type: Type.STRING },
-                          remarks: { type: Type.STRING },
-                          suggestions: { type: Type.STRING },
+                        distractorAnalysis: {
+                          type: Type.OBJECT,
+                          properties: {
+                            quality: { type: Type.STRING },
+                            remarks: { type: Type.STRING },
+                            suggestions: { type: Type.STRING },
+                          },
+                          required: ['quality', 'remarks', 'suggestions'],
                         },
-                        required: ['quality', 'remarks', 'suggestions'],
-                      },
-                      explanationDepth: {
-                        type: Type.OBJECT,
-                        properties: {
-                          quality: { type: Type.STRING },
-                          remarks: { type: Type.STRING },
+                        explanationDepth: {
+                          type: Type.OBJECT,
+                          properties: {
+                            quality: { type: Type.STRING },
+                            remarks: { type: Type.STRING },
+                          },
+                          required: ['quality', 'remarks'],
                         },
-                        required: ['quality', 'remarks'],
-                      },
-                      difficultyCalibration: {
-                        type: Type.OBJECT,
-                        properties: {
-                          assessedDifficulty: { type: Type.STRING },
-                          targetExamSuitability: { type: Type.STRING },
+                        difficultyCalibration: {
+                          type: Type.OBJECT,
+                          properties: {
+                            assessedDifficulty: { type: Type.STRING },
+                            targetExamSuitability: { type: Type.STRING },
+                          },
+                          required: ['assessedDifficulty', 'targetExamSuitability'],
                         },
-                        required: ['assessedDifficulty', 'targetExamSuitability'],
-                      },
-                      syllabusTaxonomy: {
-                        type: Type.OBJECT,
-                        properties: {
-                          recommendedSubject: { type: Type.STRING },
-                          recommendedChapter: { type: Type.STRING },
-                          recommendedTopic: { type: Type.STRING },
+                        syllabusTaxonomy: {
+                          type: Type.OBJECT,
+                          properties: {
+                            recommendedSubject: { type: Type.STRING },
+                            recommendedChapter: { type: Type.STRING },
+                            recommendedTopic: { type: Type.STRING },
+                          },
+                          required: ['recommendedSubject', 'recommendedChapter', 'recommendedTopic'],
                         },
-                        required: ['recommendedSubject', 'recommendedChapter', 'recommendedTopic'],
-                      },
-                      keyRecommendations: {
-                        type: Type.ARRAY,
-                        items: { type: Type.STRING },
-                      },
-                      improvedVersion: {
-                        type: Type.OBJECT,
-                        properties: {
-                          question_text: { type: Type.STRING },
-                          option_a: { type: Type.STRING },
-                          option_b: { type: Type.STRING },
-                          option_c: { type: Type.STRING },
-                          option_d: { type: Type.STRING },
-                          correct_answer: { type: Type.STRING },
-                          explanation: { type: Type.STRING },
-                          subject: { type: Type.STRING },
-                          chapter: { type: Type.STRING },
-                          topic: { type: Type.STRING },
-                          difficulty: { type: Type.STRING },
+                        keyRecommendations: {
+                          type: Type.ARRAY,
+                          items: { type: Type.STRING },
                         },
-                        required: [
-                          'question_text',
-                          'option_a',
-                          'option_b',
-                          'option_c',
-                          'option_d',
-                          'correct_answer',
-                          'explanation',
-                        ],
+                        improvedVersion: {
+                          type: Type.OBJECT,
+                          properties: {
+                            question_text: { type: Type.STRING },
+                            option_a: { type: Type.STRING },
+                            option_b: { type: Type.STRING },
+                            option_c: { type: Type.STRING },
+                            option_d: { type: Type.STRING },
+                            correct_answer: { type: Type.STRING },
+                            explanation: { type: Type.STRING },
+                            subject: { type: Type.STRING },
+                            chapter: { type: Type.STRING },
+                            topic: { type: Type.STRING },
+                            difficulty: { type: Type.STRING },
+                          },
+                          required: [
+                            'question_text',
+                            'option_a',
+                            'option_b',
+                            'option_c',
+                            'option_d',
+                            'correct_answer',
+                            'explanation',
+                          ],
+                        },
                       },
+                      required: [
+                        'id',
+                        'overallQualityScore',
+                        'qualityRating',
+                        'factualAccuracy',
+                        'linguisticQuality',
+                        'distractorAnalysis',
+                        'explanationDepth',
+                        'difficultyCalibration',
+                        'syllabusTaxonomy',
+                        'keyRecommendations',
+                        'improvedVersion',
+                      ],
                     },
-                    required: [
-                      'id',
-                      'overallQualityScore',
-                      'qualityRating',
-                      'factualAccuracy',
-                      'linguisticQuality',
-                      'distractorAnalysis',
-                      'explanationDepth',
-                      'difficultyCalibration',
-                      'syllabusTaxonomy',
-                      'keyRecommendations',
-                      'improvedVersion',
-                    ],
                   },
                 },
               },
-            });
+              (msg) => onProgress?.(processedCount, total, msg),
+              `Bulk 360° Inspection (${startIdx}-${endIdx})`
+            );
 
             const rawText = response.text || '';
             let parsed = JSON.parse(rawText);
@@ -1049,113 +1152,117 @@ AUDIT CRITERIA:
 Return your response strictly conforming to the requested JSON schema.
         `.trim();
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.7-flash',
-          contents: promptText,
-          config: {
-            responseMimeType: 'application/json',
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                overallQualityScore: { type: Type.INTEGER },
-                qualityRating: { type: Type.STRING },
-                factualAccuracy: {
-                  type: Type.OBJECT,
-                  properties: {
-                    status: { type: Type.STRING },
-                    confirmedAnswer: { type: Type.STRING },
-                    remarks: { type: Type.STRING },
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  overallQualityScore: { type: Type.INTEGER },
+                  qualityRating: { type: Type.STRING },
+                  factualAccuracy: {
+                    type: Type.OBJECT,
+                    properties: {
+                      status: { type: Type.STRING },
+                      confirmedAnswer: { type: Type.STRING },
+                      remarks: { type: Type.STRING },
+                    },
+                    required: ['status', 'confirmedAnswer', 'remarks'],
                   },
-                  required: ['status', 'confirmedAnswer', 'remarks'],
-                },
-                linguisticQuality: {
-                  type: Type.OBJECT,
-                  properties: {
-                    score: { type: Type.INTEGER },
-                    clarity: { type: Type.STRING },
-                    grammarFeedback: { type: Type.STRING },
+                  linguisticQuality: {
+                    type: Type.OBJECT,
+                    properties: {
+                      score: { type: Type.INTEGER },
+                      clarity: { type: Type.STRING },
+                      grammarFeedback: { type: Type.STRING },
+                    },
+                    required: ['score', 'clarity', 'grammarFeedback'],
                   },
-                  required: ['score', 'clarity', 'grammarFeedback'],
-                },
-                distractorAnalysis: {
-                  type: Type.OBJECT,
-                  properties: {
-                    quality: { type: Type.STRING },
-                    remarks: { type: Type.STRING },
-                    suggestions: { type: Type.STRING },
+                  distractorAnalysis: {
+                    type: Type.OBJECT,
+                    properties: {
+                      quality: { type: Type.STRING },
+                      remarks: { type: Type.STRING },
+                      suggestions: { type: Type.STRING },
+                    },
+                    required: ['quality', 'remarks', 'suggestions'],
                   },
-                  required: ['quality', 'remarks', 'suggestions'],
-                },
-                explanationDepth: {
-                  type: Type.OBJECT,
-                  properties: {
-                    quality: { type: Type.STRING },
-                    remarks: { type: Type.STRING },
+                  explanationDepth: {
+                    type: Type.OBJECT,
+                    properties: {
+                      quality: { type: Type.STRING },
+                      remarks: { type: Type.STRING },
+                    },
+                    required: ['quality', 'remarks'],
                   },
-                  required: ['quality', 'remarks'],
-                },
-                difficultyCalibration: {
-                  type: Type.OBJECT,
-                  properties: {
-                    assessedDifficulty: { type: Type.STRING },
-                    targetExamSuitability: { type: Type.STRING },
+                  difficultyCalibration: {
+                    type: Type.OBJECT,
+                    properties: {
+                      assessedDifficulty: { type: Type.STRING },
+                      targetExamSuitability: { type: Type.STRING },
+                    },
+                    required: ['assessedDifficulty', 'targetExamSuitability'],
                   },
-                  required: ['assessedDifficulty', 'targetExamSuitability'],
-                },
-                syllabusTaxonomy: {
-                  type: Type.OBJECT,
-                  properties: {
-                    recommendedSubject: { type: Type.STRING },
-                    recommendedChapter: { type: Type.STRING },
-                    recommendedTopic: { type: Type.STRING },
+                  syllabusTaxonomy: {
+                    type: Type.OBJECT,
+                    properties: {
+                      recommendedSubject: { type: Type.STRING },
+                      recommendedChapter: { type: Type.STRING },
+                      recommendedTopic: { type: Type.STRING },
+                    },
+                    required: ['recommendedSubject', 'recommendedChapter', 'recommendedTopic'],
                   },
-                  required: ['recommendedSubject', 'recommendedChapter', 'recommendedTopic'],
-                },
-                keyRecommendations: {
-                  type: Type.ARRAY,
-                  items: { type: Type.STRING },
-                },
-                improvedVersion: {
-                  type: Type.OBJECT,
-                  properties: {
-                    question_text: { type: Type.STRING },
-                    option_a: { type: Type.STRING },
-                    option_b: { type: Type.STRING },
-                    option_c: { type: Type.STRING },
-                    option_d: { type: Type.STRING },
-                    correct_answer: { type: Type.STRING },
-                    explanation: { type: Type.STRING },
-                    subject: { type: Type.STRING },
-                    chapter: { type: Type.STRING },
-                    topic: { type: Type.STRING },
-                    difficulty: { type: Type.STRING },
+                  keyRecommendations: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
                   },
-                  required: [
-                    'question_text',
-                    'option_a',
-                    'option_b',
-                    'option_c',
-                    'option_d',
-                    'correct_answer',
-                    'explanation',
-                  ],
+                  improvedVersion: {
+                    type: Type.OBJECT,
+                    properties: {
+                      question_text: { type: Type.STRING },
+                      option_a: { type: Type.STRING },
+                      option_b: { type: Type.STRING },
+                      option_c: { type: Type.STRING },
+                      option_d: { type: Type.STRING },
+                      correct_answer: { type: Type.STRING },
+                      explanation: { type: Type.STRING },
+                      subject: { type: Type.STRING },
+                      chapter: { type: Type.STRING },
+                      topic: { type: Type.STRING },
+                      difficulty: { type: Type.STRING },
+                    },
+                    required: [
+                      'question_text',
+                      'option_a',
+                      'option_b',
+                      'option_c',
+                      'option_d',
+                      'correct_answer',
+                      'explanation',
+                    ],
+                  },
                 },
+                required: [
+                  'overallQualityScore',
+                  'qualityRating',
+                  'factualAccuracy',
+                  'linguisticQuality',
+                  'distractorAnalysis',
+                  'explanationDepth',
+                  'difficultyCalibration',
+                  'syllabusTaxonomy',
+                  'keyRecommendations',
+                  'improvedVersion',
+                ],
               },
-              required: [
-                'overallQualityScore',
-                'qualityRating',
-                'factualAccuracy',
-                'linguisticQuality',
-                'distractorAnalysis',
-                'explanationDepth',
-                'difficultyCalibration',
-                'syllabusTaxonomy',
-                'keyRecommendations',
-                'improvedVersion',
-              ],
             },
           },
-        });
+          onLog,
+          '360° MCQ Inspection'
+        );
 
         const rawText = response.text || '';
         if (!rawText) {
