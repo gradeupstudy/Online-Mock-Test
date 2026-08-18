@@ -44,10 +44,12 @@ export const Footer: React.FC = () => {
     };
 
     window.addEventListener('gradeup_settings_updated', handleUpdate);
+    window.addEventListener('gradeup_social_updated', handleUpdate);
     window.addEventListener('storage', handleUpdate);
 
     return () => {
       window.removeEventListener('gradeup_settings_updated', handleUpdate);
+      window.removeEventListener('gradeup_social_updated', handleUpdate);
       window.removeEventListener('storage', handleUpdate);
     };
   }, []);

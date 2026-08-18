@@ -25,6 +25,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const [tests, setTests] = useState<Test[]>([]);
   const [availablePlatforms, setAvailablePlatforms] = useState<SocialPlatform[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -34,6 +35,15 @@ export const TestManager: React.FC<TestManagerProps> = ({
 
   useEffect(() => {
     loadTests();
+
+    const handleTestsUpdated = () => {
+      loadTests();
+    };
+
+    window.addEventListener('gradeup_tests_updated', handleTestsUpdated);
+    return () => {
+      window.removeEventListener('gradeup_tests_updated', handleTestsUpdated);
+    };
   }, []);
 
   const loadTests = async () => {
@@ -43,8 +53,8 @@ export const TestManager: React.FC<TestManagerProps> = ({
         dataService.getTests(true),
         dataService.getSocialPlatforms(true)
       ]);
-      setTests(fetched);
-      setAvailablePlatforms(platforms);
+      setTests(fetched || []);
+      setAvailablePlatforms(platforms || []);
     } catch (e) {
       console.error('Failed to load tests', e);
     } finally {
@@ -114,37 +124,62 @@ export const TestManager: React.FC<TestManagerProps> = ({
       return;
     }
 
-    const slug = editingTest.slug
-      ? editingTest.slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
-      : editingTest.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+    setIsSaving(true);
+    try {
+      const slug = editingTest.slug
+        ? editingTest.slug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '')
+        : editingTest.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 
-    const totalQuestions = parseSafeNumber(editingTest.total_questions, 10);
-    const marksPerQuestion = parseSafeNumber(editingTest.marks_per_question, 1);
-    const totalMarks = parseSafeNumber(editingTest.total_marks, totalQuestions * marksPerQuestion);
-    const negativeMark = parseSafeNumber(editingTest.negative_marking, 0.25);
-    const duration = parseSafeNumber(editingTest.duration_minutes, 15);
-    const passingMarks = parseSafeNumber(editingTest.passing_marks, totalMarks * 0.4);
+      const totalQuestions = parseSafeNumber(editingTest.total_questions, 10);
+      const marksPerQuestion = parseSafeNumber(editingTest.marks_per_question, 1);
+      const totalMarks = parseSafeNumber(editingTest.total_marks, totalQuestions * marksPerQuestion);
+      const negativeMark = parseSafeNumber(editingTest.negative_marking, 0.25);
+      const duration = parseSafeNumber(editingTest.duration_minutes, 15);
+      const passingMarks = parseSafeNumber(editingTest.passing_marks, totalMarks * 0.4);
 
-    const testToSave: Test = {
-      ...(editingTest as Test),
-      id: editingTest.id || generateUUID(),
-      slug: slug || `test-${Date.now()}`,
-      category: editingTest.category || 'Police Exam',
-      subject: editingTest.subject || 'General Paper',
-      total_questions: totalQuestions,
-      marks_per_question: marksPerQuestion,
-      total_marks: totalMarks,
-      negative_marking: negativeMark,
-      duration_minutes: duration,
-      passing_marks: passingMarks,
-      status: (editingTest.status as TestStatus) || 'published',
-      is_published: editingTest.status === 'published' || editingTest.is_published === true
-    };
+      const testToSave: Test = {
+        ...(editingTest as Test),
+        id: editingTest.id || generateUUID(),
+        slug: slug || `test-${Date.now()}`,
+        category: editingTest.category || 'Police Exam',
+        subject: editingTest.subject || 'General Paper',
+        total_questions: totalQuestions,
+        marks_per_question: marksPerQuestion,
+        total_marks: totalMarks,
+        negative_marking: negativeMark,
+        duration_minutes: duration,
+        passing_marks: passingMarks,
+        status: (editingTest.status as TestStatus) || 'published',
+        is_published: editingTest.status === 'published' || editingTest.is_published === true
+      };
 
-    const saved = await dataService.saveTest(testToSave);
-    notify('success', `Mock test "${saved.title}" saved successfully!`);
-    setIsModalOpen(false);
-    await loadTests();
+      const saved = await dataService.saveTest(testToSave);
+      
+      // Update local state immediately so test appears with zero lag
+      setTests((prev) => {
+        const idx = prev.findIndex((t) => t.id === saved.id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = saved;
+          return updated;
+        }
+        return [saved, ...prev];
+      });
+
+      // Clear filters so new test is guaranteed visible
+      setSearchQuery('');
+      setFilterCategory('all');
+      setFilterStatus('all');
+
+      notify('success', `Mock test "${saved.title}" saved successfully!`);
+      setIsModalOpen(false);
+      await loadTests();
+    } catch (err: any) {
+      console.error('Error saving test:', err);
+      notify('error', `Failed to save test: ${err?.message || 'Unknown error'}`);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleTogglePublish = async (test: Test) => {
@@ -266,13 +301,27 @@ export const TestManager: React.FC<TestManagerProps> = ({
     notify('info', 'Loaded global channels as editable custom channels!');
   };
 
+  // Unique categories derived dynamically from all available tests
+  const dynamicCategories = Array.from(
+    new Set([
+      'Police Exam',
+      'Revenue Exam',
+      'Teacher Exam',
+      'General Exam',
+      ...tests.map((t) => t.category).filter(Boolean)
+    ])
+  ) as string[];
+
   // Filtered tests
   const filteredTests = tests.filter((t) => {
-    const matchesQuery = t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         t.test_code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         t.category.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = filterCategory === 'all' || t.category === filterCategory;
-    const matchesStatus = filterStatus === 'all' || t.status === filterStatus;
+    const title = (t.title || '').toLowerCase();
+    const code = (t.test_code || '').toLowerCase();
+    const cat = (t.category || '').toLowerCase();
+    const q = searchQuery.toLowerCase().trim();
+
+    const matchesQuery = !q || title.includes(q) || code.includes(q) || cat.includes(q);
+    const matchesCategory = filterCategory === 'all' || (t.category || '') === filterCategory;
+    const matchesStatus = filterStatus === 'all' || (t.status || 'published') === filterStatus;
     return matchesQuery && matchesCategory && matchesStatus;
   });
 
@@ -313,10 +362,11 @@ export const TestManager: React.FC<TestManagerProps> = ({
           className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden"
         >
           <option value="all">All Categories</option>
-          <option value="Police Exam">Police Exam</option>
-          <option value="Revenue Exam">Revenue Exam</option>
-          <option value="Teacher Exam">Teacher Exam</option>
-          <option value="General Exam">General Exam</option>
+          {dynamicCategories.map((cat) => (
+            <option key={cat} value={cat}>
+              {cat}
+            </option>
+          ))}
         </select>
 
         <select
@@ -1223,16 +1273,21 @@ export const TestManager: React.FC<TestManagerProps> = ({
             <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
               <button
                 type="button"
+                disabled={isSaving}
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:underline"
+                className="px-4 py-2 text-xs font-bold text-slate-600 dark:text-slate-400 hover:underline disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-md transition-all"
+                disabled={isSaving}
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-bold text-sm rounded-xl shadow-md transition-all flex items-center gap-2"
               >
-                Save Mock Test
+                {isSaving && (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                )}
+                <span>{isSaving ? 'Saving Mock Test...' : 'Save Mock Test'}</span>
               </button>
             </div>
 

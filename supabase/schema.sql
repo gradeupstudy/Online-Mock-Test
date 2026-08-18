@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS public.admin_settings (
     website_url TEXT DEFAULT 'https://gradeupstudy.com',
     support_email VARCHAR(255) DEFAULT 'support@gradeupstudy.com',
     whatsapp_number VARCHAR(20) DEFAULT '+919816000000',
+    whatsapp_channel_url TEXT DEFAULT 'https://whatsapp.com/channel/gradeupstudy',
     telegram_channel TEXT DEFAULT 'https://t.me/gradeupstudy',
     youtube_channel TEXT DEFAULT 'https://youtube.com/@gradeupstudy',
     instagram_handle TEXT DEFAULT 'https://instagram.com/gradeupstudy',

@@ -132,6 +132,39 @@ export const dataService = {
 
         if (!error && data) {
           settings = { ...DEMO_ADMIN_SETTINGS, ...data };
+          
+          // If whatsapp_channel_url is empty in data, check social_platforms array or fallback
+          if (!settings.whatsapp_channel_url && Array.isArray(data.social_platforms)) {
+            const wa = data.social_platforms.find((p: any) => (p.platform_name || '').toLowerCase().includes('whatsapp') || p.icon === 'message-circle');
+            if (wa && wa.platform_url) {
+              settings.whatsapp_channel_url = wa.platform_url;
+            }
+          }
+          
+          // Also check social_platforms table in Supabase if any links were missing
+          try {
+            const { data: spRows } = await supabase.from('social_platforms').select('*');
+            if (spRows && spRows.length > 0) {
+              spRows.forEach((row: any) => {
+                const name = (row.platform_name || '').toLowerCase();
+                if ((name.includes('youtube') || row.icon === 'youtube') && row.platform_url && (!data.youtube_channel || data.youtube_channel.includes('gradeupstudy'))) {
+                  settings.youtube_channel = row.platform_url;
+                }
+                if ((name.includes('telegram') || row.icon === 'send') && row.platform_url && (!data.telegram_channel || data.telegram_channel.includes('gradeupstudy'))) {
+                  settings.telegram_channel = row.platform_url;
+                }
+                if ((name.includes('instagram') || row.icon === 'instagram') && row.platform_url && (!data.instagram_handle || data.instagram_handle.includes('gradeupstudy'))) {
+                  settings.instagram_handle = row.platform_url;
+                }
+                if ((name.includes('whatsapp') || row.icon === 'message-circle') && row.platform_url && (!settings.whatsapp_channel_url || settings.whatsapp_channel_url.includes('gradeupstudy'))) {
+                  settings.whatsapp_channel_url = row.platform_url;
+                }
+              });
+            }
+          } catch {
+            // ignore
+          }
+
           localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
           
           // If settings contains social_platforms, sync to local storage cache as well
@@ -192,13 +225,37 @@ export const dataService = {
 
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
 
+    // 1. Sync & update social_platforms list
+    const currentPlatforms = await dataService.getSocialPlatforms(true);
+    const updatedPlatforms = currentPlatforms.map((p) => {
+      const lowerName = (p.platform_name || '').toLowerCase();
+      if (updated.youtube_channel && (lowerName.includes('youtube') || p.icon === 'youtube' || p.id === 'a1000000-0000-0000-0000-000000000001')) {
+        return { ...p, platform_url: updated.youtube_channel };
+      }
+      if (updated.telegram_channel && (lowerName.includes('telegram') || p.icon === 'send' || p.id === 'a1000000-0000-0000-0000-000000000002')) {
+        return { ...p, platform_url: updated.telegram_channel };
+      }
+      if (updated.instagram_handle && (lowerName.includes('instagram') || p.icon === 'instagram' || p.id === 'a1000000-0000-0000-0000-000000000003')) {
+        return { ...p, platform_url: updated.instagram_handle };
+      }
+      if (updated.whatsapp_channel_url && (lowerName.includes('whatsapp') || p.icon === 'message-circle' || p.id === 'a1000000-0000-0000-0000-000000000004')) {
+        return { ...p, platform_url: updated.whatsapp_channel_url };
+      }
+      return p;
+    });
+
+    updated.social_platforms = updatedPlatforms;
+    localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
+    localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(updatedPlatforms));
+
+    // 2. Persist to Supabase
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
         const { data: existingRows } = await supabase.from('admin_settings').select('id').order('updated_at', { ascending: false }).limit(1);
         const idToUse = existingRows && existingRows.length > 0 ? existingRows[0].id : generateUUID();
         
-        const payload: Record<string, unknown> = {
+        const fullPayload: Record<string, unknown> = {
           id: idToUse,
           brand_name: updated.brand_name || 'Gradeup Study',
           logo_url: updated.logo_url || '/logo.png',
@@ -216,17 +273,17 @@ export const dataService = {
           social_gate_enabled: updated.social_gate_enabled ?? true,
           social_gate_title: updated.social_gate_title || 'Gradeup Study Official Community Requirement',
           social_gate_description: updated.social_gate_description || 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.',
-          social_platforms: updated.social_platforms || (await dataService.getSocialPlatforms(true)),
+          social_platforms: updatedPlatforms,
           updated_at: new Date().toISOString()
         };
 
-        if (updated.admin_email) payload.admin_email = updated.admin_email;
-        if (updated.admin_password) payload.admin_password = updated.admin_password;
+        if (updated.admin_email) fullPayload.admin_email = updated.admin_email;
+        if (updated.admin_password) fullPayload.admin_password = updated.admin_password;
 
-        const { error } = await supabase.from('admin_settings').upsert(payload);
+        const { error } = await supabase.from('admin_settings').upsert(fullPayload);
         if (error) {
           console.warn('Supabase admin_settings upsert error (retrying with minimal payload):', error);
-          const minimalPayload = {
+          const minimalPayload: Record<string, unknown> = {
             id: idToUse,
             brand_name: updated.brand_name,
             logo_url: updated.logo_url,
@@ -240,9 +297,70 @@ export const dataService = {
             default_marks: updated.default_marks,
             default_negative_marking: updated.default_negative_marking,
             mask_leaderboard_names: updated.mask_leaderboard_names,
+            social_platforms: updatedPlatforms,
             updated_at: new Date().toISOString()
           };
           await supabase.from('admin_settings').upsert(minimalPayload);
+        }
+
+        // 3. Direct dual-sync to Supabase `social_platforms` table for all 4 official channels
+        const officialPlatformDefs = [
+          {
+            id: 'a1000000-0000-0000-0000-000000000001',
+            platform_name: 'YouTube',
+            platform_url: updated.youtube_channel || 'https://youtube.com/@gradeupstudy',
+            icon: 'youtube',
+            button_text: 'Subscribe on YouTube',
+            verification_method: 'redirect_only',
+            is_required: true,
+            is_active: true,
+            order_index: 1
+          },
+          {
+            id: 'a1000000-0000-0000-0000-000000000002',
+            platform_name: 'Telegram Channel',
+            platform_url: updated.telegram_channel || 'https://t.me/gradeupstudy',
+            icon: 'send',
+            button_text: 'Join Telegram Channel',
+            verification_method: 'redirect_only',
+            is_required: true,
+            is_active: true,
+            order_index: 2
+          },
+          {
+            id: 'a1000000-0000-0000-0000-000000000003',
+            platform_name: 'Instagram',
+            platform_url: updated.instagram_handle || 'https://instagram.com/gradeupstudy',
+            icon: 'instagram',
+            button_text: 'Follow on Instagram',
+            verification_method: 'redirect_only',
+            is_required: false,
+            is_active: true,
+            order_index: 3
+          },
+          {
+            id: 'a1000000-0000-0000-0000-000000000004',
+            platform_name: 'WhatsApp Channel',
+            platform_url: updated.whatsapp_channel_url || 'https://whatsapp.com/channel/gradeupstudy',
+            icon: 'message-circle',
+            button_text: 'Join WhatsApp Channel',
+            verification_method: 'redirect_only',
+            is_required: true,
+            is_active: true,
+            order_index: 4
+          }
+        ];
+
+        for (const def of officialPlatformDefs) {
+          try {
+            await supabase.from('social_platforms').upsert(def);
+            await supabase
+              .from('social_platforms')
+              .update({ platform_url: def.platform_url })
+              .ilike('platform_name', `%${def.platform_name}%`);
+          } catch (e) {
+            console.warn(`Supabase sync for platform ${def.platform_name} error:`, e);
+          }
         }
 
         // Also sync global social gate updates to all tests that use global social gate
@@ -265,63 +383,12 @@ export const dataService = {
       }
     }
 
-    // Sync in local storage tests as well
-    if (newSettings.social_gate_title || newSettings.social_gate_description) {
-      const rawTests = localStorage.getItem(STORAGE_KEYS.TESTS);
-      if (rawTests) {
-        try {
-          const parsedTests: Test[] = JSON.parse(rawTests);
-          const updatedTests = parsedTests.map(t => {
-            if (!t.social_gate_mode || t.social_gate_mode === 'global') {
-              return {
-                ...t,
-                social_gate_title: updated.social_gate_title,
-                social_gate_description: updated.social_gate_description
-              };
-            }
-            return t;
-          });
-          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(updatedTests));
-        } catch {
-          // ignore
-        }
-      }
-    }
-
-    // Sync social_platforms list with social channels if modified
+    // Broadcast update events so all components (Footer, Header, SocialGate, AdminSettingsView, SocialGateManager) instantly reflect the new links
     try {
-      const currentPlatforms = await dataService.getSocialPlatforms(false);
-      let platformsChanged = false;
-      const updatedPlatforms = currentPlatforms.map(p => {
-        const lowerName = (p.platform_name || '').toLowerCase();
-        if (newSettings.youtube_channel && (lowerName.includes('youtube') || p.icon === 'youtube')) {
-          platformsChanged = true;
-          return { ...p, platform_url: newSettings.youtube_channel };
-        }
-        if (newSettings.telegram_channel && (lowerName.includes('telegram') || p.icon === 'send')) {
-          platformsChanged = true;
-          return { ...p, platform_url: newSettings.telegram_channel };
-        }
-        if (newSettings.instagram_handle && (lowerName.includes('instagram') || p.icon === 'instagram')) {
-          platformsChanged = true;
-          return { ...p, platform_url: newSettings.instagram_handle };
-        }
-        if (newSettings.whatsapp_channel_url && (lowerName.includes('whatsapp') || p.icon === 'message-circle')) {
-          platformsChanged = true;
-          return { ...p, platform_url: newSettings.whatsapp_channel_url };
-        }
-        return p;
-      });
-
-      if (platformsChanged) {
-        localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(updatedPlatforms));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gradeup_settings_updated', { detail: updated }));
+        window.dispatchEvent(new CustomEvent('gradeup_social_updated', { detail: updatedPlatforms }));
       }
-    } catch {
-      // ignore
-    }
-
-    try {
-      window.dispatchEvent(new CustomEvent('gradeup_settings_updated', { detail: updated }));
     } catch {
       // ignore
     }
@@ -333,6 +400,16 @@ export const dataService = {
   // TESTS MANAGEMENT
   // ------------------------------------
   getTests: async (includeUnpublished = true): Promise<Test[]> => {
+    // 1. Read existing local tests first
+    const rawLocal = localStorage.getItem(STORAGE_KEYS.TESTS);
+    let localTests: Test[] = [];
+    try {
+      localTests = rawLocal ? JSON.parse(rawLocal) : DEMO_TESTS;
+      if (!Array.isArray(localTests)) localTests = DEMO_TESTS;
+    } catch {
+      localTests = DEMO_TESTS;
+    }
+
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
@@ -341,20 +418,43 @@ export const dataService = {
           query = query.eq('is_published', true).eq('status', 'published');
         }
         const { data, error } = await query;
-        if (!error && data) {
-          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(data));
-          return data as Test[];
+        if (!error && Array.isArray(data)) {
+          const remoteTests = data as Test[];
+          
+          // SMART MERGE: Keep all remote tests + any local tests not yet in remote
+          const remoteIdSet = new Set(remoteTests.map(t => t.id));
+          const unsyncedLocal = localTests.filter(lt => !remoteIdSet.has(lt.id));
+          
+          const merged = [...unsyncedLocal, ...remoteTests];
+          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(merged));
+
+          // Background sync unsynced tests to Supabase if any exist
+          if (unsyncedLocal.length > 0) {
+            setTimeout(async () => {
+              for (const unsynced of unsyncedLocal) {
+                try {
+                  await dataService.saveTest(unsynced);
+                } catch {
+                  // ignore background retry errors
+                }
+              }
+            }, 500);
+          }
+
+          if (!includeUnpublished) {
+            return merged.filter(t => t.is_published && (t.status === 'published' || !t.status));
+          }
+          return merged;
         }
       } catch (e) {
         console.warn('Supabase fetch tests error', e);
       }
     }
-    const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
-    const tests: Test[] = raw ? JSON.parse(raw) : DEMO_TESTS;
+
     if (!includeUnpublished) {
-      return tests.filter(t => t.is_published && t.status === 'published');
+      return localTests.filter(t => t.is_published && (t.status === 'published' || !t.status));
     }
-    return tests;
+    return localTests;
   },
 
   getTestBySlugOrId: async (identifier: string): Promise<Test | null> => {
@@ -435,9 +535,22 @@ export const dataService = {
     const duration = parseSafeNumber(test.duration_minutes, 15);
     const passingMarks = parseSafeNumber(test.passing_marks, totalMarks * 0.4);
 
+    let cleanSlug = (test.slug || test.title || `test-${Date.now()}`)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)+/g, '');
+    if (!cleanSlug) cleanSlug = `test-${Date.now()}`;
+
+    const cleanCode = (test.test_code || `TEST-${Math.floor(1000 + Math.random() * 9000)}`).trim().toUpperCase();
+
     const sanitizedTest: Test = {
       ...test,
       id: validId,
+      slug: cleanSlug,
+      test_code: cleanCode,
+      category: test.category || 'Police Exam',
+      subject: test.subject || 'General Paper',
       total_questions: totalQuestions,
       marks_per_question: marksPerQuestion,
       total_marks: totalMarks,
@@ -446,13 +559,32 @@ export const dataService = {
       passing_marks: passingMarks,
       status,
       is_published: isPublished,
+      created_at: test.created_at || new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
+    // 1. Immediately store in local cache so UI displays it immediately with zero delay
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
+      let localTests: Test[] = raw ? JSON.parse(raw) : DEMO_TESTS;
+      if (!Array.isArray(localTests)) localTests = DEMO_TESTS;
+      const idx = localTests.findIndex(t => t.id === sanitizedTest.id);
+      if (idx >= 0) {
+        localTests[idx] = sanitizedTest;
+      } else {
+        localTests.unshift(sanitizedTest);
+      }
+      localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(localTests));
+      window.dispatchEvent(new CustomEvent('gradeup_tests_updated', { detail: sanitizedTest }));
+    } catch (e) {
+      console.warn('Local test cache save error', e);
+    }
+
+    // 2. Persist to Supabase if available with progressive fallback & error recovery
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const payload = {
+        const fullPayload = {
           id: sanitizedTest.id,
           test_code: sanitizedTest.test_code,
           title: sanitizedTest.title,
@@ -487,35 +619,73 @@ export const dataService = {
           max_attempts_per_student: parseSafeNumber(sanitizedTest.max_attempts_per_student, 1),
           start_time: sanitizedTest.start_time || null,
           end_time: sanitizedTest.end_time || null,
-          created_at: sanitizedTest.created_at || new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          created_at: sanitizedTest.created_at,
+          updated_at: sanitizedTest.updated_at
         };
 
-        const { data, error } = await supabase.from('tests').upsert(payload).select().single();
+        let { data, error } = await supabase.from('tests').upsert(fullPayload, { onConflict: 'id' }).select().single();
+
+        // If error due to missing table columns or constraint, attempt retry with core payload
         if (error) {
-          console.error('Supabase test save error:', error);
-        } else if (data) {
-          // Sync local
-          const localTests = await dataService.getTests(true);
-          const idx = localTests.findIndex(t => t.id === data.id);
-          if (idx >= 0) localTests[idx] = data as Test;
-          else localTests.unshift(data as Test);
+          console.warn('Supabase full upsert error, attempting core payload fallback:', error.message);
+          
+          // Core schema payload that matches standard columns in all Supabase setups
+          const corePayload = {
+            id: sanitizedTest.id,
+            test_code: sanitizedTest.test_code,
+            title: sanitizedTest.title,
+            slug: sanitizedTest.slug,
+            description: sanitizedTest.description || '',
+            category: sanitizedTest.category || 'Competitive Exam',
+            subject: sanitizedTest.subject || 'General Paper',
+            total_questions: sanitizedTest.total_questions,
+            total_marks: sanitizedTest.total_marks,
+            marks_per_question: sanitizedTest.marks_per_question,
+            negative_marking: sanitizedTest.negative_marking,
+            duration_minutes: sanitizedTest.duration_minutes,
+            passing_marks: sanitizedTest.passing_marks,
+            instructions: sanitizedTest.instructions || '',
+            status: sanitizedTest.status,
+            is_published: sanitizedTest.is_published,
+            created_at: sanitizedTest.created_at,
+            updated_at: sanitizedTest.updated_at
+          };
+
+          // If duplicate key error on slug/code, make slug/code unique
+          if (error.code === '23505' || error.message.toLowerCase().includes('duplicate') || error.message.toLowerCase().includes('unique')) {
+            const randSuffix = Math.floor(100 + Math.random() * 900);
+            corePayload.slug = `${sanitizedTest.slug}-${randSuffix}`;
+            corePayload.test_code = `${sanitizedTest.test_code}-${randSuffix}`;
+            sanitizedTest.slug = corePayload.slug;
+            sanitizedTest.test_code = corePayload.test_code;
+          }
+
+          const coreResult = await supabase.from('tests').upsert(corePayload, { onConflict: 'id' }).select().single();
+          if (!coreResult.error && coreResult.data) {
+            data = coreResult.data;
+            error = null;
+          } else {
+            console.error('Supabase core test save fallback also failed:', coreResult.error);
+          }
+        }
+
+        if (data) {
+          const remoteTest = data as Test;
+          // Merge remote with sanitized
+          const finalizedTest = { ...sanitizedTest, ...remoteTest };
+          const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
+          let localTests: Test[] = raw ? JSON.parse(raw) : [];
+          const idx = localTests.findIndex(t => t.id === finalizedTest.id);
+          if (idx >= 0) localTests[idx] = finalizedTest;
+          else localTests.unshift(finalizedTest);
           localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(localTests));
-          return data as Test;
+          return finalizedTest;
         }
       } catch (e) {
         console.error('Supabase test save exception', e);
       }
     }
 
-    const tests = await dataService.getTests(true);
-    const index = tests.findIndex(t => t.id === sanitizedTest.id);
-    if (index >= 0) {
-      tests[index] = { ...sanitizedTest };
-    } else {
-      tests.unshift({ ...sanitizedTest, created_at: sanitizedTest.created_at || new Date().toISOString() });
-    }
-    localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(tests));
     return sanitizedTest;
   },
 
@@ -530,9 +700,11 @@ export const dataService = {
         console.error('Supabase test delete error', e);
       }
     }
-    const tests = await dataService.getTests(true);
+    const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
+    let tests: Test[] = raw ? JSON.parse(raw) : [];
     const filtered = tests.filter(t => t.id !== testId);
     localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(filtered));
+    window.dispatchEvent(new CustomEvent('gradeup_tests_updated'));
     return true;
   },
 
@@ -781,7 +953,7 @@ export const dataService = {
     testMeta: Partial<Test>,
     selectedQuestions: Question[]
   ): Promise<Test> => {
-    const newId = crypto.randomUUID ? crypto.randomUUID() : 'test-' + Date.now();
+    const newId = generateUUID();
     const cleanTitle = testMeta.title || 'Custom Mock Test';
     const cleanSlug = (testMeta.slug || cleanTitle)
       .toLowerCase()
@@ -837,10 +1009,10 @@ export const dataService = {
 
     await dataService.saveTest(newTest);
 
-    // Clone and map questions into new test
+    // Clone and map questions into new test with valid UUIDs
     const testQuestions: Question[] = selectedQuestions.map((q, idx) => ({
       ...q,
-      id: 'q-' + newId + '-' + (idx + 1) + '-' + Math.random().toString(36).substr(2, 4),
+      id: generateUUID(),
       test_id: newId,
       question_number: idx + 1,
     }));
@@ -858,7 +1030,7 @@ export const dataService = {
 
     const cloned: Question[] = selectedQuestions.map(q => ({
       ...q,
-      id: 'q-' + targetTestId + '-' + startNum + '-' + Math.random().toString(36).substr(2, 4),
+      id: generateUUID(),
       test_id: targetTestId,
       question_number: startNum++,
     }));
@@ -946,12 +1118,43 @@ export const dataService = {
 
     const raw = localStorage.getItem(STORAGE_KEYS.SOCIAL);
     const platforms: SocialPlatform[] = raw ? JSON.parse(raw) : DEMO_SOCIAL_PLATFORMS;
-    const normalized = platforms.map((p, idx) => ({
-      ...p,
-      id: normalizePlatformId(p.id, p.platform_name),
-      is_active: p.is_active !== undefined ? Boolean(p.is_active) : true,
-      order_index: p.order_index !== undefined ? p.order_index : idx + 1
-    }));
+    
+    // Check if admin settings has newer custom links
+    let adminCustomLinks: Partial<AdminSettings> | null = null;
+    const rawSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+    if (rawSettings) {
+      try {
+        adminCustomLinks = JSON.parse(rawSettings);
+      } catch {
+        // ignore
+      }
+    }
+
+    const normalized = platforms.map((p, idx) => {
+      const lowerName = (p.platform_name || '').toLowerCase();
+      let updatedUrl = p.platform_url;
+      if (adminCustomLinks?.youtube_channel && (lowerName.includes('youtube') || p.icon === 'youtube')) {
+        updatedUrl = adminCustomLinks.youtube_channel;
+      }
+      if (adminCustomLinks?.telegram_channel && (lowerName.includes('telegram') || p.icon === 'send')) {
+        updatedUrl = adminCustomLinks.telegram_channel;
+      }
+      if (adminCustomLinks?.instagram_handle && (lowerName.includes('instagram') || p.icon === 'instagram')) {
+        updatedUrl = adminCustomLinks.instagram_handle;
+      }
+      if (adminCustomLinks?.whatsapp_channel_url && (lowerName.includes('whatsapp') || p.icon === 'message-circle')) {
+        updatedUrl = adminCustomLinks.whatsapp_channel_url;
+      }
+
+      return {
+        ...p,
+        platform_url: updatedUrl,
+        id: normalizePlatformId(p.id, p.platform_name),
+        is_active: p.is_active !== undefined ? Boolean(p.is_active) : true,
+        order_index: p.order_index !== undefined ? p.order_index : idx + 1
+      };
+    });
+
     if (!includeInactive) {
       return normalized.filter((p) => p.is_active === true);
     }

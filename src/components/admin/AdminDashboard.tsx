@@ -66,6 +66,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   useEffect(() => {
     loadDashboardData();
+
+    const handleTestsUpdated = () => {
+      loadDashboardData();
+    };
+
+    window.addEventListener('gradeup_tests_updated', handleTestsUpdated);
+    return () => {
+      window.removeEventListener('gradeup_tests_updated', handleTestsUpdated);
+    };
   }, []);
 
   const loadDashboardData = async () => {

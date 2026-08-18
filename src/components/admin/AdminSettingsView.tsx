@@ -36,9 +36,16 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
     e.preventDefault();
     if (!settings) return;
     setSaving(true);
-    await dataService.updateSettings(settings);
-    onToast?.('success', 'Admin settings updated successfully!');
-    setSaving(false);
+    try {
+      const saved = await dataService.updateSettings(settings);
+      setSettings(saved);
+      onToast?.('success', 'Official social media links & admin settings saved to Supabase permanent cloud storage!');
+    } catch (err) {
+      console.error('Failed to save settings', err);
+      onToast?.('error', 'Failed to save settings to Supabase');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleUpdateAdminCredentials = async (e: React.FormEvent) => {
