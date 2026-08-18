@@ -142,10 +142,20 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
           {/* Header Title & Student Info */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-blue-900/60 pb-4">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="px-2.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] sm:text-[11px] font-bold rounded-md uppercase">
                   Official Exam Scorecard
                 </span>
+                {test?.category && (
+                  <span className="px-2.5 py-0.5 bg-slate-800 text-blue-200 border border-blue-700/50 text-[10px] sm:text-[11px] font-bold rounded-md">
+                    {test.category}
+                  </span>
+                )}
+                {test?.subject && (
+                  <span className="px-2.5 py-0.5 bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 text-[10px] sm:text-[11px] font-bold rounded-md">
+                    Subject: {test.subject}
+                  </span>
+                )}
                 <span className="text-[11px] text-emerald-400 font-bold flex items-center gap-1">
                   <CheckCircle className="w-3 h-3" /> Submitted Successfully
                 </span>

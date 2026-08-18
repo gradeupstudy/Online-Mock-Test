@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Clock, Award, FileText, CheckCircle, ArrowRight, Sparkles, Filter, ShieldCheck, Flame, BookOpen } from 'lucide-react';
+import { Search, Clock, Award, FileText, CheckCircle, ArrowRight, Sparkles, Filter, ShieldCheck, Flame, BookOpen, Layers, X, Tag } from 'lucide-react';
 import { Test } from '../../types';
 import { dataService } from '../../services/dataService';
 
@@ -13,6 +13,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [selectedSubject, setSelectedSubject] = useState<string>('All');
 
   useEffect(() => {
     loadPublishedTests();
@@ -25,16 +26,61 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
     setLoading(false);
   };
 
-  const categories = ['All', ...Array.from(new Set(tests.map((t) => t.category)))];
+  // Derive unique categories
+  const categories = ['All', ...Array.from(new Set(tests.map((t) => t.category).filter(Boolean)))];
+
+  // Derive unique subjects from both test.subject and test.sections
+  const subjectSet = new Set<string>();
+  tests.forEach((t) => {
+    if (t.subject && t.subject.trim()) {
+      subjectSet.add(t.subject.trim());
+    }
+    if (Array.isArray(t.sections)) {
+      t.sections.forEach((sec) => {
+        if (sec && sec.trim()) subjectSet.add(sec.trim());
+      });
+    }
+  });
+  const subjects = ['All', ...Array.from(subjectSet)];
+
+  // Helper to test if a test matches the selected subject
+  const matchesSubjectFilter = (t: Test, subject: string) => {
+    if (subject === 'All') return true;
+    const subLower = subject.toLowerCase();
+    if (t.subject && t.subject.toLowerCase() === subLower) return true;
+    if (Array.isArray(t.sections) && t.sections.some((s) => s.toLowerCase() === subLower)) return true;
+    if (t.title.toLowerCase().includes(subLower)) return true;
+    return false;
+  };
 
   const filteredTests = tests.filter((t) => {
+    const q = searchQuery.toLowerCase().trim();
     const codeStr = (t.exam_code || t.test_code || '').toLowerCase();
-    const matchesSearch = t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          codeStr.includes(searchQuery.toLowerCase()) ||
-                          t.description.toLowerCase().includes(searchQuery.toLowerCase());
+    const subjectStr = (t.subject || '').toLowerCase();
+    const sectionsStr = (t.sections || []).join(' ').toLowerCase();
+
+    const matchesSearch =
+      !q ||
+      t.title.toLowerCase().includes(q) ||
+      codeStr.includes(q) ||
+      (t.description || '').toLowerCase().includes(q) ||
+      (t.category || '').toLowerCase().includes(q) ||
+      subjectStr.includes(q) ||
+      sectionsStr.includes(q);
+
     const matchesCat = selectedCategory === 'All' || t.category === selectedCategory;
-    return matchesSearch && matchesCat;
+    const matchesSub = matchesSubjectFilter(t, selectedSubject);
+
+    return matchesSearch && matchesCat && matchesSub;
   });
+
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setSelectedCategory('All');
+    setSelectedSubject('All');
+  };
+
+  const isFiltered = searchQuery !== '' || selectedCategory !== 'All' || selectedSubject !== 'All';
 
   return (
     <div className="space-y-8 pb-12">
@@ -69,127 +115,232 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
         <div className="absolute -right-12 -bottom-12 w-80 h-80 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
       </div>
 
-      {/* Filter and Search Bar */}
-      <div className="space-y-3 sm:space-y-4">
+      {/* Filter and Search Section */}
+      <div className="space-y-4 bg-white dark:bg-slate-900/90 p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
+        
+        {/* Top Search Bar & Result Count */}
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-          <div className="relative w-full sm:w-80 md:w-96">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+          <div className="relative flex-1 max-w-lg">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
             <input
               type="text"
-              placeholder="Search exam, test series or code..."
+              placeholder="Search exam title, subject (e.g. English, GK, Maths), or code..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl sm:rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden shadow-xs"
+              className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
             />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
-          <div className="text-xs text-slate-500 font-semibold flex items-center justify-between sm:justify-end gap-2">
-            <span>Showing <strong className="text-slate-800 dark:text-slate-200">{filteredTests.length}</strong> published test series</span>
+          <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-500 font-semibold">
+            <span>
+              Showing <strong className="text-slate-900 dark:text-white font-bold">{filteredTests.length}</strong> of {tests.length} tests
+            </span>
+            {isFiltered && (
+              <button
+                onClick={handleResetFilters}
+                className="inline-flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400 font-bold hover:underline cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" /> Reset Filters
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Category Filter Pills */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
-          {categories.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-3.5 sm:px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap transition-all cursor-pointer ${
-                selectedCategory === cat
-                  ? 'bg-blue-600 text-white shadow-md'
-                  : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
+        {/* 1. Exam Category Filter Pills */}
+        <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <Layers className="w-3.5 h-3.5 text-blue-500" />
+            <span>Filter by Category:</span>
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-2 px-2">
+            {categories.map((cat) => {
+              const count = cat === 'All' ? tests.length : tests.filter((t) => t.category === cat).length;
+              const isSelected = selectedCategory === cat;
+              return (
+                <button
+                  key={cat}
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    isSelected
+                      ? 'bg-blue-600 text-white shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700/60'
+                  }`}
+                >
+                  <span>{cat === 'All' ? 'All Exams' : cat}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
+
+        {/* 2. Subject Name Filter Pills */}
+        {subjects.length > 1 && (
+          <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+              <span>Filter by Subject:</span>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-2 px-2">
+              {subjects.map((sub) => {
+                const count = sub === 'All'
+                  ? tests.length
+                  : tests.filter((t) => matchesSubjectFilter(t, sub)).length;
+                const isSelected = selectedSubject === sub;
+                return (
+                  <button
+                    key={sub}
+                    onClick={() => setSelectedSubject(sub)}
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                      isSelected
+                        ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700/60'
+                    }`}
+                  >
+                    <span>{sub === 'All' ? 'All Subjects' : sub}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                      isSelected ? 'bg-indigo-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
       </div>
 
       {/* Test List Grid */}
       {loading ? (
         <div className="py-16 text-center text-slate-400 text-sm">Loading available mock tests...</div>
       ) : filteredTests.length === 0 ? (
-        <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8">
-          <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">No mock tests available right now</h3>
-          <p className="text-xs text-slate-500 mt-1">Try clearing your search query or check back later.</p>
+        <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 space-y-3">
+          <BookOpen className="w-12 h-12 text-slate-300 mx-auto" />
+          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">No mock tests found</h3>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto">
+            No mock tests match the selected category &quot;{selectedCategory}&quot; and subject &quot;{selectedSubject}&quot;. Try resetting your filters.
+          </p>
+          <button
+            onClick={handleResetFilters}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+          >
+            Clear All Filters
+          </button>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredTests.map((test) => (
-            <div
-              key={test.id}
-              className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all duration-300 relative overflow-hidden"
-            >
-              <div className="space-y-4">
-                
-                {/* Category & Code Header */}
-                <div className="flex items-center justify-between gap-2">
-                  <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-[11px] rounded-lg border border-blue-200 dark:border-blue-900">
-                    {test.category}
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider font-semibold">
-                    {test.exam_code || test.test_code}
-                  </span>
-                </div>
+          {filteredTests.map((test) => {
+            const hasExplicitSubject = Boolean(test.subject && test.subject.trim());
+            const hasSections = Boolean(test.sections && test.sections.length > 0);
 
-                {/* Title & Description */}
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
-                    {test.title}
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1 leading-relaxed">
-                    {test.description}
-                  </p>
-                </div>
-
-                {/* Exam Key Metrics */}
-                <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-center text-xs">
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase">Time</span>
-                    <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
-                      <Clock className="w-3 h-3 text-blue-500" /> {test.duration_minutes}m
+            return (
+              <div
+                key={test.id}
+                className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all duration-300 relative overflow-hidden"
+              >
+                <div className="space-y-4">
+                  
+                  {/* Category & Code Header */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-[11px] rounded-lg border border-blue-200 dark:border-blue-900">
+                      {test.category}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider font-semibold">
+                      {test.exam_code || test.test_code}
                     </span>
                   </div>
 
-                  <div>
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase">Questions</span>
-                    <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
-                      <FileText className="w-3 h-3 text-indigo-500" /> {test.total_questions}
-                    </span>
+                  {/* Subject Badge / Sections Pill */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {hasExplicitSubject ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 font-bold text-xs rounded-lg border border-indigo-200 dark:border-indigo-800">
+                        <BookOpen className="w-3 h-3 text-indigo-500" />
+                        <span>Subject: {test.subject}</span>
+                      </span>
+                    ) : hasSections ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 font-bold text-xs rounded-lg border border-amber-200 dark:border-amber-800">
+                        <Layers className="w-3 h-3 text-amber-500" />
+                        <span>Sections ({test.sections!.length}): {test.sections!.join(', ')}</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs rounded-lg">
+                        <BookOpen className="w-3 h-3 text-slate-400" />
+                        <span>General Paper</span>
+                      </span>
+                    )}
                   </div>
 
+                  {/* Title & Description */}
                   <div>
-                    <span className="text-[10px] text-slate-400 font-bold block uppercase">Marks</span>
-                    <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
-                      <Award className="w-3 h-3 text-emerald-500" /> {test.total_marks}
-                    </span>
+                    <h3 className="text-lg font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
+                      {test.title}
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1 leading-relaxed">
+                      {test.description || 'Practice test series based on real exam pattern with instant detailed results.'}
+                    </p>
                   </div>
+
+                  {/* Exam Key Metrics */}
+                  <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-center text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Time</span>
+                      <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3 text-blue-500" /> {test.duration_minutes}m
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Questions</span>
+                      <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
+                        <FileText className="w-3 h-3 text-indigo-500" /> {test.total_questions}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Marks</span>
+                      <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
+                        <Award className="w-3 h-3 text-emerald-500" /> {test.total_marks}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Negative marking note */}
+                  {test.negative_marking > 0 && (
+                    <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1">
+                      <span>• Negative Marking: -{test.negative_marking} per wrong answer</span>
+                    </p>
+                  )}
+
                 </div>
 
-                {/* Negative marking note */}
-                {test.negative_marking > 0 && (
-                  <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1">
-                    <span>• Negative Marking: -{test.negative_marking} per wrong answer</span>
-                  </p>
-                )}
+                {/* Action Button */}
+                <div className="pt-6 border-t border-slate-100 dark:border-slate-800/80 mt-4">
+                  <button
+                    onClick={() => onSelectTest(test)}
+                    className="w-full py-3 px-4 bg-slate-900 hover:bg-blue-600 dark:bg-slate-800 dark:hover:bg-blue-600 text-white font-bold text-xs rounded-xl transition-all duration-200 flex items-center justify-center gap-2 group-hover:shadow-lg cursor-pointer"
+                  >
+                    <span>Start Mock Test</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
 
               </div>
-
-              {/* Action Button */}
-              <div className="pt-6 border-t border-slate-100 dark:border-slate-800/80 mt-4">
-                <button
-                  onClick={() => onSelectTest(test)}
-                  className="w-full py-3 px-4 bg-slate-900 hover:bg-blue-600 dark:bg-slate-800 dark:hover:bg-blue-600 text-white font-bold text-xs rounded-xl transition-all duration-200 flex items-center justify-center gap-2 group-hover:shadow-lg"
-                >
-                  <span>Start Mock Test</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </div>
-
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

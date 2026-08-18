@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock, Award, AlertTriangle, CheckCircle, ShieldCheck, FileText, ArrowRight, ArrowLeft } from 'lucide-react';
+import { Clock, Award, AlertTriangle, CheckCircle, ShieldCheck, FileText, ArrowRight, ArrowLeft, BookOpen, Layers } from 'lucide-react';
 import { Test } from '../../types';
 
 interface TestIntroProps {
@@ -9,13 +9,16 @@ interface TestIntroProps {
 }
 
 export const TestIntro: React.FC<TestIntroProps> = ({ test, onBack, onProceedToSocialGate }) => {
+  const hasSubject = Boolean(test.subject && test.subject.trim());
+  const hasSections = Boolean(test.sections && test.sections.length > 0);
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-12">
       
       {/* Top Back Navigation */}
       <button
         onClick={onBack}
-        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+        className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
       >
         <ArrowLeft className="w-4 h-4" /> Back to Test Directory
       </button>
@@ -23,9 +26,23 @@ export const TestIntro: React.FC<TestIntroProps> = ({ test, onBack, onProceedToS
       {/* Test Title Header Card */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-6 sm:p-8 shadow-xs space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="px-3 py-1 bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200 text-xs font-bold rounded-lg border border-blue-200 dark:border-blue-900">
-            {test.category}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="px-3 py-1 bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200 text-xs font-bold rounded-lg border border-blue-200 dark:border-blue-900">
+              {test.category}
+            </span>
+            {hasSubject && (
+              <span className="inline-flex items-center gap-1 px-3 py-1 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 font-bold text-xs rounded-lg border border-indigo-200 dark:border-indigo-800">
+                <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Subject: {test.subject}</span>
+              </span>
+            )}
+            {hasSections && (
+              <span className="inline-flex items-center gap-1 px-3 py-1 bg-amber-50 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 font-bold text-xs rounded-lg border border-amber-200 dark:border-amber-800">
+                <Layers className="w-3.5 h-3.5 text-amber-500" />
+                <span>Sections ({test.sections!.length}): {test.sections!.join(', ')}</span>
+              </span>
+            )}
+          </div>
           <span className="text-xs font-mono font-bold text-slate-400">
             CODE: {test.exam_code || test.test_code}
           </span>
