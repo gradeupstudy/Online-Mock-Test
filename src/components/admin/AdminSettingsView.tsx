@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Save, Globe, Mail, Phone, Youtube, Send, Instagram, MessageCircle, Share2, ShieldCheck, Check, Key, Lock, UserCheck, Image as ImageIcon, GraduationCap, ExternalLink } from 'lucide-react';
+import { Settings, Save, Globe, Mail, Phone, Youtube, Send, Instagram, MessageCircle, Share2, ShieldCheck, Check, Key, Lock, UserCheck, Image as ImageIcon, GraduationCap, ExternalLink, Database, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
 import { AdminSettings } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase';
@@ -19,10 +19,29 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [updatingAuth, setUpdatingAuth] = useState(false);
+  const [syncingCloud, setSyncingCloud] = useState(false);
+  const [syncStats, setSyncStats] = useState<{ tests: number; questions: number; attempts: number } | null>(null);
 
   useEffect(() => {
     loadSettings();
   }, []);
+
+  const handleSyncToSupabase = async () => {
+    setSyncingCloud(true);
+    try {
+      const res = await dataService.syncAllLocalDataToSupabase();
+      if (res.success) {
+        setSyncStats({ tests: res.testsCount, questions: res.questionsCount, attempts: res.attemptsCount });
+        onToast?.('success', `Synced ${res.testsCount} tests, ${res.questionsCount} MCQs, and ${res.attemptsCount} attempts to Supabase successfully!`);
+      } else {
+        onToast?.('error', res.error || 'Failed to sync data to Supabase');
+      }
+    } catch (err: any) {
+      onToast?.('error', err?.message || 'Sync failed');
+    } finally {
+      setSyncingCloud(false);
+    }
+  };
 
   const loadSettings = async () => {
     const s = await dataService.getSettings();
@@ -192,6 +211,65 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
             </button>
           </div>
         </form>
+      </div>
+
+      {/* SUPABASE CLOUD DATABASE & PERSISTENCE CARD */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 rounded-lg">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Supabase Cloud Database & Persistence
+              </h2>
+              <p className="text-xs text-slate-500">
+                Centralized storage for all Mock Tests, MCQs Question Bank, and Student Attempts
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {isSupabaseConfigured() ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 text-xs font-bold rounded-full border border-emerald-200 dark:border-emerald-800">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Supabase Connected</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 text-xs font-bold rounded-full border border-amber-200 dark:border-amber-800">
+                <AlertCircle className="w-3.5 h-3.5" />
+                <span>Offline / Local Mode</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700/60 text-xs space-y-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <p className="font-semibold text-slate-800 dark:text-slate-200">
+                Single Source of Truth: Supabase PostgreSQL
+              </p>
+              <p className="text-slate-500 dark:text-slate-400 text-[11px] mt-0.5">
+                All tests, MCQs, and attempts are stored securely in Supabase. Deleting a test permanently removes it from the cloud database without reviving zombie demo tests.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSyncToSupabase}
+              disabled={syncingCloud || !isSupabaseConfigured()}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer whitespace-nowrap"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncingCloud ? 'animate-spin' : ''}`} />
+              <span>{syncingCloud ? 'Pushing Data to Cloud...' : 'Sync All Data to Supabase'}</span>
+            </button>
+          </div>
+          {syncStats && (
+            <p className="text-emerald-600 dark:text-emerald-400 font-medium text-[11px] pt-1">
+              ✓ Successfully synced: {syncStats.tests} Tests, {syncStats.questions} MCQs, {syncStats.attempts} Student Attempts.
+            </p>
+          )}
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">

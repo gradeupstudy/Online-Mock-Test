@@ -65,16 +65,17 @@ const STORAGE_KEYS = {
   ACTIVE_ATTEMPT: 'gradeup_active_attempt_'
 };
 
-// Initialize local storage with fallback demo data if empty
+// Initialize local storage with default structure
 const initLocalStorage = () => {
+  const isRemoteActive = isSupabaseConfigured();
   if (!localStorage.getItem(STORAGE_KEYS.TESTS)) {
-    localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(DEMO_TESTS));
+    localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(isRemoteActive ? [] : DEMO_TESTS));
   }
   if (!localStorage.getItem(STORAGE_KEYS.QUESTIONS)) {
-    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(DEMO_QUESTIONS));
+    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(isRemoteActive ? {} : DEMO_QUESTIONS));
   }
   if (!localStorage.getItem(STORAGE_KEYS.ATTEMPTS)) {
-    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(DEMO_ATTEMPTS));
+    localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(isRemoteActive ? [] : DEMO_ATTEMPTS));
   }
   if (!localStorage.getItem(STORAGE_KEYS.SOCIAL)) {
     localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(DEMO_SOCIAL_PLATFORMS));
@@ -573,16 +574,6 @@ export const dataService = {
   // TESTS MANAGEMENT
   // ------------------------------------
   getTests: async (includeUnpublished = true): Promise<Test[]> => {
-    // 1. Read existing local tests first
-    const rawLocal = localStorage.getItem(STORAGE_KEYS.TESTS);
-    let localTests: Test[] = [];
-    try {
-      localTests = rawLocal ? JSON.parse(rawLocal) : DEMO_TESTS;
-      if (!Array.isArray(localTests)) localTests = DEMO_TESTS;
-    } catch {
-      localTests = DEMO_TESTS;
-    }
-
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
@@ -593,35 +584,25 @@ export const dataService = {
         const { data, error } = await query;
         if (!error && Array.isArray(data)) {
           const remoteTests = data as Test[];
-          
-          // SMART MERGE: Keep all remote tests + any local tests not yet in remote
-          const remoteIdSet = new Set(remoteTests.map(t => t.id));
-          const unsyncedLocal = localTests.filter(lt => !remoteIdSet.has(lt.id));
-          
-          const merged = [...unsyncedLocal, ...remoteTests];
-          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(merged));
-
-          // Background sync unsynced tests to Supabase if any exist
-          if (unsyncedLocal.length > 0) {
-            setTimeout(async () => {
-              for (const unsynced of unsyncedLocal) {
-                try {
-                  await dataService.saveTest(unsynced);
-                } catch {
-                  // ignore background retry errors
-                }
-              }
-            }, 500);
-          }
-
+          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(remoteTests));
           if (!includeUnpublished) {
-            return merged.filter(t => t.is_published && (t.status === 'published' || !t.status));
+            return remoteTests.filter(t => t.is_published && (t.status === 'published' || !t.status));
           }
-          return merged;
+          return remoteTests;
         }
       } catch (e) {
-        console.warn('Supabase fetch tests error', e);
+        console.warn('Supabase fetch tests error, using local cache', e);
       }
+    }
+
+    // Offline / Local cache fallback
+    const rawLocal = localStorage.getItem(STORAGE_KEYS.TESTS);
+    let localTests: Test[] = [];
+    try {
+      localTests = rawLocal ? JSON.parse(rawLocal) : [];
+      if (!Array.isArray(localTests)) localTests = [];
+    } catch {
+      localTests = [];
     }
 
     if (!includeUnpublished) {
@@ -867,16 +848,56 @@ export const dataService = {
     if (isSupabaseConfigured() && supabase) {
       try {
         if (isValidUUID(testId)) {
+          // 1. Delete questions for this test
+          await supabase.from('questions').delete().eq('test_id', testId);
+          
+          // 2. Delete answers for attempts belonging to this test
+          const { data: atts } = await supabase.from('attempts').select('id').eq('test_id', testId);
+          if (atts && atts.length > 0) {
+            const attIds = atts.map((a: any) => a.id);
+            await supabase.from('answers').delete().in('attempt_id', attIds);
+          }
+
+          // 3. Delete attempts belonging to this test
+          await supabase.from('attempts').delete().eq('test_id', testId);
+
+          // 4. Delete the test row itself
           await supabase.from('tests').delete().eq('id', testId);
         }
       } catch (e) {
         console.error('Supabase test delete error', e);
       }
     }
+
+    // Purge test from local cache
     const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
-    let tests: Test[] = raw ? JSON.parse(raw) : [];
-    const filtered = tests.filter(t => t.id !== testId);
+    let tests: Test[] = [];
+    try {
+      tests = raw ? JSON.parse(raw) : [];
+    } catch {}
+    const filtered = tests.filter(t => t.id !== testId && t.slug !== testId && t.test_code !== testId);
     localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(filtered));
+
+    // Purge questions from local cache
+    const qRaw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+    if (qRaw) {
+      try {
+        const qMap = JSON.parse(qRaw);
+        delete qMap[testId];
+        localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(qMap));
+      } catch {}
+    }
+
+    // Purge attempts from local cache
+    const aRaw = localStorage.getItem(STORAGE_KEYS.ATTEMPTS);
+    if (aRaw) {
+      try {
+        const attList: Attempt[] = JSON.parse(aRaw);
+        const filteredAtts = attList.filter(a => a.test_id !== testId);
+        localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(filteredAtts));
+      } catch {}
+    }
+
     window.dispatchEvent(new CustomEvent('gradeup_tests_updated'));
     return true;
   },
@@ -958,14 +979,31 @@ export const dataService = {
           .select('*')
           .eq('test_id', testId)
           .order('question_number', { ascending: true });
-        if (!error && data) return data as Question[];
+        if (!error && Array.isArray(data)) {
+          // Update local cache for this test
+          const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+          let questionsMap: Record<string, Question[]> = {};
+          try {
+            questionsMap = raw ? JSON.parse(raw) : {};
+          } catch {}
+          questionsMap[testId] = data as Question[];
+          localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+
+          if (!includeAnswers) {
+            return (data as Question[]).map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
+          }
+          return data as Question[];
+        }
       } catch (e) {
         console.warn('Supabase questions fetch error', e);
       }
     }
 
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
+    let questionsMap: Record<string, Question[]> = {};
+    try {
+      questionsMap = raw ? JSON.parse(raw) : {};
+    } catch {}
     const questions = questionsMap[testId] || [];
     if (!includeAnswers) {
       return questions.map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
@@ -1007,6 +1045,18 @@ export const dataService = {
       };
     });
 
+    // 1. Ensure test metadata exists and update totals
+    const test = await dataService.getTestBySlugOrId(targetTestId);
+    if (test) {
+      const updatedTest: Test = {
+        ...test,
+        total_questions: sanitizedQuestions.length,
+        total_marks: sanitizedQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0)
+      };
+      await dataService.saveTest(updatedTest);
+    }
+
+    // 2. Persist questions in Supabase
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase && isValidUUID(targetTestId)) {
       try {
@@ -1022,20 +1072,14 @@ export const dataService = {
       }
     }
 
+    // 3. Update local cache
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
+    let questionsMap: Record<string, Question[]> = {};
+    try {
+      questionsMap = raw ? JSON.parse(raw) : {};
+    } catch {}
     questionsMap[targetTestId] = sanitizedQuestions as unknown as Question[];
     localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
-
-    const test = await dataService.getTestBySlugOrId(targetTestId);
-    if (test) {
-      const updatedTest: Test = {
-        ...test,
-        total_questions: sanitizedQuestions.length,
-        total_marks: sanitizedQuestions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0)
-      };
-      await dataService.saveTest(updatedTest);
-    }
   },
 
   saveQuestion: async (testId: string, question: Question): Promise<Question> => {
@@ -1059,6 +1103,15 @@ export const dataService = {
   },
 
   deleteQuestion: async (testId: string, questionId: string): Promise<void> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase && isValidUUID(questionId)) {
+      try {
+        await supabase.from('questions').delete().eq('id', questionId);
+      } catch (e) {
+        console.error('Supabase deleteQuestion error:', e);
+      }
+    }
+
     const questions = await dataService.getQuestions(testId, true);
     const filtered = questions.filter(q => q.id !== questionId);
     const reindexed = filtered.map((q, idx) => ({ ...q, question_number: idx + 1 }));
@@ -1076,14 +1129,17 @@ export const dataService = {
           .from('questions')
           .select('*')
           .order('created_at', { ascending: false });
-        if (!error && data && data.length > 0) return data as Question[];
+        if (!error && Array.isArray(data)) return data as Question[];
       } catch (e) {
         console.warn('Supabase all questions fetch error', e);
       }
     }
 
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
+    let questionsMap: Record<string, Question[]> = {};
+    try {
+      questionsMap = raw ? JSON.parse(raw) : {};
+    } catch {}
     
     const allList: Question[] = [];
     const seenIds = new Set<string>();
@@ -1109,8 +1165,20 @@ export const dataService = {
   },
 
   deleteQuestionFromBank: async (questionId: string): Promise<void> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase && isValidUUID(questionId)) {
+      try {
+        await supabase.from('questions').delete().eq('id', questionId);
+      } catch (e) {
+        console.error('Supabase deleteQuestionFromBank error:', e);
+      }
+    }
+
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : DEMO_QUESTIONS;
+    let questionsMap: Record<string, Question[]> = {};
+    try {
+      questionsMap = raw ? JSON.parse(raw) : {};
+    } catch {}
 
     let targetTestId = 'bank';
     Object.entries(questionsMap).forEach(([tId, list]) => {
@@ -1989,23 +2057,12 @@ export const dataService = {
       }
     }
     const raw = localStorage.getItem(STORAGE_KEYS.ATTEMPTS);
-    let attempts: Attempt[] = raw ? JSON.parse(raw) : DEMO_ATTEMPTS;
-    
-    // Ensure all demo attempts are available if not present
-    if (Array.isArray(attempts)) {
-      const existingIds = new Set(attempts.map(a => a.id));
-      let added = false;
-      DEMO_ATTEMPTS.forEach(da => {
-        if (!existingIds.has(da.id)) {
-          attempts.push(da);
-          added = true;
-        }
-      });
-      if (added) {
-        localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(attempts));
-      }
-    } else {
-      attempts = DEMO_ATTEMPTS;
+    let attempts: Attempt[] = [];
+    try {
+      attempts = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(attempts)) attempts = [];
+    } catch {
+      attempts = [];
     }
 
     if (testId && testId !== 'all') {
@@ -2041,6 +2098,78 @@ export const dataService = {
     const raw = localStorage.getItem(STORAGE_KEYS.ANSWERS);
     const answersMap: Record<string, Answer[]> = raw ? JSON.parse(raw) : {};
     return answersMap[attemptId] || [];
+  },
+
+  // ------------------------------------
+  // MANUAL FULL SYNC UTILITY TO SUPABASE
+  // ------------------------------------
+  syncAllLocalDataToSupabase: async (): Promise<{
+    success: boolean;
+    testsCount: number;
+    questionsCount: number;
+    attemptsCount: number;
+    error?: string;
+  }> => {
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase) {
+      return { success: false, testsCount: 0, questionsCount: 0, attemptsCount: 0, error: 'Supabase is not configured' };
+    }
+
+    let syncedTests = 0;
+    let syncedQuestions = 0;
+    let syncedAttempts = 0;
+
+    try {
+      // 1. Sync all tests
+      const tests = await dataService.getTests(true);
+      for (const t of tests) {
+        await dataService.saveTest(t);
+        syncedTests++;
+      }
+
+      // 2. Sync all questions
+      const rawQ = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+      if (rawQ) {
+        const qMap = JSON.parse(rawQ);
+        for (const [tId, qList] of Object.entries(qMap)) {
+          if (Array.isArray(qList) && qList.length > 0) {
+            await dataService.saveQuestions(tId, qList as Question[]);
+            syncedQuestions += qList.length;
+          }
+        }
+      }
+
+      // 3. Sync all attempts
+      const attempts = await dataService.getAttempts();
+      for (const att of attempts) {
+        await dataService.saveAttempt(att);
+        syncedAttempts++;
+      }
+
+      // 4. Sync Settings & Social Platforms
+      const settings = await dataService.getSettings();
+      await dataService.updateSettings(settings);
+
+      const platforms = await dataService.getSocialPlatforms(true);
+      for (const p of platforms) {
+        await dataService.saveSocialPlatform(p);
+      }
+
+      return {
+        success: true,
+        testsCount: syncedTests,
+        questionsCount: syncedQuestions,
+        attemptsCount: syncedAttempts
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        testsCount: syncedTests,
+        questionsCount: syncedQuestions,
+        attemptsCount: syncedAttempts,
+        error: err?.message || 'Sync failed'
+      };
+    }
   },
 
   // ------------------------------------
