@@ -160,6 +160,7 @@ export interface AdminSettings {
   website_url: string;
   support_email: string;
   whatsapp_number: string;
+  whatsapp_channel_url?: string;
   telegram_channel: string;
   youtube_channel: string;
   instagram_handle: string;

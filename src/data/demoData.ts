@@ -6,6 +6,7 @@ export const DEMO_ADMIN_SETTINGS: AdminSettings = {
   website_url: "https://gradeupstudy.com",
   support_email: "support@gradeupstudy.com",
   whatsapp_number: "+919816000000",
+  whatsapp_channel_url: "https://whatsapp.com/channel/gradeupstudy",
   telegram_channel: "https://t.me/gradeupstudy",
   youtube_channel: "https://youtube.com/@gradeupstudy",
   instagram_handle: "https://instagram.com/gradeupstudy",

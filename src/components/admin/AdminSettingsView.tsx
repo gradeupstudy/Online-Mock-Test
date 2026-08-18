@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Settings, Save, Globe, Mail, Phone, Youtube, Send, Instagram, ShieldCheck, Check, Key, Lock, UserCheck, Image as ImageIcon, GraduationCap } from 'lucide-react';
+import { Settings, Save, Globe, Mail, Phone, Youtube, Send, Instagram, MessageCircle, Share2, ShieldCheck, Check, Key, Lock, UserCheck, Image as ImageIcon, GraduationCap, ExternalLink } from 'lucide-react';
 import { AdminSettings } from '../../types';
 import { dataService } from '../../services/dataService';
 import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase';
@@ -259,6 +259,135 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
                 onChange={(e) => setSettings({ ...settings, whatsapp_number: e.target.value })}
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
               />
+            </div>
+          </div>
+        </div>
+
+        {/* Official Social Media Links (Bottom Bar & Social Gate) */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+          <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
+            <div className="flex items-center gap-2">
+              <Share2 className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                Official Social Media Links (Bottom Bar & Community)
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              These links appear on the website footer/bottom bar and connect students to your official channels.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* YouTube */}
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">
+                <Youtube className="w-4 h-4 text-rose-600" />
+                <span>YouTube Channel URL</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="url"
+                  placeholder="https://youtube.com/@gradeupstudy"
+                  value={settings.youtube_channel || ''}
+                  onChange={(e) => setSettings({ ...settings, youtube_channel: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white"
+                />
+                {settings.youtube_channel && (
+                  <a
+                    href={settings.youtube_channel}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-rose-600"
+                    title="Open Link"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Telegram */}
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">
+                <Send className="w-4 h-4 text-blue-500" />
+                <span>Telegram Channel / Group Link</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="url"
+                  placeholder="https://t.me/gradeupstudy"
+                  value={settings.telegram_channel || ''}
+                  onChange={(e) => setSettings({ ...settings, telegram_channel: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white"
+                />
+                {settings.telegram_channel && (
+                  <a
+                    href={settings.telegram_channel}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-blue-500"
+                    title="Open Link"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* Instagram */}
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">
+                <Instagram className="w-4 h-4 text-pink-600" />
+                <span>Instagram Profile Link</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="url"
+                  placeholder="https://instagram.com/gradeupstudy"
+                  value={settings.instagram_handle || ''}
+                  onChange={(e) => setSettings({ ...settings, instagram_handle: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white"
+                />
+                {settings.instagram_handle && (
+                  <a
+                    href={settings.instagram_handle}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-pink-600"
+                    title="Open Link"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                )}
+              </div>
+            </div>
+
+            {/* WhatsApp Channel */}
+            <div>
+              <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-1.5">
+                <MessageCircle className="w-4 h-4 text-emerald-600" />
+                <span>WhatsApp Channel / Community Link</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="url"
+                  placeholder="https://whatsapp.com/channel/gradeupstudy"
+                  value={settings.whatsapp_channel_url || ''}
+                  onChange={(e) => setSettings({ ...settings, whatsapp_channel_url: e.target.value })}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white"
+                />
+                {settings.whatsapp_channel_url && (
+                  <a
+                    href={settings.whatsapp_channel_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-emerald-600"
+                    title="Open Link"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+                )}
+              </div>
             </div>
           </div>
         </div>

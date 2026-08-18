@@ -205,6 +205,7 @@ export const dataService = {
           website_url: updated.website_url || 'https://gradeupstudy.com',
           support_email: updated.support_email || 'support@gradeupstudy.com',
           whatsapp_number: updated.whatsapp_number || '+919816000000',
+          whatsapp_channel_url: updated.whatsapp_channel_url || 'https://whatsapp.com/channel/gradeupstudy',
           telegram_channel: updated.telegram_channel || 'https://t.me/gradeupstudy',
           youtube_channel: updated.youtube_channel || 'https://youtube.com/@gradeupstudy',
           instagram_handle: updated.instagram_handle || 'https://instagram.com/gradeupstudy',
@@ -285,6 +286,44 @@ export const dataService = {
           // ignore
         }
       }
+    }
+
+    // Sync social_platforms list with social channels if modified
+    try {
+      const currentPlatforms = await dataService.getSocialPlatforms(false);
+      let platformsChanged = false;
+      const updatedPlatforms = currentPlatforms.map(p => {
+        const lowerName = (p.platform_name || '').toLowerCase();
+        if (newSettings.youtube_channel && (lowerName.includes('youtube') || p.icon === 'youtube')) {
+          platformsChanged = true;
+          return { ...p, platform_url: newSettings.youtube_channel };
+        }
+        if (newSettings.telegram_channel && (lowerName.includes('telegram') || p.icon === 'send')) {
+          platformsChanged = true;
+          return { ...p, platform_url: newSettings.telegram_channel };
+        }
+        if (newSettings.instagram_handle && (lowerName.includes('instagram') || p.icon === 'instagram')) {
+          platformsChanged = true;
+          return { ...p, platform_url: newSettings.instagram_handle };
+        }
+        if (newSettings.whatsapp_channel_url && (lowerName.includes('whatsapp') || p.icon === 'message-circle')) {
+          platformsChanged = true;
+          return { ...p, platform_url: newSettings.whatsapp_channel_url };
+        }
+        return p;
+      });
+
+      if (platformsChanged) {
+        localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(updatedPlatforms));
+      }
+    } catch {
+      // ignore
+    }
+
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_settings_updated', { detail: updated }));
+    } catch {
+      // ignore
     }
 
     return updated;
