@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { Question } from '../types';
+import { shuffleAndBalanceQuestions, shuffleQuestionOptions } from './dataService';
 
 const STORAGE_KEY = 'gradeup_gemini_api_keys';
 
@@ -278,8 +279,9 @@ CRITICAL RULES:
 5. Do NOT mix up or duplicate Subject Name into Section Name or Topic Name into Section Name.
 6. Each question MUST have exactly 4 plausible options (A, B, C, D).
 7. "correct_answer" must be exactly "A", "B", "C", or "D".
-8. "explanation" must be educational, factual, and crystal clear (in Hindi or English as appropriate).
-9. Output JSON array with EXACTLY ${targetCount} items.
+8. CRITICAL ANSWER DISTRIBUTION: The correct answer positions MUST be balanced and randomized across A, B, C, and D (roughly 25% A, 25% B, 25% C, 25% D). NEVER make all or most questions have the same correct answer (e.g. NEVER make all questions 'A' or 'B'). Avoid 3 consecutive questions with the same answer.
+9. "explanation" must be educational, factual, and crystal clear (in Hindi or English as appropriate).
+10. Output JSON array with EXACTLY ${targetCount} items.
         `.trim();
 
         const response = await aiService.generateWithModelFallback(
@@ -369,7 +371,10 @@ CRITICAL RULES:
           inspection_status: 'pending',
         }));
 
-        return questions;
+        // Balance & shuffle options so that correct answers are evenly distributed across A, B, C, D
+        const balancedQuestions = shuffleAndBalanceQuestions(questions);
+
+        return balancedQuestions;
       }
     );
   },
@@ -1274,4 +1279,13 @@ Return your response strictly conforming to the requested JSON schema.
       }
     );
   },
+
+  /**
+   * Helper to shuffle options and balance answer keys
+   */
+  shuffleAndBalanceQuestions,
+  shuffleQuestionOptions,
 };
+
+export { shuffleAndBalanceQuestions, shuffleQuestionOptions };
+

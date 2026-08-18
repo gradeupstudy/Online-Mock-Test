@@ -283,104 +283,107 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex flex-col font-sans -mx-4 -mt-6 sm:-mx-6 sm:-mt-8">
+    <div className="min-h-screen bg-slate-100 dark:bg-slate-950 flex flex-col font-sans w-full">
       
-      {/* EXAM TOP HEADER BAR */}
-      <header className="bg-slate-900 text-white px-3 sm:px-6 py-2.5 sm:py-3 sticky top-0 z-30 border-b border-slate-800 flex items-center justify-between gap-2">
-        
-        {/* Test title & Candidate info */}
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-          <button
-            onClick={() => setShowMobilePalette(true)}
-            className="lg:hidden px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 border border-slate-700 shrink-0 cursor-pointer shadow-xs"
-            title="Open Question Palette"
-          >
-            <Grid className="w-4 h-4 text-blue-400" />
-            <span className="hidden xs:inline">Palette</span>
-            <span className="text-[11px] font-mono text-blue-300">({currentIndex + 1}/{questions.length})</span>
-          </button>
-
-          <div className="min-w-0">
-            <h1 className="font-black text-xs sm:text-sm md:text-base text-white truncate">{test.title}</h1>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
-              Candidate: <span className="text-blue-300 font-bold">{studentData.student_name}</span> ({studentData.student_district})
-            </p>
-          </div>
-        </div>
-
-        {/* Font size toggles & Timer & Submit */}
-        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+      {/* EXAM STICKY TOP CONTAINER (Header + Section Switcher combined) */}
+      <div className="sticky top-0 z-30 shadow-md">
+        {/* EXAM TOP HEADER BAR */}
+        <header className="bg-slate-900 text-white px-3 sm:px-6 py-2.5 sm:py-3 border-b border-slate-800 flex items-center justify-between gap-2">
           
-          {/* Zoom Controls (Tablet & PC) */}
-          <div className="hidden sm:flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-xl text-xs border border-slate-700">
+          {/* Test title & Candidate info */}
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <button
-              onClick={() => setFontSize('sm')}
-              className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'sm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-              title="Small text"
+              onClick={() => setShowMobilePalette(true)}
+              className="lg:hidden px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 active:bg-slate-600 rounded-xl text-white font-bold text-xs flex items-center gap-1.5 border border-slate-700 shrink-0 cursor-pointer shadow-xs"
+              title="Open Question Palette"
             >
-              A-
+              <Grid className="w-4 h-4 text-blue-400" />
+              <span className="hidden xs:inline">Palette</span>
+              <span className="text-[11px] font-mono text-blue-300">({currentIndex + 1}/{questions.length})</span>
             </button>
-            <button
-              onClick={() => setFontSize('base')}
-              className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'base' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-              title="Normal text"
-            >
-              A
-            </button>
-            <button
-              onClick={() => setFontSize('lg')}
-              className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'lg' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
-              title="Large text"
-            >
-              A+
-            </button>
+
+            <div className="min-w-0">
+              <h1 className="font-black text-xs sm:text-sm md:text-base text-white truncate">{test.title}</h1>
+              <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
+                Candidate: <span className="text-blue-300 font-bold">{studentData.student_name}</span> ({studentData.student_district})
+              </p>
+            </div>
           </div>
 
-          {/* Countdown Clock */}
-          <div className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl font-mono font-black text-xs sm:text-sm md:text-base flex items-center gap-1.5 border shadow-inner ${
-            timeLeftSeconds < 300
-              ? 'bg-rose-950 text-rose-300 border-rose-600 animate-pulse'
-              : 'bg-slate-800 text-emerald-400 border-slate-700'
-          }`}>
-            <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-            <span>{formatTimer(timeLeftSeconds)}</span>
-          </div>
-
-          {/* Finish & Submit Button */}
-          <button
-            onClick={() => setShowConfirmModal(true)}
-            className="px-3 sm:px-4 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
-          >
-            <span>Submit</span>
-            <span className="hidden sm:inline">Exam</span>
-          </button>
-        </div>
-
-      </header>
-
-      {/* Section Switcher Bar */}
-      {sectionsList.length > 0 && (
-        <div className="bg-slate-800 text-slate-300 px-3 sm:px-6 py-2 border-b border-slate-700 flex items-center gap-2 overflow-x-auto text-xs font-bold scrollbar-none">
-          <span className="text-amber-400 uppercase text-[10px] tracking-wider shrink-0 mr-1 font-black">Sections:</span>
-          {sectionsList.map((sec) => {
-            const firstIdx = questions.findIndex((q) => q.section === sec || q.subject === sec);
-            const isCurrentSection = (currentQuestion?.section === sec) || (!currentQuestion?.section && currentQuestion?.subject === sec);
-            return (
+          {/* Font size toggles & Timer & Submit */}
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            
+            {/* Zoom Controls (Tablet & PC) */}
+            <div className="hidden sm:flex items-center gap-1 bg-slate-800 px-2 py-1 rounded-xl text-xs border border-slate-700">
               <button
-                key={sec}
-                onClick={() => firstIdx !== -1 && handleGoToQuestion(firstIdx)}
-                className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
-                  isCurrentSection
-                    ? 'bg-blue-600 text-white font-black shadow-xs'
-                    : 'bg-slate-900 hover:bg-slate-700 text-slate-300 font-semibold'
-                }`}
+                onClick={() => setFontSize('sm')}
+                className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'sm' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                title="Small text"
               >
-                <span>{sec}</span>
+                A-
               </button>
-            );
-          })}
-        </div>
-      )}
+              <button
+                onClick={() => setFontSize('base')}
+                className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'base' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                title="Normal text"
+              >
+                A
+              </button>
+              <button
+                onClick={() => setFontSize('lg')}
+                className={`px-1.5 py-0.5 rounded-lg font-bold transition-colors ${fontSize === 'lg' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+                title="Large text"
+              >
+                A+
+              </button>
+            </div>
+
+            {/* Countdown Clock */}
+            <div className={`px-2.5 sm:px-3.5 py-1.5 rounded-xl font-mono font-black text-xs sm:text-sm md:text-base flex items-center gap-1.5 border shadow-inner ${
+              timeLeftSeconds < 300
+                ? 'bg-rose-950 text-rose-300 border-rose-600 animate-pulse'
+                : 'bg-slate-800 text-emerald-400 border-slate-700'
+            }`}>
+              <Clock className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span>{formatTimer(timeLeftSeconds)}</span>
+            </div>
+
+            {/* Finish & Submit Button */}
+            <button
+              onClick={() => setShowConfirmModal(true)}
+              className="px-3 sm:px-4 py-1.5 sm:py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <span>Submit</span>
+              <span className="hidden sm:inline">Exam</span>
+            </button>
+          </div>
+
+        </header>
+
+        {/* Section Switcher Bar */}
+        {sectionsList.length > 0 && (
+          <div className="bg-slate-800/95 backdrop-blur-md text-slate-300 px-3 sm:px-6 py-2 border-b border-slate-700/80 flex items-center gap-2 overflow-x-auto text-xs font-bold scrollbar-none">
+            <span className="text-amber-400 uppercase text-[10px] tracking-wider shrink-0 mr-1 font-black">Sections:</span>
+            {sectionsList.map((sec) => {
+              const firstIdx = questions.findIndex((q) => q.section === sec || q.subject === sec);
+              const isCurrentSection = (currentQuestion?.section === sec) || (!currentQuestion?.section && currentQuestion?.subject === sec);
+              return (
+                <button
+                  key={sec}
+                  onClick={() => firstIdx !== -1 && handleGoToQuestion(firstIdx)}
+                  className={`px-3 py-1.5 rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer text-xs ${
+                    isCurrentSection
+                      ? 'bg-blue-600 text-white font-black shadow-xs ring-1 ring-blue-400'
+                      : 'bg-slate-900 hover:bg-slate-700 text-slate-300 font-semibold'
+                  }`}
+                >
+                  <span>{sec}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* MAIN EXAM LAYOUT */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
@@ -496,13 +499,23 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
                     <ChevronLeft className="w-4 h-4" /> <span>Previous</span>
                   </button>
 
-                  <button
-                    onClick={handleSaveAndNext}
-                    className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <span>Save & Next</span>
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
+                  {currentIndex === questions.length - 1 ? (
+                    <button
+                      onClick={() => setShowConfirmModal(true)}
+                      className="flex-1 sm:flex-none px-5 sm:px-7 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-lg hover:shadow-emerald-500/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>Submit Test</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleSaveAndNext}
+                      className="flex-1 sm:flex-none px-5 sm:px-6 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>Save & Next</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
 
               </div>

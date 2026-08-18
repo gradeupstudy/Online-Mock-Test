@@ -17,10 +17,11 @@ import {
   ShieldCheck,
   Layers,
   BookOpen,
-  Copy
+  Copy,
+  Shuffle
 } from 'lucide-react';
 import { Test, Question } from '../../types';
-import { dataService, generateUUID } from '../../services/dataService';
+import { dataService, generateUUID, shuffleQuestionOptions, shuffleAndBalanceQuestions } from '../../services/dataService';
 import { aiService } from '../../services/aiService';
 import { Modal } from '../common/Modal';
 import { AIQuestionGeneratorModal } from './AIQuestionGeneratorModal';
@@ -156,6 +157,54 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       else next.add(id);
       return next;
     });
+  };
+
+  // 1-Click: Shuffle options for ALL questions in the mock test
+  const handleShuffleAllTestOptions = async () => {
+    if (questions.length === 0) {
+      notify('error', 'No questions to shuffle!');
+      return;
+    }
+    if (!window.confirm(`Kya aap sabhi ${questions.length} questions ke options (A, B, C, D) shuffle/randomize karna chahte hain? Correct answers 100% accurate rahenge aur evenly balance ho jayenge.`)) {
+      return;
+    }
+    try {
+      const shuffled = shuffleAndBalanceQuestions(questions);
+      await dataService.saveQuestions(testId, shuffled);
+      setQuestions(shuffled);
+      notify('success', `🔀 Shuffled & balanced options for all ${shuffled.length} MCQs!`);
+    } catch (err: any) {
+      notify('error', err?.message || 'Failed to shuffle options.');
+    }
+  };
+
+  // Shuffle options for only selected questions
+  const handleShuffleSelectedOptions = async () => {
+    if (selectedQuestionIds.size === 0) return;
+    try {
+      const targetQuestions = questions.filter(q => selectedQuestionIds.has(q.id));
+      const balancedTargets = shuffleAndBalanceQuestions(targetQuestions);
+      const targetMap = new Map(balancedTargets.map(q => [q.id, q]));
+      
+      const updated = questions.map(q => targetMap.get(q.id) || q);
+      await dataService.saveQuestions(testId, updated);
+      setQuestions(updated);
+      notify('success', `🔀 Shuffled options for ${selectedQuestionIds.size} selected questions!`);
+    } catch (err: any) {
+      notify('error', err?.message || 'Failed to shuffle selected options.');
+    }
+  };
+
+  // 1-Click single question option shuffle
+  const handleSingleShuffle = async (q: Question) => {
+    try {
+      const shuffledQ = shuffleQuestionOptions(q);
+      await dataService.saveQuestion(testId, shuffledQ);
+      setQuestions(prev => prev.map(item => item.id === q.id ? shuffledQ : item));
+      notify('success', `🔀 Options shuffled for Q${q.question_number} (New Ans: ${shuffledQ.correct_answer})`);
+    } catch (err: any) {
+      notify('error', err?.message || 'Failed to shuffle question options.');
+    }
   };
 
   const handleDeleteSelected = async () => {
@@ -314,6 +363,16 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             <span>AI Explanations (Bulk)</span>
           </button>
 
+          {/* SHUFFLE ALL OPTIONS (1-CLICK RANDOMIZE) */}
+          <button
+            onClick={handleShuffleAllTestOptions}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+            title="1-Click: Shuffle option positions (A/B/C/D) across all questions in this mock test to balance answers"
+          >
+            <Shuffle className="w-4 h-4 text-indigo-200" />
+            <span>Shuffle Options</span>
+          </button>
+
           <button
             onClick={() => setIsAiModalOpen(true)}
             className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer border border-slate-700"
@@ -396,6 +455,15 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             >
               <BookOpen className="w-3.5 h-3.5" />
               <span>Generate Explanations ({selectedQuestionIds.size})</span>
+            </button>
+
+            <button
+              onClick={handleShuffleSelectedOptions}
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Shuffle option positions for selected questions"
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              <span>Shuffle Options ({selectedQuestionIds.size})</span>
             </button>
 
             <button
@@ -540,6 +608,13 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                   title="Preview Question"
                 >
                   <Eye className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleSingleShuffle(q)}
+                  className="p-1.5 text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                  title="Shuffle options A/B/C/D for this question"
+                >
+                  <Shuffle className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => handleOpenEdit(q)}

@@ -15,9 +15,10 @@ import {
   HelpCircle, 
   ShieldCheck,
   Check,
-  Zap
+  Zap,
+  Shuffle
 } from 'lucide-react';
-import { aiService, AIGenerateParams } from '../../services/aiService';
+import { aiService, AIGenerateParams, shuffleAndBalanceQuestions, shuffleQuestionOptions } from '../../services/aiService';
 import { Question } from '../../types';
 import { dataService } from '../../services/dataService';
 
@@ -144,6 +145,22 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
     } finally {
       setGenerating(false);
     }
+  };
+
+  const handleShuffleOptions = () => {
+    if (generatedQuestions.length === 0) return;
+    const shuffled = shuffleAndBalanceQuestions(generatedQuestions);
+    setGeneratedQuestions(shuffled);
+    onToast?.('success', '🔀 Shuffled all options! Correct answers are now evenly distributed across A, B, C, D.');
+  };
+
+  const getAnswerDistribution = () => {
+    const counts = { A: 0, B: 0, C: 0, D: 0 };
+    generatedQuestions.forEach((q) => {
+      const ans = (q.correct_answer?.toUpperCase() || 'A') as 'A' | 'B' | 'C' | 'D';
+      if (counts[ans] !== undefined) counts[ans]++;
+    });
+    return counts;
   };
 
   const handleConfirmImport = async () => {
@@ -407,17 +424,49 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
         {/* GENERATED QUESTIONS PREVIEW TABLE */}
         {generatedQuestions.length > 0 && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1">
-                <CheckCircle className="w-4 h-4" /> AI Generated {generatedQuestions.length} Questions Ready To Save
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-100 dark:bg-slate-800/80 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4" /> {generatedQuestions.length} Questions Ready
+                </span>
 
-              <button
-                onClick={() => setGeneratedQuestions([])}
-                className="text-xs text-blue-600 hover:underline font-bold flex items-center gap-1"
-              >
-                <RefreshCw className="w-3.5 h-3.5" /> Re-generate
-              </button>
+                {/* Answer Distribution Pills */}
+                {(() => {
+                  const dist = getAnswerDistribution();
+                  return (
+                    <div className="flex items-center gap-1 text-[11px] font-bold bg-white dark:bg-slate-900 px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
+                      <span className="text-slate-400 font-normal mr-1">Answer Keys:</span>
+                      <span className="text-blue-600 font-extrabold">A:{dist.A}</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-emerald-600 font-extrabold">B:{dist.B}</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-purple-600 font-extrabold">C:{dist.C}</span>
+                      <span className="text-slate-300">•</span>
+                      <span className="text-amber-600 font-extrabold">D:{dist.D}</span>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleShuffleOptions}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Shuffle option positions across all questions to randomize correct answers"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>Shuffle Options (Randomize Keys)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGeneratedQuestions([])}
+                  className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-bold flex items-center gap-1 px-2 py-1"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Re-generate
+                </button>
+              </div>
             </div>
 
             <div className="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 bg-slate-50 dark:bg-slate-900/60">

@@ -484,7 +484,7 @@ export const SocialGateManager: React.FC<SocialGateManagerProps> = ({ onToast })
                 required
                 value={editingPlatform.platform_url || ''}
                 onChange={(e) => setEditingPlatform({ ...editingPlatform, platform_url: e.target.value })}
-                placeholder="https://t.me/gradeupstudy"
+                placeholder="https://t.me/gradeupstudyofficial"
                 className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
               />
             </div>

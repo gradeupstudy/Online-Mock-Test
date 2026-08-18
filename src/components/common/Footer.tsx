@@ -6,8 +6,8 @@ import { DEMO_ADMIN_SETTINGS } from '../../data/demoData';
 export const Footer: React.FC = () => {
   const [socialLinks, setSocialLinks] = useState({
     youtube: DEMO_ADMIN_SETTINGS.youtube_channel || 'https://youtube.com/@gradeupstudy',
-    telegram: DEMO_ADMIN_SETTINGS.telegram_channel || 'https://t.me/gradeupstudy',
-    instagram: DEMO_ADMIN_SETTINGS.instagram_handle || 'https://instagram.com/gradeupstudy',
+    telegram: DEMO_ADMIN_SETTINGS.telegram_channel || 'https://t.me/gradeupstudyofficial',
+    instagram: DEMO_ADMIN_SETTINGS.instagram_handle || 'https://instagram.com/gradeupstudy.official',
     whatsapp: DEMO_ADMIN_SETTINGS.whatsapp_channel_url || 'https://whatsapp.com/channel/gradeupstudy',
     brandName: DEMO_ADMIN_SETTINGS.brand_name || 'Gradeup Study',
     supportEmail: DEMO_ADMIN_SETTINGS.support_email || 'support@gradeupstudy.com',
@@ -25,8 +25,8 @@ export const Footer: React.FC = () => {
 
       setSocialLinks({
         youtube: settings.youtube_channel || ytPlatform?.platform_url || 'https://youtube.com/@gradeupstudy',
-        telegram: settings.telegram_channel || tgPlatform?.platform_url || 'https://t.me/gradeupstudy',
-        instagram: settings.instagram_handle || igPlatform?.platform_url || 'https://instagram.com/gradeupstudy',
+        telegram: settings.telegram_channel || tgPlatform?.platform_url || 'https://t.me/gradeupstudyofficial',
+        instagram: settings.instagram_handle || igPlatform?.platform_url || 'https://instagram.com/gradeupstudy.official',
         whatsapp: settings.whatsapp_channel_url || waPlatform?.platform_url || (settings.whatsapp_number ? `https://wa.me/${settings.whatsapp_number.replace(/[^0-9]/g, '')}` : 'https://whatsapp.com/channel/gradeupstudy'),
         brandName: settings.brand_name || 'Gradeup Study',
         supportEmail: settings.support_email || 'support@gradeupstudy.com',

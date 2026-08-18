@@ -322,7 +322,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
               <div className="relative">
                 <input
                   type="url"
-                  placeholder="https://t.me/gradeupstudy"
+                  placeholder="https://t.me/gradeupstudyofficial"
                   value={settings.telegram_channel || ''}
                   onChange={(e) => setSettings({ ...settings, telegram_channel: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white"
@@ -350,7 +350,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
               <div className="relative">
                 <input
                   type="url"
-                  placeholder="https://instagram.com/gradeupstudy"
+                  placeholder="https://instagram.com/gradeupstudy.official"
                   value={settings.instagram_handle || ''}
                   onChange={(e) => setSettings({ ...settings, instagram_handle: e.target.value })}
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-medium text-slate-900 dark:text-white"

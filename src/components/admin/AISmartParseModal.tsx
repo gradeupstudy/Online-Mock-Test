@@ -14,10 +14,11 @@ import {
   Check,
   Zap,
   HelpCircle,
-  Upload
+  Upload,
+  Shuffle
 } from 'lucide-react';
 import { Question } from '../../types';
-import { aiService } from '../../services/aiService';
+import { aiService, shuffleAndBalanceQuestions } from '../../services/aiService';
 import { dataService } from '../../services/dataService';
 
 interface AISmartParseModalProps {
@@ -105,6 +106,13 @@ export const AISmartParseModal: React.FC<AISmartParseModalProps> = ({
     } else {
       setSelectedIndices(new Set(parsedQuestions.map((_, i) => i)));
     }
+  };
+
+  const handleShuffleOptions = () => {
+    if (parsedQuestions.length === 0) return;
+    const shuffled = shuffleAndBalanceQuestions(parsedQuestions);
+    setParsedQuestions(shuffled);
+    onToast?.('success', '🔀 Shuffled all options! Correct answers are now balanced across A, B, C, D.');
   };
 
   const handleConfirmSave = async () => {
@@ -265,26 +273,38 @@ Explanation: 'Army' represents a group of soldiers, hence collective noun.
         {/* PARSED QUESTIONS PREVIEW TABLE */}
         {parsedQuestions.length > 0 && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-100 dark:bg-slate-800/80 p-3 rounded-xl border border-slate-200 dark:border-slate-700">
               <div className="flex items-center gap-3">
                 <button
                   onClick={toggleSelectAll}
-                  className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1"
+                  className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <Check className="w-3.5 h-3.5" />
                   {selectedIndices.size === parsedQuestions.length ? 'Deselect All' : 'Select All'}
                 </button>
                 <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                  {selectedIndices.size} of {parsedQuestions.length} Questions Selected
+                  {selectedIndices.size} of {parsedQuestions.length} Selected
                 </span>
               </div>
 
-              <button
-                onClick={() => setParsedQuestions([])}
-                className="text-xs text-slate-500 hover:underline font-bold flex items-center gap-1"
-              >
-                <RefreshCw className="w-3.5 h-3.5" /> Paste Again
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleShuffleOptions}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Shuffle option positions across all parsed questions to randomize correct answers"
+                >
+                  <Shuffle className="w-3.5 h-3.5" />
+                  <span>Shuffle Options</span>
+                </button>
+
+                <button
+                  onClick={() => setParsedQuestions([])}
+                  className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 font-bold flex items-center gap-1 px-2 py-1 cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Paste Again
+                </button>
+              </div>
             </div>
 
             <div className="max-h-96 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 bg-slate-50 dark:bg-slate-900/60">

@@ -22,10 +22,11 @@ import {
   Zap,
   Eye,
   Copy,
-  ChevronDown
+  ChevronDown,
+  Shuffle
 } from 'lucide-react';
 import { Question, Test } from '../../types';
-import { dataService } from '../../services/dataService';
+import { dataService, shuffleQuestionOptions, shuffleAndBalanceQuestions } from '../../services/dataService';
 import { aiService } from '../../services/aiService';
 import { Modal } from '../common/Modal';
 import { MCQInspectionModal } from './MCQInspectionModal';
@@ -239,6 +240,32 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
       setSelectedQuestionIds(new Set());
     } else {
       setSelectedQuestionIds(new Set(filteredQuestions.map((q) => q.id)));
+    }
+  };
+
+  const handleShuffleSelectedBankOptions = async () => {
+    if (selectedQuestionIds.size === 0) return;
+    try {
+      const targetQuestions = questions.filter(q => selectedQuestionIds.has(q.id));
+      const balancedTargets = shuffleAndBalanceQuestions(targetQuestions);
+      for (const q of balancedTargets) {
+        await dataService.saveQuestionToBank(q);
+      }
+      await loadBankData();
+      onToast?.('success', `🔀 Shuffled options for ${selectedQuestionIds.size} selected questions!`);
+    } catch (err: any) {
+      onToast?.('error', 'Failed to shuffle selected questions.');
+    }
+  };
+
+  const handleSingleBankShuffle = async (q: Question) => {
+    try {
+      const shuffledQ = shuffleQuestionOptions(q);
+      await dataService.saveQuestionToBank(shuffledQ);
+      setQuestions(prev => prev.map(item => item.id === q.id ? shuffledQ : item));
+      onToast?.('success', `🔀 Options shuffled for Q (New Ans: ${shuffledQ.correct_answer})`);
+    } catch (err: any) {
+      onToast?.('error', 'Failed to shuffle question options.');
     }
   };
 
@@ -711,6 +738,15 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
               </button>
 
               <button
+                onClick={handleShuffleSelectedBankOptions}
+                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Shuffle option positions for selected questions"
+              >
+                <Shuffle className="w-3.5 h-3.5" />
+                <span>Shuffle Options ({selectedQuestionIds.size})</span>
+              </button>
+
+              <button
                 onClick={() => {
                   setNewTestForm((prev) => ({
                     ...prev,
@@ -935,6 +971,14 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                     >
                       <ShieldCheck className="w-3.5 h-3.5 fill-slate-950" />
                       <span>360° Inspect</span>
+                    </button>
+
+                    <button
+                      onClick={() => handleSingleBankShuffle(q)}
+                      title="Shuffle options A/B/C/D for this question"
+                      className="p-2 rounded-xl bg-slate-100 hover:bg-indigo-100 dark:bg-slate-800 dark:hover:bg-indigo-950/60 text-slate-700 hover:text-indigo-600 dark:text-slate-300 dark:hover:text-indigo-400 cursor-pointer transition-colors"
+                    >
+                      <Shuffle className="w-3.5 h-3.5" />
                     </button>
 
                     <button

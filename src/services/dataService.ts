@@ -86,6 +86,173 @@ const initLocalStorage = () => {
 
 initLocalStorage();
 
+export const sanitizeSocialUrl = (platformNameOrIcon: string, url?: string | null): string => {
+  const norm = (platformNameOrIcon || '').toLowerCase();
+  const cleanUrl = (url || '').trim();
+  
+  if (norm.includes('telegram') || norm.includes('send') || norm.includes('t.me')) {
+    if (!cleanUrl || cleanUrl === 'https://t.me/gradeupstudy' || cleanUrl === 'http://t.me/gradeupstudy' || cleanUrl === 'https://t.me/gradeupstudy/') {
+      return 'https://t.me/gradeupstudyofficial';
+    }
+    return cleanUrl;
+  }
+  
+  if (norm.includes('instagram') || norm.includes('ig') || norm.includes('insta')) {
+    if (!cleanUrl || cleanUrl === 'https://instagram.com/gradeupstudy' || cleanUrl === 'http://instagram.com/gradeupstudy' || cleanUrl === 'https://www.instagram.com/gradeupstudy' || cleanUrl === 'https://instagram.com/gradeupstudy/') {
+      return 'https://instagram.com/gradeupstudy.official';
+    }
+    return cleanUrl;
+  }
+
+  if (norm.includes('youtube') || norm.includes('yt')) {
+    if (!cleanUrl) return 'https://youtube.com/@gradeupstudy';
+    return cleanUrl;
+  }
+
+  if (norm.includes('whatsapp') || norm.includes('wa') || norm.includes('message-circle')) {
+    if (!cleanUrl) return 'https://whatsapp.com/channel/gradeupstudy';
+    return cleanUrl;
+  }
+
+  return cleanUrl;
+};
+
+/**
+ * Safely shuffle the 4 options (A, B, C, D) for a single Question.
+ * Keeps the correct answer mapping 100% accurate, but reorders the options randomly
+ * or targets a specific new option slot ('A' | 'B' | 'C' | 'D') if desired.
+ */
+export const shuffleQuestionOptions = (
+  q: Question,
+  forcedTargetAnswer?: 'A' | 'B' | 'C' | 'D'
+): Question => {
+  const currentKey = (['A', 'B', 'C', 'D'].includes(q.correct_answer?.toUpperCase())
+    ? q.correct_answer.toUpperCase()
+    : 'A') as 'A' | 'B' | 'C' | 'D';
+
+  const optionsMap: Record<'A' | 'B' | 'C' | 'D', string> = {
+    A: q.option_a || '',
+    B: q.option_b || '',
+    C: q.option_c || '',
+    D: q.option_d || ''
+  };
+
+  const correctText = optionsMap[currentKey] || q.option_a;
+  
+  // Extract all 4 options
+  const originalList = [
+    { text: q.option_a, wasCorrect: currentKey === 'A' },
+    { text: q.option_b, wasCorrect: currentKey === 'B' },
+    { text: q.option_c, wasCorrect: currentKey === 'C' },
+    { text: q.option_d, wasCorrect: currentKey === 'D' }
+  ];
+
+  let newList: string[] = [];
+  let newCorrectKey: 'A' | 'B' | 'C' | 'D' = 'A';
+
+  if (forcedTargetAnswer) {
+    const targetIdx = ['A', 'B', 'C', 'D'].indexOf(forcedTargetAnswer);
+    const distractors = originalList.filter(item => !item.wasCorrect).map(item => item.text);
+    
+    // Shuffle distractors
+    for (let i = distractors.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [distractors[i], distractors[j]] = [distractors[j], distractors[i]];
+    }
+
+    newList = [];
+    let dIdx = 0;
+    for (let i = 0; i < 4; i++) {
+      if (i === targetIdx) {
+        newList.push(correctText);
+      } else {
+        newList.push(distractors[dIdx++] || `Option ${['A', 'B', 'C', 'D'][i]}`);
+      }
+    }
+    newCorrectKey = forcedTargetAnswer;
+  } else {
+    // Random Fisher-Yates shuffle
+    const shuffled = [...originalList];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
+    newList = shuffled.map(item => item.text);
+    const foundIdx = shuffled.findIndex(item => item.wasCorrect);
+    newCorrectKey = (['A', 'B', 'C', 'D'][foundIdx >= 0 ? foundIdx : 0]) as 'A' | 'B' | 'C' | 'D';
+  }
+
+  // Update explanation if it contains explicit "Option X" text
+  let newExplanation = q.explanation || '';
+  if (newExplanation && currentKey !== newCorrectKey) {
+    newExplanation = newExplanation.replace(
+      new RegExp(`Option\\s+${currentKey}\\b`, 'gi'),
+      `Option ${newCorrectKey}`
+    );
+  }
+
+  return {
+    ...q,
+    option_a: newList[0] || q.option_a,
+    option_b: newList[1] || q.option_b,
+    option_c: newList[2] || q.option_c,
+    option_d: newList[3] || q.option_d,
+    correct_answer: newCorrectKey,
+    explanation: newExplanation
+  };
+};
+
+/**
+ * Shuffle & Balance options across an entire list of questions.
+ * Ensures an even distribution of correct answers across A, B, C, D (~25% each)
+ * and prevents long streaks of identical answers.
+ */
+export const shuffleAndBalanceQuestions = (questions: Question[]): Question[] => {
+  if (!questions || questions.length === 0) return [];
+
+  const keys: ('A' | 'B' | 'C' | 'D')[] = ['A', 'B', 'C', 'D'];
+  const balancedTargets: ('A' | 'B' | 'C' | 'D')[] = [];
+  const fullCycles = Math.ceil(questions.length / 4);
+  
+  for (let c = 0; c < fullCycles; c++) {
+    const cycleKeys = [...keys];
+    // Shuffle the 4 keys for this cycle
+    for (let i = cycleKeys.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [cycleKeys[i], cycleKeys[j]] = [cycleKeys[j], cycleKeys[i]];
+    }
+    // Prevent last key of previous cycle matching first key of new cycle
+    if (balancedTargets.length > 0 && balancedTargets[balancedTargets.length - 1] === cycleKeys[0]) {
+      [cycleKeys[0], cycleKeys[1]] = [cycleKeys[1], cycleKeys[0]];
+    }
+    balancedTargets.push(...cycleKeys);
+  }
+
+  return questions.map((q, idx) => {
+    const targetKey = balancedTargets[idx] || keys[idx % 4];
+    return shuffleQuestionOptions(q, targetKey);
+  });
+};
+
+export const sanitizeAdminSettings = (s: Partial<AdminSettings>): AdminSettings => {
+  const brand_name = s.brand_name || 'Gradeup Study';
+  const youtube_channel = sanitizeSocialUrl('youtube', s.youtube_channel);
+  const telegram_channel = sanitizeSocialUrl('telegram', s.telegram_channel);
+  const instagram_handle = sanitizeSocialUrl('instagram', s.instagram_handle);
+  const whatsapp_channel_url = sanitizeSocialUrl('whatsapp', s.whatsapp_channel_url);
+
+  return {
+    ...DEMO_ADMIN_SETTINGS,
+    ...s,
+    brand_name,
+    youtube_channel,
+    telegram_channel,
+    instagram_handle,
+    whatsapp_channel_url,
+  };
+};
+
 export const sanitizeAttemptForSupabase = (a: Attempt) => {
   return {
     id: isValidUUID(a.id) ? a.id : generateUUID(),
@@ -131,13 +298,13 @@ export const dataService = {
           .maybeSingle();
 
         if (!error && data) {
-          settings = { ...DEMO_ADMIN_SETTINGS, ...data };
+          settings = sanitizeAdminSettings(data);
           
           // If whatsapp_channel_url is empty in data, check social_platforms array or fallback
           if (!settings.whatsapp_channel_url && Array.isArray(data.social_platforms)) {
             const wa = data.social_platforms.find((p: any) => (p.platform_name || '').toLowerCase().includes('whatsapp') || p.icon === 'message-circle');
             if (wa && wa.platform_url) {
-              settings.whatsapp_channel_url = wa.platform_url;
+              settings.whatsapp_channel_url = sanitizeSocialUrl('whatsapp', wa.platform_url);
             }
           }
           
@@ -148,16 +315,16 @@ export const dataService = {
               spRows.forEach((row: any) => {
                 const name = (row.platform_name || '').toLowerCase();
                 if ((name.includes('youtube') || row.icon === 'youtube') && row.platform_url && (!data.youtube_channel || data.youtube_channel.includes('gradeupstudy'))) {
-                  settings.youtube_channel = row.platform_url;
+                  settings.youtube_channel = sanitizeSocialUrl('youtube', row.platform_url);
                 }
                 if ((name.includes('telegram') || row.icon === 'send') && row.platform_url && (!data.telegram_channel || data.telegram_channel.includes('gradeupstudy'))) {
-                  settings.telegram_channel = row.platform_url;
+                  settings.telegram_channel = sanitizeSocialUrl('telegram', row.platform_url);
                 }
                 if ((name.includes('instagram') || row.icon === 'instagram') && row.platform_url && (!data.instagram_handle || data.instagram_handle.includes('gradeupstudy'))) {
-                  settings.instagram_handle = row.platform_url;
+                  settings.instagram_handle = sanitizeSocialUrl('instagram', row.platform_url);
                 }
                 if ((name.includes('whatsapp') || row.icon === 'message-circle') && row.platform_url && (!settings.whatsapp_channel_url || settings.whatsapp_channel_url.includes('gradeupstudy'))) {
-                  settings.whatsapp_channel_url = row.platform_url;
+                  settings.whatsapp_channel_url = sanitizeSocialUrl('whatsapp', row.platform_url);
                 }
               });
             }
@@ -169,14 +336,18 @@ export const dataService = {
           
           // If settings contains social_platforms, sync to local storage cache as well
           if (Array.isArray(data.social_platforms) && data.social_platforms.length > 0) {
-            localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(data.social_platforms));
+            const sanitizedSP = data.social_platforms.map((p: any) => ({
+              ...p,
+              platform_url: sanitizeSocialUrl(p.platform_name || p.icon, p.platform_url)
+            }));
+            localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(sanitizedSP));
           }
         } else {
           // If no row in Supabase admin_settings yet, check localStorage
           const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
           if (raw) {
             try {
-              settings = { ...DEMO_ADMIN_SETTINGS, ...JSON.parse(raw) };
+              settings = sanitizeAdminSettings(JSON.parse(raw));
             } catch {
               settings = { ...DEMO_ADMIN_SETTINGS };
             }
@@ -187,7 +358,7 @@ export const dataService = {
         const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
         if (raw) {
           try {
-            settings = { ...DEMO_ADMIN_SETTINGS, ...JSON.parse(raw) };
+            settings = sanitizeAdminSettings(JSON.parse(raw));
           } catch {
             settings = { ...DEMO_ADMIN_SETTINGS };
           }
@@ -197,12 +368,14 @@ export const dataService = {
       const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (raw) {
         try {
-          settings = { ...DEMO_ADMIN_SETTINGS, ...JSON.parse(raw) };
+          settings = sanitizeAdminSettings(JSON.parse(raw));
         } catch {
           settings = { ...DEMO_ADMIN_SETTINGS };
         }
       }
     }
+
+    settings = sanitizeAdminSettings(settings);
 
     // Clear out unsplash image URLs if present
     if (settings.logo_url && settings.logo_url.includes('unsplash.com')) {
@@ -215,13 +388,13 @@ export const dataService = {
 
   updateSettings: async (newSettings: Partial<AdminSettings>): Promise<AdminSettings> => {
     const current = await dataService.getSettings();
-    const updated: AdminSettings = {
+    const updated: AdminSettings = sanitizeAdminSettings({
       ...current,
       ...newSettings,
       social_gate_title: newSettings.social_gate_title !== undefined ? newSettings.social_gate_title : (current.social_gate_title || DEMO_ADMIN_SETTINGS.social_gate_title),
       social_gate_description: newSettings.social_gate_description !== undefined ? newSettings.social_gate_description : (current.social_gate_description || DEMO_ADMIN_SETTINGS.social_gate_description),
       social_gate_enabled: newSettings.social_gate_enabled !== undefined ? newSettings.social_gate_enabled : (current.social_gate_enabled ?? true)
-    };
+    });
 
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
 
@@ -263,9 +436,9 @@ export const dataService = {
           support_email: updated.support_email || 'support@gradeupstudy.com',
           whatsapp_number: updated.whatsapp_number || '+919816000000',
           whatsapp_channel_url: updated.whatsapp_channel_url || 'https://whatsapp.com/channel/gradeupstudy',
-          telegram_channel: updated.telegram_channel || 'https://t.me/gradeupstudy',
+          telegram_channel: updated.telegram_channel || 'https://t.me/gradeupstudyofficial',
           youtube_channel: updated.youtube_channel || 'https://youtube.com/@gradeupstudy',
-          instagram_handle: updated.instagram_handle || 'https://instagram.com/gradeupstudy',
+          instagram_handle: updated.instagram_handle || 'https://instagram.com/gradeupstudy.official',
           default_test_duration: parseSafeNumber(updated.default_test_duration, 90),
           default_marks: parseSafeNumber(updated.default_marks, 1.0),
           default_negative_marking: parseSafeNumber(updated.default_negative_marking, 0.25),
@@ -319,7 +492,7 @@ export const dataService = {
           {
             id: 'a1000000-0000-0000-0000-000000000002',
             platform_name: 'Telegram Channel',
-            platform_url: updated.telegram_channel || 'https://t.me/gradeupstudy',
+            platform_url: updated.telegram_channel || 'https://t.me/gradeupstudyofficial',
             icon: 'send',
             button_text: 'Join Telegram Channel',
             verification_method: 'redirect_only',
@@ -330,7 +503,7 @@ export const dataService = {
           {
             id: 'a1000000-0000-0000-0000-000000000003',
             platform_name: 'Instagram',
-            platform_url: updated.instagram_handle || 'https://instagram.com/gradeupstudy',
+            platform_url: updated.instagram_handle || 'https://instagram.com/gradeupstudy.official',
             icon: 'instagram',
             button_text: 'Follow on Instagram',
             verification_method: 'redirect_only',
@@ -1058,7 +1231,7 @@ export const dataService = {
           const platforms: SocialPlatform[] = settingsData.social_platforms.map((p: any, idx: number) => ({
             id: normalizePlatformId(p.id, p.platform_name),
             platform_name: p.platform_name || 'Community Channel',
-            platform_url: p.platform_url || '',
+            platform_url: sanitizeSocialUrl(p.platform_name || p.icon, p.platform_url || ''),
             icon: p.icon || 'share2',
             button_text: p.button_text || 'Join Channel',
             verification_method: p.verification_method || 'redirect_only',
@@ -1100,6 +1273,7 @@ export const dataService = {
             seen.set(key || normalizedId, {
               ...item,
               id: normalizedId,
+              platform_url: sanitizeSocialUrl(item.platform_name || item.icon, item.platform_url),
               is_active: isItemActive,
               order_index: item.order_index !== undefined ? item.order_index : idx + 1
             });
@@ -1132,18 +1306,18 @@ export const dataService = {
 
     const normalized = platforms.map((p, idx) => {
       const lowerName = (p.platform_name || '').toLowerCase();
-      let updatedUrl = p.platform_url;
+      let updatedUrl = sanitizeSocialUrl(p.platform_name || p.icon, p.platform_url);
       if (adminCustomLinks?.youtube_channel && (lowerName.includes('youtube') || p.icon === 'youtube')) {
-        updatedUrl = adminCustomLinks.youtube_channel;
+        updatedUrl = sanitizeSocialUrl('youtube', adminCustomLinks.youtube_channel);
       }
       if (adminCustomLinks?.telegram_channel && (lowerName.includes('telegram') || p.icon === 'send')) {
-        updatedUrl = adminCustomLinks.telegram_channel;
+        updatedUrl = sanitizeSocialUrl('telegram', adminCustomLinks.telegram_channel);
       }
       if (adminCustomLinks?.instagram_handle && (lowerName.includes('instagram') || p.icon === 'instagram')) {
-        updatedUrl = adminCustomLinks.instagram_handle;
+        updatedUrl = sanitizeSocialUrl('instagram', adminCustomLinks.instagram_handle);
       }
       if (adminCustomLinks?.whatsapp_channel_url && (lowerName.includes('whatsapp') || p.icon === 'message-circle')) {
-        updatedUrl = adminCustomLinks.whatsapp_channel_url;
+        updatedUrl = sanitizeSocialUrl('whatsapp', adminCustomLinks.whatsapp_channel_url);
       }
 
       return {
@@ -1167,6 +1341,7 @@ export const dataService = {
     const sanitizedPlatform: SocialPlatform = {
       ...platform,
       id: cleanId,
+      platform_url: sanitizeSocialUrl(platform.platform_name || platform.icon, platform.platform_url),
       is_active: platform.is_active !== undefined ? Boolean(platform.is_active) : true,
       is_required: platform.is_required !== undefined ? Boolean(platform.is_required) : true,
       verification_method: platform.verification_method || 'redirect_only'
