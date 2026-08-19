@@ -116,7 +116,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
       </div>
 
       {/* Filter and Search Section */}
-      <div className="space-y-4 bg-white dark:bg-slate-900/90 p-4 sm:p-6 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 shadow-xs">
+      <div className="space-y-4 bg-white dark:bg-slate-900 p-4 sm:p-6 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-md">
         
         {/* Top Search Bar & Result Count */}
         <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
@@ -127,21 +127,21 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
               placeholder="Search exam title, subject (e.g. English, GK, Maths), or code..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl sm:rounded-2xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
+              className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-hidden"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="absolute right-3 top-3 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             )}
           </div>
 
-          <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-500 font-semibold">
+          <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-600 dark:text-slate-400 font-semibold">
             <span>
-              Showing <strong className="text-slate-900 dark:text-white font-bold">{filteredTests.length}</strong> of {tests.length} tests
+              Showing <strong className="text-blue-600 dark:text-blue-400 font-black">{filteredTests.length}</strong> of {tests.length} tests
             </span>
             {isFiltered && (
               <button
@@ -156,7 +156,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
 
         {/* 1. Exam Category Filter Pills */}
         <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
             <Layers className="w-3.5 h-3.5 text-blue-500" />
             <span>Filter by Category:</span>
           </div>
@@ -168,15 +168,15 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
                 <button
                   key={cat}
                   onClick={() => setSelectedCategory(cat)}
-                  className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                  className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
                     isSelected
-                      ? 'bg-blue-600 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700/60'
+                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
                   }`}
                 >
                   <span>{cat === 'All' ? 'All Exams' : cat}</span>
                   <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                   }`}>
                     {count}
                   </span>
@@ -189,7 +189,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
         {/* 2. Subject Name Filter Pills */}
         {subjects.length > 1 && (
           <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
               <span>Filter by Subject:</span>
             </div>
@@ -203,15 +203,15 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
                   <button
                     key={sub}
                     onClick={() => setSelectedSubject(sub)}
-                    className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
                       isSelected
-                        ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400'
-                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700/60'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/20'
+                        : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-600 dark:hover:text-indigo-300 border border-slate-200 dark:border-slate-700'
                     }`}
                   >
                     <span>{sub === 'All' ? 'All Subjects' : sub}</span>
                     <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                      isSelected ? 'bg-indigo-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                      isSelected ? 'bg-indigo-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
                     }`}>
                       {count}
                     </span>
@@ -226,9 +226,9 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
 
       {/* Test List Grid */}
       {loading ? (
-        <div className="py-16 text-center text-slate-400 text-sm">Loading available mock tests...</div>
+        <div className="py-16 text-center text-slate-500 font-bold text-sm">Loading available mock tests...</div>
       ) : filteredTests.length === 0 ? (
-        <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 space-y-3">
+        <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-8 space-y-3 shadow-md">
           <BookOpen className="w-12 h-12 text-slate-300 mx-auto" />
           <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">No mock tests found</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
@@ -236,7 +236,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
           </p>
           <button
             onClick={handleResetFilters}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
           >
             Clear All Filters
           </button>
@@ -250,16 +250,16 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
             return (
               <div
                 key={test.id}
-                className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all duration-300 relative overflow-hidden"
+                className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 flex flex-col justify-between shadow-md hover:shadow-xl hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-200 relative overflow-hidden"
               >
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   
                   {/* Category & Code Header */}
                   <div className="flex items-center justify-between gap-2">
-                    <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-[11px] rounded-lg border border-blue-200 dark:border-blue-900">
+                    <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs">
                       {test.category}
                     </span>
-                    <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider font-semibold">
+                    <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/90 dark:border-slate-700 font-mono text-[11px] font-bold rounded-md uppercase">
                       {test.exam_code || test.test_code}
                     </span>
                   </div>
@@ -277,7 +277,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
                         <span>Sections ({test.sections!.length}): {test.sections!.join(', ')}</span>
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs rounded-lg">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs rounded-lg border border-slate-200/80 dark:border-slate-700">
                         <BookOpen className="w-3 h-3 text-slate-400" />
                         <span>General Paper</span>
                       </span>
@@ -286,34 +286,34 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
 
                   {/* Title & Description */}
                   <div>
-                    <h3 className="text-lg font-bold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug">
                       {test.title}
                     </h3>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 mt-1 leading-relaxed">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 mt-1 leading-relaxed min-h-[32px]">
                       {test.description || 'Practice test series based on real exam pattern with instant detailed results.'}
                     </p>
                   </div>
 
                   {/* Exam Key Metrics */}
-                  <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-center text-xs">
+                  <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200/90 dark:border-slate-700/80 text-center text-xs">
                     <div>
-                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Time</span>
-                      <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
-                        <Clock className="w-3 h-3 text-blue-500" /> {test.duration_minutes}m
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">Time</span>
+                      <span className="font-black text-slate-900 dark:text-white flex items-center justify-center gap-1 mt-0.5 text-xs sm:text-sm">
+                        <Clock className="w-3.5 h-3.5 text-blue-500" /> {test.duration_minutes}m
                       </span>
                     </div>
 
                     <div>
-                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Questions</span>
-                      <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
-                        <FileText className="w-3 h-3 text-indigo-500" /> {test.total_questions}
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">Questions</span>
+                      <span className="font-black text-slate-900 dark:text-white flex items-center justify-center gap-1 mt-0.5 text-xs sm:text-sm">
+                        <FileText className="w-3.5 h-3.5 text-indigo-500" /> {test.total_questions}
                       </span>
                     </div>
 
                     <div>
-                      <span className="text-[10px] text-slate-400 font-bold block uppercase">Marks</span>
-                      <span className="font-extrabold text-slate-800 dark:text-slate-200 flex items-center justify-center gap-1 mt-0.5">
-                        <Award className="w-3 h-3 text-emerald-500" /> {test.total_marks}
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-bold block uppercase tracking-wider">Marks</span>
+                      <span className="font-black text-emerald-600 dark:text-emerald-400 flex items-center justify-center gap-1 mt-0.5 text-xs sm:text-sm">
+                        <Award className="w-3.5 h-3.5 text-emerald-500" /> {test.total_marks}
                       </span>
                     </div>
                   </div>
@@ -328,10 +328,10 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
                 </div>
 
                 {/* Action Button */}
-                <div className="pt-6 border-t border-slate-100 dark:border-slate-800/80 mt-4">
+                <div className="pt-4 border-t border-slate-100 dark:border-slate-800/90 mt-4">
                   <button
                     onClick={() => onSelectTest(test)}
-                    className="w-full py-3 px-4 bg-slate-900 hover:bg-blue-600 dark:bg-slate-800 dark:hover:bg-blue-600 text-white font-bold text-xs rounded-xl transition-all duration-200 flex items-center justify-center gap-2 group-hover:shadow-lg cursor-pointer"
+                    className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs sm:text-sm rounded-xl transition-all duration-200 flex items-center justify-center gap-2 shadow-md hover:shadow-lg cursor-pointer"
                   >
                     <span>Start Mock Test</span>
                     <ArrowRight className="w-4 h-4" />

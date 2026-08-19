@@ -35,6 +35,7 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
   onToast,
 }) => {
   const [inspecting, setInspecting] = useState(false);
+  const [targetExam, setTargetExam] = useState<string>('General Competitive Mock Test');
   const [logs, setLogs] = useState<string[]>([]);
   const [report, setReport] = useState<MCQ360InspectionReport | null>(null);
 
@@ -46,9 +47,15 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
     setReport(null);
 
     try {
-      const res = await aiService.inspectMCQ(question, (msg) => {
-        setLogs((prev) => [...prev, msg]);
-      });
+      const res = await aiService.inspectMCQ(
+        question,
+        (msg) => {
+          setLogs((prev) => [...prev, msg]);
+        },
+        {
+          targetExam,
+        }
+      );
       setReport(res);
       onToast?.('success', `360° Inspection complete! Quality Score: ${res.overallQualityScore}/100`);
     } catch (err: any) {
@@ -98,8 +105,8 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
     <Modal isOpen={isOpen} onClose={onClose} title="360° AI MCQ Inspection & Quality Audit" maxWidth="5xl">
       <div className="space-y-6">
 
-        {/* HERO BANNER */}
-        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 text-white p-5 rounded-2xl border border-indigo-500/30 shadow-md">
+        {/* HERO BANNER & BENCHMARK SELECTOR */}
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-900 text-white p-5 rounded-2xl border border-indigo-500/30 shadow-md space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2">
@@ -119,7 +126,7 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
             <button
               onClick={handleRunInspection}
               disabled={inspecting}
-              className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 shrink-0 disabled:opacity-50"
+              className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 shrink-0 disabled:opacity-50 cursor-pointer"
             >
               {inspecting ? (
                 <>
@@ -133,6 +140,26 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
                 </>
               )}
             </button>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-indigo-500/20 text-xs">
+            <span className="font-bold text-amber-300">🎯 Target Exam Syllabus Benchmark:</span>
+            <select
+              value={targetExam}
+              onChange={(e) => setTargetExam(e.target.value)}
+              disabled={inspecting}
+              className="flex-1 px-3 py-1.5 rounded-lg bg-slate-800/90 text-white text-xs border border-indigo-500/40 focus:outline-none focus:ring-1 focus:ring-amber-400 font-medium"
+            >
+              <option value="General Competitive Mock Test">General Competitive Mock Test (Standard)</option>
+              <option value="SSC CGL / CHSL / MTS / CPO (Staff Selection Commission)">SSC CGL / CHSL / MTS / CPO (Staff Selection Commission)</option>
+              <option value="UPSC Civil Services / State PSC (Prelims GS & CSAT)">UPSC Civil Services / State PSC (Prelims GS & CSAT)</option>
+              <option value="Banking & Insurance (IBPS PO, Clerk, SBI, RBI)">Banking & Insurance (IBPS PO, Clerk, SBI, RBI)</option>
+              <option value="Railways RRB (NTPC, Group D, ALP)">Railways RRB (NTPC, Group D, ALP)</option>
+              <option value="Teaching Exams (CTET, State TET, DSSSB, KVS)">Teaching Exams (CTET, State TET, DSSSB, KVS)</option>
+              <option value="Police & Defense (Sub-Inspector, Constable, NDA, CDS)">Police & Defense (Sub-Inspector, Constable, NDA, CDS)</option>
+              <option value="State Police / HP Police / Patwari / Forest Guard">State Police / HP Police / Patwari / Forest Guard</option>
+              <option value="NEET / JEE / Science & Medical Foundation">NEET / JEE / Science & Medical Foundation</option>
+            </select>
           </div>
         </div>
 
@@ -222,9 +249,14 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
                 <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1">
                   <ShieldCheck className="w-4 h-4" /> {report.factualAccuracy?.status || 'Verified'}
                 </div>
-                <div className="text-[11px] text-slate-400 mt-0.5">
+                <div className="text-[11px] font-bold text-slate-700 dark:text-slate-200 mt-0.5">
                   Confirmed: Option {report.factualAccuracy?.confirmedAnswer}
                 </div>
+                {report.factualAccuracy?.verificationReasoning && (
+                  <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">
+                    {report.factualAccuracy.verificationReasoning}
+                  </p>
+                )}
               </div>
 
               <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs">
@@ -232,9 +264,14 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
                 <div className="text-sm font-bold text-blue-600 dark:text-blue-400 mt-1">
                   {report.linguisticQuality?.score || 9}/10 ({report.linguisticQuality?.clarity || 'Clear'})
                 </div>
-                <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 truncate">
                   {report.linguisticQuality?.grammarFeedback}
                 </div>
+                {report.linguisticQuality?.bilingualConsistency && (
+                  <span className="inline-block text-[10px] text-blue-600 dark:text-blue-400 font-bold mt-1 bg-blue-50 dark:bg-blue-950/50 px-1.5 py-0.5 rounded">
+                    Bilingual: {report.linguisticQuality.bilingualConsistency}
+                  </span>
+                )}
               </div>
 
               <div className="p-4 rounded-2xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-xs">

@@ -48,6 +48,7 @@ export const BulkMCQInspectionModal: React.FC<BulkMCQInspectionModalProps> = ({
 }) => {
   const [scope, setScope] = useState<'all' | 'uninspected' | 'selected'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [targetExam, setTargetExam] = useState<string>('General Competitive Mock Test');
   
   const [isAuditing, setIsAuditing] = useState(false);
   const [progressDone, setProgressDone] = useState(0);
@@ -104,6 +105,9 @@ export const BulkMCQInspectionModal: React.FC<BulkMCQInspectionModalProps> = ({
           setProgressTotal(total);
           setCurrentStatusLog(logMsg);
           setLogs((prev) => [...prev.slice(-20), logMsg]);
+        },
+        {
+          targetExam,
         }
       );
 
@@ -232,6 +236,33 @@ export const BulkMCQInspectionModal: React.FC<BulkMCQInspectionModalProps> = ({
         {/* STEP 1: PRE-AUDIT CONFIGURATION */}
         {!isAuditing && !isCompleted && (
           <div className="space-y-4">
+            {/* Exam Target & Precision Mode */}
+            <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <label className="block text-xs font-bold uppercase text-slate-700 dark:text-slate-300">
+                  🎯 Target Exam Benchmark (for Exact Syllabus & Difficulty):
+                </label>
+                <span className="text-[11px] font-bold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-900">
+                  ⚡ Turbo Parallel Mode (5 MCQs/batch)
+                </span>
+              </div>
+              <select
+                value={targetExam}
+                onChange={(e) => setTargetExam(e.target.value)}
+                className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100 text-xs font-bold focus:ring-2 focus:ring-amber-500 focus:outline-none"
+              >
+                <option value="General Competitive Mock Test">General Competitive Mock Test (Standard)</option>
+                <option value="SSC CGL / CHSL / MTS / CPO (Staff Selection Commission)">SSC CGL / CHSL / MTS / CPO (Staff Selection Commission)</option>
+                <option value="UPSC Civil Services / State PSC (Prelims GS & CSAT)">UPSC Civil Services / State PSC (Prelims GS & CSAT)</option>
+                <option value="Banking & Insurance (IBPS PO, Clerk, SBI, RBI)">Banking & Insurance (IBPS PO, Clerk, SBI, RBI)</option>
+                <option value="Railways RRB (NTPC, Group D, ALP)">Railways RRB (NTPC, Group D, ALP)</option>
+                <option value="Teaching Exams (CTET, State TET, DSSSB, KVS)">Teaching Exams (CTET, State TET, DSSSB, KVS)</option>
+                <option value="Police & Defense (Sub-Inspector, Constable, NDA, CDS)">Police & Defense (Sub-Inspector, Constable, NDA, CDS)</option>
+                <option value="State Police / HP Police / Patwari / Forest Guard">State Police / HP Police / Patwari / Forest Guard</option>
+                <option value="NEET / JEE / Science & Medical Foundation">NEET / JEE / Science & Medical Foundation</option>
+              </select>
+            </div>
+
             <div className="bg-slate-50 dark:bg-slate-900/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-3">
               <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400">
                 Select Audit Scope:
@@ -656,17 +687,33 @@ export const BulkMCQInspectionModal: React.FC<BulkMCQInspectionModalProps> = ({
                     {isExpanded && (
                       <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-3 text-xs">
                         
-                        {/* Recommendations */}
-                        {rep?.keyRecommendations && rep.keyRecommendations.length > 0 && (
-                          <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 space-y-1">
-                            <span className="font-bold block">AI Audit Findings & Polish:</span>
-                            <ul className="list-disc list-inside space-y-0.5 text-[11px]">
-                              {rep.keyRecommendations.map((rec, rIdx) => (
-                                <li key={rIdx}>{rec}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
+                        {/* Recommendations & Reasoning */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {rep?.keyRecommendations && rep.keyRecommendations.length > 0 && (
+                            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 space-y-1">
+                              <span className="font-bold block">💡 AI Findings & Recommendations:</span>
+                              <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                                {rep.keyRecommendations.map((rec, rIdx) => (
+                                  <li key={rIdx}>{rec}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+
+                          {rep?.factualAccuracy?.verificationReasoning && (
+                            <div className="p-3 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900 text-blue-900 dark:text-blue-200 space-y-1">
+                              <span className="font-bold block">🔍 Fact Verification Proof:</span>
+                              <p className="text-[11px] leading-relaxed">
+                                {rep.factualAccuracy.verificationReasoning}
+                              </p>
+                              {rep.linguisticQuality?.bilingualConsistency && (
+                                <p className="text-[10px] text-blue-700 dark:text-blue-300 font-semibold mt-1">
+                                  Bilingual Parity: {rep.linguisticQuality.bilingualConsistency}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
 
                         {/* Side by side diff */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

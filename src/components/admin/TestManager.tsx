@@ -329,14 +329,19 @@ export const TestManager: React.FC<TestManagerProps> = ({
     <div className="space-y-6">
       
       {/* Top Header Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white dark:bg-slate-900 p-5 sm:p-6 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-md">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 dark:text-white">Mock Test Manager</h1>
-          <p className="text-xs text-slate-500">Create, configure, publish, and duplicate online mock exams</p>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 text-[11px] font-black rounded-md uppercase tracking-wider">
+              Management Portal
+            </span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">Mock Test Manager</h1>
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Create, configure, publish, and duplicate online mock exams</p>
         </div>
         <button
           onClick={handleOpenCreateModal}
-          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm rounded-xl shadow-md transition-all"
+          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm rounded-xl shadow-md transition-all cursor-pointer shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span>Create Mock Test</span>
@@ -344,7 +349,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
         <div className="md:col-span-2 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
@@ -352,14 +357,14 @@ export const TestManager: React.FC<TestManagerProps> = ({
             placeholder="Search test name, code, category..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
+            className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden font-medium text-slate-900 dark:text-white"
           />
         </div>
 
         <select
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value)}
-          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden"
+          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-medium text-slate-900 dark:text-white"
         >
           <option value="all">All Categories</option>
           {dynamicCategories.map((cat) => (
@@ -372,7 +377,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
-          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden"
+          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-medium text-slate-900 dark:text-white"
         >
           <option value="all">All Statuses</option>
           <option value="published">Published</option>
@@ -383,148 +388,195 @@ export const TestManager: React.FC<TestManagerProps> = ({
 
       {/* Tests Grid / Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredTests.map((test) => (
-          <div
-            key={test.id}
-            className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 flex flex-col justify-between shadow-xs hover:border-blue-300 dark:hover:border-blue-700 transition-all"
-          >
-            <div>
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <span className="px-2.5 py-0.5 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-md">
-                  {test.category}
-                </span>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                  test.is_published
-                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                    : 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300'
-                }`}>
-                  {test.is_published ? 'Published' : 'Draft'}
-                </span>
-              </div>
+        {filteredTests.map((test) => {
+          const hasSubject = Boolean(test.subject && test.subject.trim());
+          const hasSections = Boolean(test.is_multisection && test.sections && test.sections.length > 0);
 
-              <h3 className="text-base font-bold text-slate-900 dark:text-white line-clamp-2 mb-1">
-                {test.title}
-              </h3>
-              {test.is_multisection && test.sections && test.sections.length > 0 && (
-                <div className="flex flex-wrap gap-1 mb-2">
-                  <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 text-[10px] font-black rounded-md border border-amber-200 dark:border-amber-800">
-                    Multi-Section ({test.sections.length}): {test.sections.join(', ')}
-                  </span>
-                </div>
-              )}
-              <p className="text-xs text-slate-500 line-clamp-2 mb-4">
-                {test.description || 'No description provided.'}
-              </p>
-
-              {/* Specs Badge Pill Grid */}
-              <div className="grid grid-cols-3 gap-2 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl text-center text-xs mb-3">
-                <div>
-                  <p className="font-black text-slate-900 dark:text-white">{test.total_questions}</p>
-                  <p className="text-[10px] text-slate-400 uppercase">Questions</p>
-                </div>
-                <div>
-                  <p className="font-black text-slate-900 dark:text-white">{test.duration_minutes}m</p>
-                  <p className="text-[10px] text-slate-400 uppercase">Duration</p>
-                </div>
-                <div>
-                  <p className="font-black text-slate-900 dark:text-white">{test.negative_marking}</p>
-                  <p className="text-[10px] text-slate-400 uppercase">Neg Mark</p>
-                </div>
-              </div>
-
-              {/* Social Gate Status Badge on Card */}
-              <div className="mb-3">
-                {test.social_gate_enabled !== false ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60">
-                    <ShieldCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-                    <span className="truncate">
-                      {test.social_gate_mode === 'custom_links'
-                        ? `Custom Channels (${test.custom_social_platforms?.length || 0})`
-                        : test.social_gate_mode === 'custom_selection'
-                        ? `Selected Channels (${test.social_platform_ids?.length || 0})`
-                        : 'Global Social Gate (Active)'}
+          return (
+            <div
+              key={test.id}
+              className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 flex flex-col justify-between shadow-md hover:shadow-xl hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-200 relative"
+            >
+              <div className="space-y-3.5">
+                
+                {/* Header Row: Category Badge + Test Code + Published Status */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs">
+                      {test.category}
                     </span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-500">
-                    <XCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>Social Gate Disabled</span>
-                  </span>
-                )}
-              </div>
-            </div>
+                    <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/90 dark:border-slate-700 font-mono text-[11px] font-bold rounded-md uppercase">
+                      {test.exam_code || test.test_code}
+                    </span>
+                  </div>
 
-            {/* Actions Bar */}
-            <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
-              <div className="flex items-center justify-between gap-1.5">
-                <button
-                  onClick={() => onSelectTestQuestions(test.id)}
-                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center justify-center gap-1"
-                >
-                  <FileText className="w-3.5 h-3.5" /> Questions ({test.total_questions})
-                </button>
-                {onViewTestResults && (
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1.5 shadow-2xs shrink-0 ${
+                    test.is_published
+                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800'
+                      : 'bg-amber-50 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border-amber-300 dark:border-amber-800'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${test.is_published ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+                    <span>{test.is_published ? 'Published' : 'Draft'}</span>
+                  </span>
+                </div>
+
+                {/* Subject & Section Tags */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {hasSubject && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-indigo-50 dark:bg-indigo-950/70 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/80 rounded-lg text-xs font-bold">
+                      <FileText className="w-3 h-3 text-indigo-500" />
+                      <span>Subject: {test.subject}</span>
+                    </span>
+                  )}
+                  {hasSections && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 bg-amber-50 dark:bg-amber-950/80 text-amber-800 dark:text-amber-200 text-xs font-bold rounded-lg border border-amber-200 dark:border-amber-800">
+                      <Layers className="w-3 h-3 text-amber-600" />
+                      <span>Sections ({test.sections!.length}): {test.sections!.join(', ')}</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Title & Description */}
+                <div>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug">
+                    {test.title}
+                  </h3>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 line-clamp-2 mt-1 leading-relaxed min-h-[32px]">
+                    {test.description || 'Practice test series based on real exam pattern with instant detailed results.'}
+                  </p>
+                </div>
+
+                {/* Specs Badge Pill Grid - High Contrast */}
+                <div className="grid grid-cols-4 gap-1.5 bg-slate-50 dark:bg-slate-800/80 p-2.5 sm:p-3 rounded-xl border border-slate-200/90 dark:border-slate-700/80 text-center text-xs">
+                  <div>
+                    <p className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">{test.total_questions}</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Questions</p>
+                  </div>
+                  <div>
+                    <p className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">{test.duration_minutes}m</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Duration</p>
+                  </div>
+                  <div>
+                    <p className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">{test.total_marks}</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Marks</p>
+                  </div>
+                  <div>
+                    <p className="font-black text-rose-600 dark:text-rose-400 text-xs sm:text-sm">{test.negative_marking}</p>
+                    <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Neg Mark</p>
+                  </div>
+                </div>
+
+                {/* Social Gate Status Badge on Card */}
+                <div>
+                  {test.social_gate_enabled !== false ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60 shadow-2xs">
+                      <ShieldCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <span className="truncate">
+                        {test.social_gate_mode === 'custom_links'
+                          ? `Custom Channels (${test.custom_social_platforms?.length || 0})`
+                          : test.social_gate_mode === 'custom_selection'
+                          ? `Selected Channels (${test.social_platform_ids?.length || 0})`
+                          : 'Global Social Gate (Active)'}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                      <XCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>Social Gate Disabled</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Actions Bar */}
+              <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800/90 mt-4">
+                
+                {/* Primary Action Buttons */}
+                <div className="flex items-center justify-between gap-1.5">
                   <button
-                    onClick={() => onViewTestResults(test.id)}
-                    className="px-2.5 py-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 rounded-xl transition-colors font-bold text-xs flex items-center gap-1"
-                    title="View Student Results & Leaderboard"
+                    onClick={() => onSelectTestQuestions(test.id)}
+                    className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Results</span>
+                    <FileText className="w-3.5 h-3.5" />
+                    <span>Questions ({test.total_questions})</span>
                   </button>
-                )}
-                <button
-                  onClick={() => onPreviewTest(test.slug)}
-                  className="p-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 rounded-xl transition-colors"
-                  title="Preview Test"
-                >
-                  <Eye className="w-4 h-4" />
-                </button>
+
+                  {onViewTestResults && (
+                    <button
+                      onClick={() => onViewTestResults(test.id)}
+                      className="px-3 py-2.5 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-xl transition-all font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                      title="View Student Results & Leaderboard"
+                    >
+                      <Users className="w-3.5 h-3.5" />
+                      <span>Results</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => onPreviewTest(test.slug)}
+                    className="p-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/90 dark:border-slate-700 rounded-xl transition-all cursor-pointer shadow-2xs"
+                    title="Preview Student View"
+                  >
+                    <Eye className="w-4 h-4" />
+                  </button>
+                </div>
+
+                {/* Secondary Tools Row with Crisp Buttons */}
+                <div className="flex items-center justify-between text-xs gap-1.5 pt-1">
+                  <button
+                    onClick={() => handleCopyLink(test.slug)}
+                    className="px-2.5 py-1 bg-slate-50 hover:bg-blue-50 dark:bg-slate-800 dark:hover:bg-blue-950/60 text-slate-700 dark:text-slate-300 hover:text-blue-600 dark:hover:text-blue-300 border border-slate-200/90 dark:border-slate-700 rounded-lg font-bold flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                    title="Copy Student Link"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Copy Link</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleTogglePublish(test)}
+                    className={`px-2.5 py-1 rounded-lg font-bold border transition-all cursor-pointer shadow-2xs ${
+                      test.is_published
+                        ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border-amber-300 dark:border-amber-800 hover:bg-amber-100'
+                        : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-300 dark:border-emerald-800 hover:bg-emerald-100'
+                    }`}
+                  >
+                    {test.is_published ? 'Unpublish' : 'Publish'}
+                  </button>
+
+                  <div className="flex items-center gap-1 ml-auto">
+                    <button
+                      onClick={() => handleOpenEditModal(test)}
+                      className="p-1.5 bg-slate-50 hover:bg-blue-50 dark:bg-slate-800 text-slate-600 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-300 border border-slate-200/90 dark:border-slate-700 rounded-lg transition-all cursor-pointer"
+                      title="Edit Settings"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDuplicate(test.id)}
+                      className="p-1.5 bg-slate-50 hover:bg-indigo-50 dark:bg-slate-800 text-slate-600 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 border border-slate-200/90 dark:border-slate-700 rounded-lg transition-all cursor-pointer"
+                      title="Duplicate Test"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(test)}
+                      className="p-1.5 bg-slate-50 hover:bg-rose-50 dark:bg-slate-800 text-rose-500 hover:text-rose-700 dark:hover:bg-rose-950/60 border border-slate-200/90 dark:border-slate-700 rounded-lg transition-all cursor-pointer"
+                      title="Delete Test"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
               </div>
 
-              <div className="flex items-center justify-between text-xs text-slate-500 gap-1">
-                <button
-                  onClick={() => handleCopyLink(test.slug)}
-                  className="inline-flex items-center gap-1 hover:text-blue-600 font-medium"
-                >
-                  <Share2 className="w-3.5 h-3.5" /> Copy Link
-                </button>
-                <button
-                  onClick={() => handleTogglePublish(test)}
-                  className={`font-semibold ${test.is_published ? 'text-amber-600' : 'text-emerald-600'}`}
-                >
-                  {test.is_published ? 'Unpublish' : 'Publish'}
-                </button>
-                <button
-                  onClick={() => handleOpenEditModal(test)}
-                  className="p-1 text-slate-500 hover:text-slate-900 dark:hover:text-white"
-                  title="Edit Settings"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => handleDuplicate(test.id)}
-                  className="p-1 text-slate-500 hover:text-slate-900 dark:hover:text-white"
-                  title="Duplicate Test"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                </button>
-                <button
-                  onClick={() => handleDelete(test)}
-                  className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors"
-                  title="Delete Test"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
             </div>
-
-          </div>
-        ))}
+          );
+        })}
 
         {filteredTests.length === 0 && (
-          <div className="col-span-full py-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800">
-            <p className="text-slate-500 text-sm">No mock tests found matching your filter criteria.</p>
+          <div className="col-span-full py-12 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-md">
+            <p className="text-slate-600 dark:text-slate-400 text-sm font-semibold">No mock tests found matching your filter criteria.</p>
           </div>
         )}
       </div>
