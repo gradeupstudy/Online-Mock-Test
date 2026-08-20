@@ -289,6 +289,20 @@ export const dataService = {
     let settings = { ...DEMO_ADMIN_SETTINGS };
     const supabase = getSupabaseClient();
     
+    // Retrieve cached logo if user previously uploaded one
+    let cachedLogo: string | null = null;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.logo_url && parsed.logo_url.trim() !== '' && parsed.logo_url !== '/logo.png' && parsed.logo_url !== '/logo.svg') {
+          cachedLogo = parsed.logo_url;
+        }
+      }
+    } catch {
+      // ignore
+    }
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const { data, error } = await supabase
@@ -301,6 +315,24 @@ export const dataService = {
         if (!error && data) {
           settings = sanitizeAdminSettings(data);
           
+          // If Supabase returned a valid custom logo, use it
+          if (data.logo_url && data.logo_url.trim() !== '' && data.logo_url !== '/logo.png' && data.logo_url !== '/logo.svg') {
+            settings.logo_url = data.logo_url;
+          } else if (cachedLogo) {
+            // Preserve uploaded custom logo if remote had empty string
+            settings.logo_url = cachedLogo;
+            // Silently sync back to Supabase
+            if (data.id) {
+              (async () => {
+                try {
+                  await supabase.from('admin_settings').update({ logo_url: cachedLogo, updated_at: new Date().toISOString() }).eq('id', data.id);
+                } catch {
+                  // ignore
+                }
+              })();
+            }
+          }
+
           // If whatsapp_channel_url is empty in data, check social_platforms array or fallback
           if (!settings.whatsapp_channel_url && Array.isArray(data.social_platforms)) {
             const wa = data.social_platforms.find((p: any) => (p.platform_name || '').toLowerCase().includes('whatsapp') || p.icon === 'message-circle');
@@ -497,6 +529,19 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
+        // Step A: Immediately & directly persist logo_url to Supabase admin_settings table
+        if (updated.logo_url) {
+          try {
+            await supabase.from('admin_settings').update({
+              logo_url: updated.logo_url,
+              brand_name: updated.brand_name || 'Gradeup Study',
+              updated_at: new Date().toISOString()
+            }).neq('id', '00000000-0000-0000-0000-000000000000');
+          } catch {
+            // ignore
+          }
+        }
+
         const { data: existingRows } = await supabase.from('admin_settings').select('id');
         
         const fullPayload: Record<string, unknown> = {
@@ -531,6 +576,13 @@ export const dataService = {
             const { error: updErr } = await supabase.from('admin_settings').update(fullPayload).eq('id', row.id);
             if (!updErr) {
               dbUpdated = true;
+            } else {
+              // Try minimal safe update
+              await supabase.from('admin_settings').update({
+                logo_url: updated.logo_url,
+                brand_name: updated.brand_name,
+                updated_at: new Date().toISOString()
+              }).eq('id', row.id);
             }
           }
         }
@@ -562,7 +614,16 @@ export const dataService = {
               social_platforms: updatedPlatforms,
               updated_at: new Date().toISOString()
             };
-            await supabase.from('admin_settings').upsert(basicPayload);
+            const { error: basicErr } = await supabase.from('admin_settings').upsert(basicPayload);
+            if (basicErr) {
+              // Absolute bare-minimum upsert
+              await supabase.from('admin_settings').upsert({
+                id: idToUse,
+                brand_name: updated.brand_name,
+                logo_url: updated.logo_url,
+                updated_at: new Date().toISOString()
+              });
+            }
           }
         }
 

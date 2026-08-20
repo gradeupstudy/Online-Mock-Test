@@ -120,12 +120,11 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
         setCustomLogoUrlInput(newLogoUrl.startsWith('http') ? newLogoUrl : '');
         
         // 2. Immediately persist to Supabase Cloud Database so all browsers get it
-        if (settings) {
-          const updatedSettings = { ...settings, logo_url: newLogoUrl };
-          setSettings(updatedSettings);
-          const saved = await dataService.updateSettings(updatedSettings);
-          setSettings(saved);
-        }
+        const currentSettings = settings || await dataService.getSettings();
+        const updatedSettings = { ...currentSettings, logo_url: newLogoUrl };
+        setSettings(updatedSettings);
+        const saved = await dataService.updateSettings(updatedSettings);
+        setSettings(saved);
 
         if (uploadResult.source === 'supabase_storage') {
           onToast?.('success', 'Official Logo uploaded to Supabase Cloud Storage and permanently saved! Visible across all browsers.');
@@ -141,11 +140,13 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
       const reader = new FileReader();
       reader.onload = async (event) => {
         const result = event.target?.result as string;
-        if (result && settings) {
-          const updatedSettings = { ...settings, logo_url: result };
+        if (result) {
+          const currentSettings = settings || await dataService.getSettings();
+          const updatedSettings = { ...currentSettings, logo_url: result };
           setSettings(updatedSettings);
           try {
-            await dataService.updateSettings(updatedSettings);
+            const saved = await dataService.updateSettings(updatedSettings);
+            setSettings(saved);
             onToast?.('success', 'Logo saved to Cloud Database!');
           } catch {
             onToast?.('info', 'Logo loaded locally. Click "Apply & Save Logo Now" to sync with Supabase.');
@@ -203,10 +204,10 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
   };
 
   const handleApplyLogoImmediately = async () => {
-    if (!settings) return;
+    const currentSettings = settings || await dataService.getSettings();
     setSaving(true);
     try {
-      const saved = await dataService.updateSettings(settings);
+      const saved = await dataService.updateSettings(currentSettings);
       setSettings(saved);
       onToast?.('success', 'Official Gradeup Study Logo permanently saved to Supabase Cloud! Visible across all browsers & devices.');
     } catch (err) {
