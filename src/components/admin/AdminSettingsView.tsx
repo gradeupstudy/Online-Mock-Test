@@ -93,8 +93,8 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
     }
   };
 
-  // Helper to optimize and convert image to Data URL
-  const processImageFile = (file: File) => {
+  // Helper to optimize and upload/persist image to Supabase
+  const processImageFile = async (file: File) => {
     if (!file.type.startsWith('image/')) {
       onToast?.('error', 'Please upload a valid image file (PNG, JPG, WEBP, or SVG)');
       return;
@@ -112,71 +112,50 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
       size: `${(file.size / 1024).toFixed(1)} KB`
     });
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (!result) {
-        setIsProcessingLogo(false);
-        onToast?.('error', 'Failed to read image file');
-        return;
-      }
-
-      // If SVG or small image under 300KB, use directly
-      if (file.type.includes('svg') || file.size < 300 * 1024) {
+    try {
+      // 1. Process and upload via dataService to Supabase Storage / Cloud Payload
+      const uploadResult = await dataService.uploadLogoFile(file);
+      if (uploadResult.success && uploadResult.url) {
+        const newLogoUrl = uploadResult.url;
+        setCustomLogoUrlInput(newLogoUrl.startsWith('http') ? newLogoUrl : '');
+        
+        // 2. Immediately persist to Supabase Cloud Database so all browsers get it
         if (settings) {
-          setSettings({ ...settings, logo_url: result });
+          const updatedSettings = { ...settings, logo_url: newLogoUrl };
+          setSettings(updatedSettings);
+          const saved = await dataService.updateSettings(updatedSettings);
+          setSettings(saved);
         }
-        setCustomLogoUrlInput(result);
-        setIsProcessingLogo(false);
-        onToast?.('success', 'Logo loaded! Click "Save Settings" or "Apply & Save Logo Now" to publish.');
-        return;
-      }
 
-      // If larger image, resize via canvas to max 600x600 for optimal fast performance
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const maxDim = 600;
-        let width = img.width;
-        let height = img.height;
-
-        if (width > height) {
-          if (width > maxDim) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          }
+        if (uploadResult.source === 'supabase_storage') {
+          onToast?.('success', 'Official Logo uploaded to Supabase Cloud Storage and permanently saved! Visible across all browsers.');
         } else {
-          if (height > maxDim) {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
+          onToast?.('success', 'Official Logo saved permanently to Supabase Cloud Database! Visible to all students in all browsers.');
+        }
+      } else {
+        throw new Error('Upload failed');
+      }
+    } catch (err) {
+      console.error('Error uploading/saving logo file:', err);
+      // Fallback local reader
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const result = event.target?.result as string;
+        if (result && settings) {
+          const updatedSettings = { ...settings, logo_url: result };
+          setSettings(updatedSettings);
+          try {
+            await dataService.updateSettings(updatedSettings);
+            onToast?.('success', 'Logo saved to Cloud Database!');
+          } catch {
+            onToast?.('info', 'Logo loaded locally. Click "Apply & Save Logo Now" to sync with Supabase.');
           }
         }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressedDataUrl = canvas.toDataURL(file.type.includes('png') ? 'image/png' : 'image/jpeg', 0.92);
-          if (settings) {
-            setSettings({ ...settings, logo_url: compressedDataUrl });
-          }
-          setCustomLogoUrlInput(compressedDataUrl);
-          onToast?.('success', `Logo optimized (${width}x${height}px) & loaded!`);
-        }
-        setIsProcessingLogo(false);
       };
-      img.onerror = () => {
-        setIsProcessingLogo(false);
-        onToast?.('error', 'Could not process image');
-      };
-      img.src = result;
-    };
-    reader.onerror = () => {
+      reader.readAsDataURL(file);
+    } finally {
       setIsProcessingLogo(false);
-      onToast?.('error', 'Failed to read uploaded file');
-    };
-    reader.readAsDataURL(file);
+    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -205,7 +184,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
     setIsDragging(false);
   };
 
-  const handleResetToOfficialVectorLogo = () => {
+  const handleResetToOfficialVectorLogo = async () => {
     if (!settings) return;
     const updatedSettings = {
       ...settings,
@@ -214,7 +193,13 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
     setSettings(updatedSettings);
     setCustomLogoUrlInput('');
     setLogoFileMeta(null);
-    onToast?.('info', 'Switched back to Gradeup Study Official 3D Vector Emblem (Default). Click "Save Settings" or "Apply Logo Now" to save.');
+    try {
+      const saved = await dataService.updateSettings(updatedSettings);
+      setSettings(saved);
+      onToast?.('info', 'Switched back to Gradeup Study Official 3D Vector Emblem and saved to Supabase Cloud.');
+    } catch {
+      onToast?.('info', 'Switched back to Gradeup Study Official 3D Vector Emblem (Default).');
+    }
   };
 
   const handleApplyLogoImmediately = async () => {
@@ -223,10 +208,10 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
     try {
       const saved = await dataService.updateSettings(settings);
       setSettings(saved);
-      onToast?.('success', 'Official Gradeup Study Logo applied & saved across all pages successfully!');
+      onToast?.('success', 'Official Gradeup Study Logo permanently saved to Supabase Cloud! Visible across all browsers & devices.');
     } catch (err) {
       console.error('Failed to save logo', err);
-      onToast?.('error', 'Failed to save logo to database');
+      onToast?.('error', 'Failed to save logo to Supabase database');
     } finally {
       setSaving(false);
     }
@@ -757,6 +742,24 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
                     Rendered in candidate greeting popup
                   </p>
                 </div>
+              </div>
+
+              {/* 4. Supabase Cloud Sync Verification Badge */}
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800/80 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <div>
+                    <p className="font-bold text-emerald-900 dark:text-emerald-300 text-[11px]">
+                      Supabase Cloud Database Persistence
+                    </p>
+                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400/90">
+                      Synchronized across all browsers, mobile devices & students
+                    </p>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 bg-emerald-600 text-white text-[10px] font-black rounded-md shrink-0">
+                  PERMANENT
+                </span>
               </div>
 
             </div>

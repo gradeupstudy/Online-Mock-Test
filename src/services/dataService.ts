@@ -380,11 +380,82 @@ export const dataService = {
 
     // Clear out unsplash image URLs if present
     if (settings.logo_url && settings.logo_url.includes('unsplash.com')) {
-      settings.logo_url = '/logo.png';
+      settings.logo_url = '/logo.svg';
       localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
     }
 
     return settings;
+  },
+
+  uploadLogoFile: async (file: File | Blob): Promise<{ success: boolean; url: string; source: 'supabase_storage' | 'cloud_compressed' }> => {
+    const supabase = getSupabaseClient();
+    
+    // 1. Try uploading binary directly to Supabase Storage Bucket
+    if (isSupabaseConfigured() && supabase) {
+      const possibleBuckets = ['logos', 'brand', 'assets', 'gradeup-assets', 'gradeup_assets', 'public', 'images'];
+      const fileExt = file instanceof File ? file.name.split('.').pop() || 'png' : 'png';
+      const fileName = `official_logo_${Date.now()}.${fileExt}`;
+      const filePath = `brand/${fileName}`;
+
+      for (const bucket of possibleBuckets) {
+        try {
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from(bucket)
+            .upload(filePath, file, {
+              cacheControl: '3600',
+              upsert: true,
+              contentType: file.type || 'image/png'
+            });
+
+          if (!uploadErr && uploadData) {
+            const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(filePath);
+            if (publicData?.publicUrl) {
+              return { success: true, url: publicData.publicUrl, source: 'supabase_storage' };
+            }
+          }
+        } catch (storageErr) {
+          // continue checking other buckets
+        }
+      }
+    }
+
+    // 2. Fallback: Ultra-crisp Canvas compression for direct Cloud Database payload
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rawData = e.target?.result as string;
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 320; // 320px gives crisp retina quality while keeping payload under ~25KB
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const compressed = canvas.toDataURL(file.type.includes('png') ? 'image/png' : 'image/jpeg', 0.9);
+            resolve({ success: true, url: compressed, source: 'cloud_compressed' });
+          } else {
+            resolve({ success: true, url: rawData, source: 'cloud_compressed' });
+          }
+        };
+        img.onerror = () => resolve({ success: true, url: rawData, source: 'cloud_compressed' });
+        img.src = rawData;
+      };
+      reader.onerror = () => resolve({ success: false, url: '', source: 'cloud_compressed' });
+      reader.readAsDataURL(file);
+    });
   },
 
   updateSettings: async (newSettings: Partial<AdminSettings>): Promise<AdminSettings> => {
@@ -422,17 +493,15 @@ export const dataService = {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(updated));
     localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(updatedPlatforms));
 
-    // 2. Persist to Supabase
+    // 2. Persist to Supabase Cloud Database (Global Single Source of Truth)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data: existingRows } = await supabase.from('admin_settings').select('id').order('updated_at', { ascending: false }).limit(1);
-        const idToUse = existingRows && existingRows.length > 0 ? existingRows[0].id : generateUUID();
+        const { data: existingRows } = await supabase.from('admin_settings').select('id');
         
         const fullPayload: Record<string, unknown> = {
-          id: idToUse,
           brand_name: updated.brand_name || 'Gradeup Study',
-          logo_url: updated.logo_url || '/logo.png',
+          logo_url: updated.logo_url || '/logo.svg',
           website_url: updated.website_url || 'https://gradeupstudy.com',
           support_email: updated.support_email || 'support@gradeupstudy.com',
           whatsapp_number: updated.whatsapp_number || '+919816000000',
@@ -454,27 +523,47 @@ export const dataService = {
         if (updated.admin_email) fullPayload.admin_email = updated.admin_email;
         if (updated.admin_password) fullPayload.admin_password = updated.admin_password;
 
-        const { error } = await supabase.from('admin_settings').upsert(fullPayload);
-        if (error) {
-          console.warn('Supabase admin_settings upsert error (retrying with minimal payload):', error);
-          const minimalPayload: Record<string, unknown> = {
-            id: idToUse,
-            brand_name: updated.brand_name,
-            logo_url: updated.logo_url,
-            website_url: updated.website_url,
-            support_email: updated.support_email,
-            whatsapp_number: updated.whatsapp_number,
-            telegram_channel: updated.telegram_channel,
-            youtube_channel: updated.youtube_channel,
-            instagram_handle: updated.instagram_handle,
-            default_test_duration: updated.default_test_duration,
-            default_marks: updated.default_marks,
-            default_negative_marking: updated.default_negative_marking,
-            mask_leaderboard_names: updated.mask_leaderboard_names,
-            social_platforms: updatedPlatforms,
-            updated_at: new Date().toISOString()
-          };
-          await supabase.from('admin_settings').upsert(minimalPayload);
+        let dbUpdated = false;
+
+        // If existing row(s) exist, update all of them so any query receives the fresh logo & settings
+        if (existingRows && existingRows.length > 0) {
+          for (const row of existingRows) {
+            const { error: updErr } = await supabase.from('admin_settings').update(fullPayload).eq('id', row.id);
+            if (!updErr) {
+              dbUpdated = true;
+            }
+          }
+        }
+
+        // If no row exists or update failed, insert a new record
+        if (!dbUpdated) {
+          const idToUse = (existingRows && existingRows.length > 0) ? existingRows[0].id : generateUUID();
+          const { error: insErr } = await supabase.from('admin_settings').upsert({
+            ...fullPayload,
+            id: idToUse
+          });
+
+          if (insErr) {
+            console.warn('Supabase admin_settings upsert error, attempting basic payload:', insErr);
+            const basicPayload: Record<string, unknown> = {
+              id: idToUse,
+              brand_name: updated.brand_name,
+              logo_url: updated.logo_url,
+              website_url: updated.website_url,
+              support_email: updated.support_email,
+              whatsapp_number: updated.whatsapp_number,
+              telegram_channel: updated.telegram_channel,
+              youtube_channel: updated.youtube_channel,
+              instagram_handle: updated.instagram_handle,
+              default_test_duration: updated.default_test_duration,
+              default_marks: updated.default_marks,
+              default_negative_marking: updated.default_negative_marking,
+              mask_leaderboard_names: updated.mask_leaderboard_names,
+              social_platforms: updatedPlatforms,
+              updated_at: new Date().toISOString()
+            };
+            await supabase.from('admin_settings').upsert(basicPayload);
+          }
         }
 
         // 3. Direct dual-sync to Supabase `social_platforms` table for all 4 official channels
