@@ -18,11 +18,17 @@ import {
   MapPin,
   ChevronRight,
   RefreshCw,
-  Database
+  Database,
+  Copy,
+  Check,
+  Zap,
+  Target,
+  AlertCircle
 } from 'lucide-react';
 import { Attempt, Test } from '../../types';
 import { dataService } from '../../services/dataService';
 import { exportAttemptsToCSV } from '../../utils/csv';
+import { printOfficialScorecard } from '../../utils/printScorecard';
 import { Modal } from '../common/Modal';
 import { ToppersMeritListModal } from './ToppersMeritListModal';
 
@@ -41,6 +47,7 @@ export const AttemptsList: React.FC<AttemptsListProps> = ({ initialTestId = 'all
   const [selectedAttempt, setSelectedAttempt] = useState<Attempt | null>(null);
   const [isToppersModalOpen, setIsToppersModalOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [copiedScorecardId, setCopiedScorecardId] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialTestId) {
@@ -150,8 +157,46 @@ export const AttemptsList: React.FC<AttemptsListProps> = ({ initialTestId = 'all
     onToast?.('success', `Exported ${sortedAttempts.length} student results to CSV!`);
   };
 
-  const handlePrintScorecard = () => {
-    window.print();
+  const handlePrintScorecard = (attemptToPrint?: Attempt) => {
+    const targetAttempt = attemptToPrint || selectedAttempt;
+    if (!targetAttempt) return;
+    const currentTest = testMap.get(targetAttempt.test_id);
+    const calculatedRank = rankMap.get(targetAttempt.id) || 1;
+    const testTotalCandidates = attempts.filter(a => a.test_id === targetAttempt.test_id).length || attempts.length;
+    
+    printOfficialScorecard({
+      attempt: targetAttempt,
+      test: currentTest,
+      rank: calculatedRank,
+      totalCandidates: testTotalCandidates
+    });
+  };
+
+  const handleCopyScorecardSummary = (att: Attempt) => {
+    const currentTest = testMap.get(att.test_id);
+    const calculatedRank = rankMap.get(att.id) || 1;
+    const totalQ = att.total_questions || currentTest?.total_questions || ((att.correct_answers || 0) + (att.wrong_answers || 0) + (att.unattempted_answers || att.skipped_questions || 0)) || 1;
+    const maxMarks = currentTest?.total_marks || totalQ;
+    const timeM = Math.floor(att.time_taken_seconds / 60);
+    const timeS = att.time_taken_seconds % 60;
+    
+    const summaryText = `🎓 *GRADEUP STUDY - OFFICIAL SCORECARD* 🎓\n` +
+      `👤 *Candidate:* ${att.student_name}\n` +
+      `📝 *Mock Test:* ${currentTest?.title || 'Mock Test'}\n` +
+      `🏆 *Rank:* #${calculatedRank}\n` +
+      `🎯 *Score:* ${att.score} / ${maxMarks} (${att.percentage}%)\n` +
+      `✅ *Correct:* ${att.correct_answers} | ❌ *Wrong:* ${att.wrong_answers}\n` +
+      `⏱️ *Time Taken:* ${timeM}m ${timeS}s\n` +
+      `📍 *Location:* ${att.student_district ? `${att.student_district}, ` : ''}${att.student_state}\n` +
+      `──────────────────────\n` +
+      `🌐 *Gradeup Study Online Assessment System*`;
+
+    navigator.clipboard.writeText(summaryText);
+    setCopiedScorecardId(att.id);
+    onToast?.('success', 'Candidate Scorecard Summary copied to clipboard!');
+    setTimeout(() => {
+      setCopiedScorecardId(null);
+    }, 2500);
   };
 
   return (
@@ -553,90 +598,197 @@ export const AttemptsList: React.FC<AttemptsListProps> = ({ initialTestId = 'all
       <Modal
         isOpen={Boolean(selectedAttempt)}
         onClose={() => setSelectedAttempt(null)}
-        title="Official Student Performance Scorecard"
-        maxWidth="lg"
-      >
-        {selectedAttempt && (
-          <div className="space-y-6 text-slate-900 dark:text-white">
-            
-            {/* Header info */}
-            <div className="bg-gradient-to-r from-blue-900 to-indigo-900 p-5 rounded-2xl text-white shadow-lg space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="px-2.5 py-0.5 bg-blue-500/20 text-blue-200 text-[10px] font-bold rounded-full border border-blue-400/30 uppercase">
-                  Gradeup Study Library
-                </span>
-                <span className="text-xs font-bold text-amber-300 flex items-center gap-1">
-                  <Trophy className="w-3.5 h-3.5" />
-                  Rank #{rankMap.get(selectedAttempt.id) || 1}
-                </span>
-              </div>
-              <div>
-                <h2 className="text-xl font-black">{selectedAttempt.student_name}</h2>
-                <p className="text-xs text-slate-300 mt-0.5">
-                  Mobile: {selectedAttempt.student_mobile} | Email: {selectedAttempt.student_email}
-                </p>
-                <p className="text-xs text-slate-300 mt-0.5 flex items-center gap-1">
-                  <MapPin className="w-3 h-3 text-blue-300 inline" /> {selectedAttempt.student_district}, {selectedAttempt.student_state}
-                </p>
-              </div>
-              <div className="pt-2 border-t border-white/10 text-xs text-blue-200 flex items-center justify-between">
-                <span>Test: {testMap.get(selectedAttempt.test_id)?.title || 'Mock Test'}</span>
-                <span>Date: {selectedAttempt.submitted_at ? new Date(selectedAttempt.submitted_at).toLocaleDateString() : 'N/A'}</span>
-              </div>
-            </div>
-
-            {/* Metric KPI Grid */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
-                <p className="font-black text-xl text-emerald-600 dark:text-emerald-400">{selectedAttempt.score}</p>
-                <p className="text-slate-400 uppercase text-[10px] font-bold mt-0.5">Marks Obtained</p>
-              </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
-                <p className="font-black text-xl text-blue-600 dark:text-blue-400">{selectedAttempt.percentage}%</p>
-                <p className="text-slate-400 uppercase text-[10px] font-bold mt-0.5">Percentage</p>
-              </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
-                <p className="font-black text-xl text-emerald-600 dark:text-emerald-400">{selectedAttempt.correct_answers}</p>
-                <p className="text-slate-400 uppercase text-[10px] font-bold mt-0.5">Correct Answers</p>
-              </div>
-              <div className="p-3 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
-                <p className="font-black text-xl text-rose-600 dark:text-rose-400">{selectedAttempt.wrong_answers}</p>
-                <p className="text-slate-400 uppercase text-[10px] font-bold mt-0.5">Wrong Answers</p>
-              </div>
-            </div>
-
-            {/* Further stats */}
-            <div className="bg-slate-50 dark:bg-slate-800/60 p-4 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2 text-xs">
-              <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
-                <span className="text-slate-500 font-medium">Attempt ID</span>
-                <span className="font-mono font-bold text-slate-800 dark:text-slate-200">{selectedAttempt.id}</span>
-              </div>
-              <div className="flex justify-between py-1 border-b border-slate-200 dark:border-slate-700">
-                <span className="text-slate-500 font-medium">Time Taken</span>
-                <span className="font-bold text-slate-800 dark:text-slate-200">
-                  {Math.floor(selectedAttempt.time_taken_seconds / 60)} mins {selectedAttempt.time_taken_seconds % 60} secs
-                </span>
-              </div>
-              <div className="flex justify-between py-1">
-                <span className="text-slate-500 font-medium">Status</span>
-                <span className="font-bold text-emerald-600 dark:text-emerald-400 uppercase">
-                  {selectedAttempt.status}
-                </span>
-              </div>
-            </div>
-
-            {/* Action buttons */}
-            <div className="flex items-center justify-end gap-3 pt-2">
-              <button
-                onClick={handlePrintScorecard}
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors flex items-center gap-1.5"
-              >
-                <Printer className="w-4 h-4" /> Print Scorecard
-              </button>
-            </div>
-
+        title={
+          <div className="flex items-center gap-2">
+            <Award className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <span>Official Candidate Scorecard</span>
           </div>
-        )}
+        }
+        maxWidth="2xl"
+      >
+        {selectedAttempt && (() => {
+          const currentTest = testMap.get(selectedAttempt.test_id);
+          const calculatedRank = rankMap.get(selectedAttempt.id) || 1;
+          const totalQ = selectedAttempt.total_questions || currentTest?.total_questions || ((selectedAttempt.correct_answers || 0) + (selectedAttempt.wrong_answers || 0) + (selectedAttempt.unattempted_answers || selectedAttempt.skipped_questions || 0)) || 1;
+          const maxMarks = currentTest?.total_marks || (totalQ * (currentTest?.marks_per_question || 1));
+          const marksPerQ = currentTest?.marks_per_question || 1;
+          const negMarks = currentTest?.negative_marking ?? 0.25;
+          const attemptedCount = selectedAttempt.attempted_questions ?? ((selectedAttempt.correct_answers || 0) + (selectedAttempt.wrong_answers || 0));
+          const unattemptedCount = selectedAttempt.unattempted_answers ?? selectedAttempt.skipped_questions ?? Math.max(0, totalQ - attemptedCount);
+          const accuracy = attemptedCount > 0 ? ((selectedAttempt.correct_answers / attemptedCount) * 100).toFixed(1) : '0';
+          const avgSpeed = attemptedCount > 0 ? (selectedAttempt.time_taken_seconds / attemptedCount).toFixed(1) : '0';
+          const isPassed = Number(selectedAttempt.percentage || 0) >= (currentTest?.passing_marks ? (currentTest.passing_marks / maxMarks) * 100 : 40);
+
+          return (
+            <div className="space-y-5 text-slate-900 dark:text-slate-100">
+              
+              {/* Official Gradeup Study Header Card */}
+              <div className="relative overflow-hidden bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 p-5 rounded-2xl text-white shadow-lg border border-blue-800/40 space-y-4">
+                
+                {/* Top Badge & Rank */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 bg-white/10 backdrop-blur-xs text-blue-200 text-[11px] font-black rounded-lg border border-white/20 uppercase tracking-wider">
+                      Gradeup Study
+                    </span>
+                    <span className="text-[10px] text-blue-300 font-semibold uppercase tracking-wider hidden sm:inline">
+                      Official Assessment Report
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center gap-1.5 px-3 py-1 bg-amber-400/20 text-amber-300 text-xs font-black rounded-xl border border-amber-400/30 shadow-xs">
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                    <span>Rank #{calculatedRank}</span>
+                  </div>
+                </div>
+
+                {/* Candidate Name & Contact Particulars */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">{selectedAttempt.student_name}</h2>
+                    <div className="mt-1 space-y-0.5 text-xs text-blue-200/90 font-medium">
+                      <p>📱 Mobile: <span className="text-white font-semibold">{selectedAttempt.student_mobile}</span></p>
+                      {selectedAttempt.student_email && (
+                        <p className="truncate">✉️ Email: <span className="text-white font-semibold">{selectedAttempt.student_email}</span></p>
+                      )}
+                      {(selectedAttempt.student_district || selectedAttempt.student_state) && (
+                        <p className="flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-blue-300 shrink-0" />
+                          <span>{selectedAttempt.student_district ? `${selectedAttempt.student_district}, ` : ''}{selectedAttempt.student_state}</span>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Exam Details Box */}
+                  <div className="bg-white/5 backdrop-blur-xs p-3 rounded-xl border border-white/10 text-xs space-y-1 self-center">
+                    <div className="text-[10px] uppercase tracking-wider font-bold text-blue-300">Examination Metadata</div>
+                    <div className="font-bold text-white text-sm line-clamp-1">{currentTest?.title || 'Mock Test'}</div>
+                    <div className="text-blue-200 text-xs flex items-center justify-between">
+                      <span>Subject: <strong className="text-white">{currentTest?.subject || currentTest?.category || 'General'}</strong></span>
+                      <span>Date: <strong className="text-white">{selectedAttempt.submitted_at ? new Date(selectedAttempt.submitted_at).toLocaleDateString('en-IN') : 'N/A'}</strong></span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* 4 Metric KPI Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 text-center">
+                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/30 rounded-2xl border border-emerald-200 dark:border-emerald-900/60 shadow-xs">
+                  <p className="font-black text-2xl text-emerald-700 dark:text-emerald-400">
+                    {selectedAttempt.score} <span className="text-xs font-normal text-emerald-600/70 dark:text-emerald-500">/ {maxMarks}</span>
+                  </p>
+                  <p className="text-slate-600 dark:text-slate-400 uppercase text-[10px] font-extrabold mt-1 tracking-wide">Marks Obtained</p>
+                </div>
+
+                <div className="p-3.5 bg-blue-50 dark:bg-blue-950/30 rounded-2xl border border-blue-200 dark:border-blue-900/60 shadow-xs">
+                  <p className="font-black text-2xl text-blue-700 dark:text-blue-400">{selectedAttempt.percentage}%</p>
+                  <p className="text-slate-600 dark:text-slate-400 uppercase text-[10px] font-extrabold mt-1 tracking-wide">Percentage Score</p>
+                </div>
+
+                <div className="p-3.5 bg-teal-50 dark:bg-teal-950/30 rounded-2xl border border-teal-200 dark:border-teal-900/60 shadow-xs">
+                  <p className="font-black text-2xl text-teal-700 dark:text-teal-400">{selectedAttempt.correct_answers}</p>
+                  <p className="text-slate-600 dark:text-slate-400 uppercase text-[10px] font-extrabold mt-1 tracking-wide">Correct Answers</p>
+                </div>
+
+                <div className="p-3.5 bg-rose-50 dark:bg-rose-950/30 rounded-2xl border border-rose-200 dark:border-rose-900/60 shadow-xs">
+                  <p className="font-black text-2xl text-rose-700 dark:text-rose-400">{selectedAttempt.wrong_answers}</p>
+                  <p className="text-slate-600 dark:text-slate-400 uppercase text-[10px] font-extrabold mt-1 tracking-wide">Wrong Answers</p>
+                </div>
+              </div>
+
+              {/* Accuracy & Speed Secondary Row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-3.5 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-700/80 text-xs">
+                <div>
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Net Accuracy</span>
+                  <span className="font-black text-sm text-slate-800 dark:text-slate-200">{accuracy}%</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Total Time</span>
+                  <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
+                    {Math.floor(selectedAttempt.time_taken_seconds / 60)}m {selectedAttempt.time_taken_seconds % 60}s
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Avg Speed</span>
+                  <span className="font-bold text-sm text-slate-800 dark:text-slate-200">{avgSpeed}s / Q</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 text-[10px] uppercase font-bold block">Result Status</span>
+                  <span className={`font-black text-xs uppercase px-2 py-0.5 rounded-md inline-block mt-0.5 ${
+                    isPassed 
+                      ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300' 
+                      : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                  }`}>
+                    {isPassed ? 'QUALIFIED' : 'COMPLETED'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Question & Mark Breakdown Details Table */}
+              <div className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden shadow-xs">
+                <div className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span>Question & Marks Breakdown</span>
+                  <span className="text-[11px] text-slate-500">Attempt ID: <code className="font-mono">{selectedAttempt.id.slice(0, 8)}</code></span>
+                </div>
+                <div className="divide-y divide-slate-100 dark:divide-slate-800 text-xs bg-white dark:bg-slate-900">
+                  <div className="grid grid-cols-3 px-4 py-2 text-slate-600 dark:text-slate-400">
+                    <span>Total Questions: <strong>{totalQ}</strong></span>
+                    <span>Attempted: <strong>{attemptedCount}</strong></span>
+                    <span>Skipped: <strong>{unattemptedCount}</strong></span>
+                  </div>
+                  <div className="grid grid-cols-2 px-4 py-2 text-slate-600 dark:text-slate-400">
+                    <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                      Correct Points Added: <strong>+{(selectedAttempt.correct_answers * marksPerQ).toFixed(2)}</strong> (+{marksPerQ}/Q)
+                    </span>
+                    <span className="text-rose-600 dark:text-rose-400 font-medium">
+                      Negative Penalty Deducted: <strong>-{(selectedAttempt.wrong_answers * negMarks).toFixed(2)}</strong> (-{negMarks}/Q)
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-2">
+                <button
+                  onClick={() => handleCopyScorecardSummary(selectedAttempt)}
+                  className="px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {copiedScorecardId === selectedAttempt.id ? (
+                    <>
+                      <Check className="w-4 h-4 text-emerald-500" />
+                      <span className="text-emerald-600 dark:text-emerald-400">Copied to Clipboard!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4 text-slate-500" />
+                      <span>Copy Scorecard Text</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setSelectedAttempt(null)}
+                    className="flex-1 sm:flex-none px-4 py-2.5 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  >
+                    Close
+                  </button>
+
+                  <button
+                    onClick={() => handlePrintScorecard(selectedAttempt)}
+                    className="flex-1 sm:flex-none px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Print Official Scorecard</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          );
+        })()}
       </Modal>
 
       {/* TOPPERS MERIT LIST PDF GENERATOR MODAL */}

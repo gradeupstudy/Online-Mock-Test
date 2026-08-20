@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Attempt, Test, Question, PublicLeaderboardEntry } from '../../types';
 import { dataService } from '../../services/dataService';
+import { printOfficialScorecard } from '../../utils/printScorecard';
 
 interface TestResultProps {
   attempt: Attempt;
@@ -71,7 +72,12 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   };
 
   const handlePrint = () => {
-    window.print();
+    printOfficialScorecard({
+      attempt,
+      test,
+      rank: myRank,
+      totalCandidates: totalAspirants
+    });
   };
 
   const handleShare = () => {

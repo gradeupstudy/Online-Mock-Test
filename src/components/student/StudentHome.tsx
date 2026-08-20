@@ -6,9 +6,10 @@ import { dataService } from '../../services/dataService';
 interface StudentHomeProps {
   onSelectTest: (test: Test) => void;
   onOpenAdmin: () => void;
+  onOpenWelcome?: () => void;
 }
 
-export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAdmin }) => {
+export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAdmin, onOpenWelcome }) => {
   const [tests, setTests] = useState<Test[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -88,8 +89,20 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
       {/* Banner / Hero */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white p-5 sm:p-8 md:p-10 shadow-xl border border-blue-900/40">
         <div className="relative z-10 max-w-2xl space-y-3 sm:space-y-4">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5" /> Gradeup Study Official Test Portal
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 text-xs font-semibold">
+              <Sparkles className="w-3.5 h-3.5" /> Gradeup Study Official Test Portal
+            </div>
+            {onOpenWelcome && (
+              <button
+                onClick={onOpenWelcome}
+                type="button"
+                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-400/40 text-xs font-bold transition-all cursor-pointer shadow-xs"
+              >
+                <span>🎓</span>
+                <span>Welcome Note</span>
+              </button>
+            )}
           </div>
           <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight text-white leading-tight">
             Master Competitive Exams with Real Exam Pattern Mock Tests

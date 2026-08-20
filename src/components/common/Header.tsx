@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GraduationCap, ShieldCheck, Sun, Moon, Database, Award, Lock } from 'lucide-react';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { dataService } from '../../services/dataService';
-import { GULogo } from './GULogo';
+import { GULogo, BrandLogo } from './GULogo';
 
 interface HeaderProps {
   currentView?: 'student' | 'admin' | 'test' | 'result';
@@ -43,12 +43,29 @@ export const Header: React.FC<HeaderProps> = ({
   });
 
   useEffect(() => {
-    dataService.getSettings().then(s => {
-      if (s?.logo_url) {
-        setLogoUrl(s.logo_url);
-        setImgError(false);
+    const fetchLogo = () => {
+      dataService.getSettings().then(s => {
+        if (s?.logo_url) {
+          setLogoUrl(s.logo_url);
+        }
+      }).catch(err => console.warn('Failed to fetch settings in Header', err));
+    };
+
+    fetchLogo();
+
+    const handleSettingsUpdated = (e: any) => {
+      if (e.detail?.logo_url !== undefined) {
+        setLogoUrl(e.detail.logo_url);
       }
-    }).catch(err => console.warn('Failed to fetch settings in Header', err));
+    };
+
+    window.addEventListener('gradeup_settings_updated', handleSettingsUpdated);
+    window.addEventListener('storage', fetchLogo);
+
+    return () => {
+      window.removeEventListener('gradeup_settings_updated', handleSettingsUpdated);
+      window.removeEventListener('storage', fetchLogo);
+    };
   }, [currentView]);
 
   const handleLogoClick = () => {
@@ -102,17 +119,8 @@ export const Header: React.FC<HeaderProps> = ({
             className="flex items-center gap-2 sm:gap-3 cursor-pointer group select-none relative min-w-0"
             title="Gradeup Study Mock Tests (Click to navigate)"
           >
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 group-hover:scale-105 transition-transform overflow-hidden shrink-0">
-              {logoUrl && !imgError ? (
-                <img
-                  src={logoUrl}
-                  alt="Gradeup Study Logo"
-                  className="w-full h-full object-cover"
-                  onError={() => setImgError(true)}
-                />
-              ) : (
-                <GraduationCap className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
-              )}
+            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center p-1 shadow-md shadow-slate-900/10 group-hover:scale-105 transition-transform overflow-hidden shrink-0">
+              <BrandLogo src={logoUrl} className="w-full h-full" />
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 sm:gap-2">

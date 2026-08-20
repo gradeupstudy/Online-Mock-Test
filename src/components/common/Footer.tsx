@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { GraduationCap, Youtube, Send, Instagram, MessageCircle, Heart } from 'lucide-react';
 import { dataService } from '../../services/dataService';
 import { DEMO_ADMIN_SETTINGS } from '../../data/demoData';
+import { GULogo, BrandLogo } from './GULogo';
 
 export const Footer: React.FC = () => {
   const [socialLinks, setSocialLinks] = useState({
@@ -11,6 +12,7 @@ export const Footer: React.FC = () => {
     whatsapp: DEMO_ADMIN_SETTINGS.whatsapp_channel_url || 'https://whatsapp.com/channel/gradeupstudy',
     brandName: DEMO_ADMIN_SETTINGS.brand_name || 'Gradeup Study',
     supportEmail: DEMO_ADMIN_SETTINGS.support_email || 'support@gradeupstudy.com',
+    logoUrl: '/logo.svg',
   });
 
   const loadLinks = async () => {
@@ -30,6 +32,7 @@ export const Footer: React.FC = () => {
         whatsapp: settings.whatsapp_channel_url || waPlatform?.platform_url || (settings.whatsapp_number ? `https://wa.me/${settings.whatsapp_number.replace(/[^0-9]/g, '')}` : 'https://whatsapp.com/channel/gradeupstudy'),
         brandName: settings.brand_name || 'Gradeup Study',
         supportEmail: settings.support_email || 'support@gradeupstudy.com',
+        logoUrl: settings.logo_url || '/logo.svg',
       });
     } catch (e) {
       console.warn('Error loading footer settings:', e);
@@ -62,8 +65,8 @@ export const Footer: React.FC = () => {
           {/* Column 1: Brand Info */}
           <div className="sm:col-span-2 space-y-3">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-700 via-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20 shrink-0">
-                <GraduationCap className="w-6 h-6 text-white" />
+              <div className="w-11 h-11 rounded-xl bg-slate-800 border border-slate-700/80 flex items-center justify-center p-1.5 shadow-md shrink-0">
+                <BrandLogo src={socialLinks.logoUrl} className="w-full h-full" />
               </div>
               <h3 className="text-xl font-bold text-white tracking-tight">
                 GRADEUP <span className="text-blue-400">STUDY</span>

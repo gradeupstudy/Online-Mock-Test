@@ -28,6 +28,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [filterSubject, setFilterSubject] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTest, setEditingTest] = useState<Partial<Test> | null>(null);
@@ -312,17 +313,26 @@ export const TestManager: React.FC<TestManagerProps> = ({
     ])
   ) as string[];
 
+  // Unique subjects derived dynamically from all available tests
+  const dynamicSubjects = Array.from(
+    new Set([
+      ...tests.map((t) => t.subject).filter(Boolean)
+    ])
+  ) as string[];
+
   // Filtered tests
   const filteredTests = tests.filter((t) => {
     const title = (t.title || '').toLowerCase();
     const code = (t.test_code || '').toLowerCase();
     const cat = (t.category || '').toLowerCase();
+    const sub = (t.subject || '').toLowerCase();
     const q = searchQuery.toLowerCase().trim();
 
-    const matchesQuery = !q || title.includes(q) || code.includes(q) || cat.includes(q);
+    const matchesQuery = !q || title.includes(q) || code.includes(q) || cat.includes(q) || sub.includes(q);
     const matchesCategory = filterCategory === 'all' || (t.category || '') === filterCategory;
+    const matchesSubject = filterSubject === 'all' || (t.subject || '') === filterSubject;
     const matchesStatus = filterStatus === 'all' || (t.status || 'published') === filterStatus;
-    return matchesQuery && matchesCategory && matchesStatus;
+    return matchesQuery && matchesCategory && matchesSubject && matchesStatus;
   });
 
   return (
@@ -349,12 +359,12 @@ export const TestManager: React.FC<TestManagerProps> = ({
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
-        <div className="md:col-span-2 relative">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
+        <div className="sm:col-span-2 lg:col-span-2 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
             type="text"
-            placeholder="Search test name, code, category..."
+            placeholder="Search test name, code, category, subject..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden font-medium text-slate-900 dark:text-white"
@@ -370,6 +380,19 @@ export const TestManager: React.FC<TestManagerProps> = ({
           {dynamicCategories.map((cat) => (
             <option key={cat} value={cat}>
               {cat}
+            </option>
+          ))}
+        </select>
+
+        <select
+          value={filterSubject}
+          onChange={(e) => setFilterSubject(e.target.value)}
+          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-medium text-slate-900 dark:text-white"
+        >
+          <option value="all">All Subjects</option>
+          {dynamicSubjects.map((sub) => (
+            <option key={sub} value={sub}>
+              {sub}
             </option>
           ))}
         </select>
