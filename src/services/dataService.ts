@@ -236,17 +236,20 @@ export const shuffleAndBalanceQuestions = (questions: Question[]): Question[] =>
   });
 };
 
-export const sanitizeAdminSettings = (s: Partial<AdminSettings>): AdminSettings => {
-  const brand_name = s.brand_name || 'Gradeup Study';
-  const youtube_channel = sanitizeSocialUrl('youtube', s.youtube_channel);
-  const telegram_channel = sanitizeSocialUrl('telegram', s.telegram_channel);
-  const instagram_handle = sanitizeSocialUrl('instagram', s.instagram_handle);
-  const whatsapp_channel_url = sanitizeSocialUrl('whatsapp', s.whatsapp_channel_url);
+export const sanitizeAdminSettings = (s?: Partial<AdminSettings> | any): AdminSettings => {
+  const data = s || {};
+  const brand_name = data.brand_name || data.app_name || 'Gradeup Study';
+  const logo_url = data.logo_url !== undefined && data.logo_url !== null ? data.logo_url : DEMO_ADMIN_SETTINGS.logo_url;
+  const youtube_channel = sanitizeSocialUrl('youtube', data.youtube_channel);
+  const telegram_channel = sanitizeSocialUrl('telegram', data.telegram_channel);
+  const instagram_handle = sanitizeSocialUrl('instagram', data.instagram_handle);
+  const whatsapp_channel_url = sanitizeSocialUrl('whatsapp', data.whatsapp_channel_url);
 
   return {
     ...DEMO_ADMIN_SETTINGS,
-    ...s,
+    ...data,
     brand_name,
+    logo_url,
     youtube_channel,
     telegram_channel,
     instagram_handle,
@@ -442,26 +445,33 @@ export const dataService = {
           if (!uploadErr && uploadData) {
             const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(filePath);
             if (publicData?.publicUrl) {
-              return { success: true, url: publicData.publicUrl, source: 'supabase_storage' };
+              const publicUrl = publicData.publicUrl;
+              // Immediately write to Supabase admin_settings
+              try {
+                await supabase.from('admin_settings').update({ logo_url: publicUrl, updated_at: new Date().toISOString() }).neq('id', '00000000-0000-0000-0000-000000000000');
+              } catch {
+                // ignore
+              }
+              return { success: true, url: publicUrl, source: 'supabase_storage' };
             }
           }
-        } catch (storageErr) {
+        } catch {
           // continue checking other buckets
         }
       }
     }
 
-    // 2. Fallback: Ultra-crisp Canvas compression for direct Cloud Database payload
+    // 2. High-Fidelity Canvas compression for direct Cloud Database payload (Retina Sharp 400px max)
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         const rawData = e.target?.result as string;
         const img = new Image();
-        img.onload = () => {
+        img.onload = async () => {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-          const maxDim = 320; // 320px gives crisp retina quality while keeping payload under ~25KB
+          const maxDim = 400; // 400px gives crisp retina quality
           if (width > maxDim || height > maxDim) {
             if (width > height) {
               height = Math.round((height * maxDim) / width);
@@ -474,13 +484,22 @@ export const dataService = {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          let compressed = rawData;
           if (ctx) {
             ctx.drawImage(img, 0, 0, width, height);
-            const compressed = canvas.toDataURL(file.type.includes('png') ? 'image/png' : 'image/jpeg', 0.9);
-            resolve({ success: true, url: compressed, source: 'cloud_compressed' });
-          } else {
-            resolve({ success: true, url: rawData, source: 'cloud_compressed' });
+            compressed = canvas.toDataURL(file.type.includes('png') ? 'image/png' : 'image/jpeg', 0.92);
           }
+
+          // Directly sync to Supabase admin_settings table
+          if (isSupabaseConfigured() && supabase) {
+            try {
+              await supabase.from('admin_settings').update({ logo_url: compressed, updated_at: new Date().toISOString() }).neq('id', '00000000-0000-0000-0000-000000000000');
+            } catch {
+              // ignore
+            }
+          }
+
+          resolve({ success: true, url: compressed, source: 'cloud_compressed' });
         };
         img.onerror = () => resolve({ success: true, url: rawData, source: 'cloud_compressed' });
         img.src = rawData;
@@ -542,89 +561,64 @@ export const dataService = {
           }
         }
 
-        const { data: existingRows } = await supabase.from('admin_settings').select('id');
+        const { data: existingRows } = await supabase.from('admin_settings').select('*');
         
-        const fullPayload: Record<string, unknown> = {
-          brand_name: updated.brand_name || 'Gradeup Study',
-          logo_url: updated.logo_url || '/logo.svg',
-          website_url: updated.website_url || 'https://gradeupstudy.com',
-          support_email: updated.support_email || 'support@gradeupstudy.com',
-          whatsapp_number: updated.whatsapp_number || '+919816000000',
-          whatsapp_channel_url: updated.whatsapp_channel_url || 'https://whatsapp.com/channel/gradeupstudy',
-          telegram_channel: updated.telegram_channel || 'https://t.me/gradeupstudyofficial',
-          youtube_channel: updated.youtube_channel || 'https://youtube.com/@gradeupstudy',
-          instagram_handle: updated.instagram_handle || 'https://instagram.com/gradeupstudy.official',
-          default_test_duration: parseSafeNumber(updated.default_test_duration, 90),
-          default_marks: parseSafeNumber(updated.default_marks, 1.0),
-          default_negative_marking: parseSafeNumber(updated.default_negative_marking, 0.25),
-          mask_leaderboard_names: updated.mask_leaderboard_names ?? true,
-          social_gate_enabled: updated.social_gate_enabled ?? true,
-          social_gate_title: updated.social_gate_title || 'Gradeup Study Official Community Requirement',
-          social_gate_description: updated.social_gate_description || 'Join our official community channels to receive free study PDFs, daily exam updates, and answer key notifications.',
-          social_platforms: updatedPlatforms,
-          updated_at: new Date().toISOString()
-        };
-
-        if (updated.admin_email) fullPayload.admin_email = updated.admin_email;
-        if (updated.admin_password) fullPayload.admin_password = updated.admin_password;
-
-        let dbUpdated = false;
-
-        // If existing row(s) exist, update all of them so any query receives the fresh logo & settings
         if (existingRows && existingRows.length > 0) {
           for (const row of existingRows) {
-            const { error: updErr } = await supabase.from('admin_settings').update(fullPayload).eq('id', row.id);
-            if (!updErr) {
-              dbUpdated = true;
-            } else {
-              // Try minimal safe update
+            const rowKeys = Object.keys(row);
+            const dynamicPayload: Record<string, unknown> = {
+              updated_at: new Date().toISOString()
+            };
+
+            // Dynamically assign ONLY columns present in Supabase admin_settings table!
+            if (rowKeys.includes('logo_url')) dynamicPayload.logo_url = updated.logo_url;
+            if (rowKeys.includes('app_name')) dynamicPayload.app_name = updated.brand_name || 'Gradeup Study';
+            if (rowKeys.includes('brand_name')) dynamicPayload.brand_name = updated.brand_name || 'Gradeup Study';
+            if (rowKeys.includes('app_subtitle')) dynamicPayload.app_subtitle = 'Free Online Mock Test Portal';
+            if (rowKeys.includes('website_url')) dynamicPayload.website_url = updated.website_url;
+            if (rowKeys.includes('support_email')) dynamicPayload.support_email = updated.support_email;
+            if (rowKeys.includes('whatsapp_number')) dynamicPayload.whatsapp_number = updated.whatsapp_number;
+            if (rowKeys.includes('whatsapp_channel_url')) dynamicPayload.whatsapp_channel_url = updated.whatsapp_channel_url;
+            if (rowKeys.includes('telegram_channel')) dynamicPayload.telegram_channel = updated.telegram_channel;
+            if (rowKeys.includes('youtube_channel')) dynamicPayload.youtube_channel = updated.youtube_channel;
+            if (rowKeys.includes('instagram_handle')) dynamicPayload.instagram_handle = updated.instagram_handle;
+            if (rowKeys.includes('default_test_duration')) dynamicPayload.default_test_duration = parseSafeNumber(updated.default_test_duration, 90);
+            if (rowKeys.includes('default_marks')) dynamicPayload.default_marks = parseSafeNumber(updated.default_marks, 1.0);
+            if (rowKeys.includes('default_negative_marking')) dynamicPayload.default_negative_marking = parseSafeNumber(updated.default_negative_marking, 0.25);
+            if (rowKeys.includes('mask_leaderboard_names')) dynamicPayload.mask_leaderboard_names = updated.mask_leaderboard_names ?? true;
+            if (rowKeys.includes('social_gate_enabled')) dynamicPayload.social_gate_enabled = updated.social_gate_enabled ?? true;
+            if (rowKeys.includes('enable_social_gate')) dynamicPayload.enable_social_gate = updated.social_gate_enabled ?? true;
+            if (rowKeys.includes('enable_leaderboard')) dynamicPayload.enable_leaderboard = !updated.mask_leaderboard_names;
+            if (rowKeys.includes('social_gate_title')) dynamicPayload.social_gate_title = updated.social_gate_title;
+            if (rowKeys.includes('social_gate_description')) dynamicPayload.social_gate_description = updated.social_gate_description;
+            if (rowKeys.includes('social_platforms')) dynamicPayload.social_platforms = updatedPlatforms;
+            if (rowKeys.includes('admin_email') && updated.admin_email) dynamicPayload.admin_email = updated.admin_email;
+            if (rowKeys.includes('admin_password') && updated.admin_password) dynamicPayload.admin_password = updated.admin_password;
+
+            const { error: updErr } = await supabase.from('admin_settings').update(dynamicPayload).eq('id', row.id);
+            if (updErr) {
+              console.warn('Dynamic update failed, fallback atomic logo commit:', updErr);
               await supabase.from('admin_settings').update({
                 logo_url: updated.logo_url,
-                brand_name: updated.brand_name,
                 updated_at: new Date().toISOString()
               }).eq('id', row.id);
             }
           }
-        }
-
-        // If no row exists or update failed, insert a new record
-        if (!dbUpdated) {
-          const idToUse = (existingRows && existingRows.length > 0) ? existingRows[0].id : generateUUID();
-          const { error: insErr } = await supabase.from('admin_settings').upsert({
-            ...fullPayload,
-            id: idToUse
-          });
-
-          if (insErr) {
-            console.warn('Supabase admin_settings upsert error, attempting basic payload:', insErr);
-            const basicPayload: Record<string, unknown> = {
-              id: idToUse,
-              brand_name: updated.brand_name,
-              logo_url: updated.logo_url,
-              website_url: updated.website_url,
-              support_email: updated.support_email,
-              whatsapp_number: updated.whatsapp_number,
-              telegram_channel: updated.telegram_channel,
-              youtube_channel: updated.youtube_channel,
-              instagram_handle: updated.instagram_handle,
-              default_test_duration: updated.default_test_duration,
-              default_marks: updated.default_marks,
-              default_negative_marking: updated.default_negative_marking,
-              mask_leaderboard_names: updated.mask_leaderboard_names,
-              social_platforms: updatedPlatforms,
-              updated_at: new Date().toISOString()
-            };
-            const { error: basicErr } = await supabase.from('admin_settings').upsert(basicPayload);
-            if (basicErr) {
-              // Absolute bare-minimum upsert
-              await supabase.from('admin_settings').upsert({
-                id: idToUse,
-                brand_name: updated.brand_name,
-                logo_url: updated.logo_url,
-                updated_at: new Date().toISOString()
-              });
-            }
-          }
+        } else {
+          // If no row exists, insert initial row with standard columns
+          const initialPayload: Record<string, unknown> = {
+            app_name: updated.brand_name || 'Gradeup Study',
+            logo_url: updated.logo_url || '',
+            admin_email: updated.admin_email || 'admin@gradeupstudy.com',
+            show_watermark: true,
+            anti_cheating_warning_limit: 3,
+            max_test_duration_minutes: 180,
+            enable_social_gate: true,
+            enable_leaderboard: true,
+            enable_student_login: false,
+            updated_at: new Date().toISOString()
+          };
+          await supabase.from('admin_settings').insert(initialPayload);
         }
 
         // 3. Direct dual-sync to Supabase `social_platforms` table for all 4 official channels
