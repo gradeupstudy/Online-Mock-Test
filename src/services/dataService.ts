@@ -829,7 +829,7 @@ export const dataService = {
     const totalQuestions = parseSafeNumber(test.total_questions, 0);
     const marksPerQuestion = parseSafeNumber(test.marks_per_question, 1);
     const totalMarks = parseSafeNumber(test.total_marks, totalQuestions * marksPerQuestion);
-    const negativeMark = parseSafeNumber(test.negative_marking, 0.25);
+    const negativeMark = parseSafeNumber(test.negative_marking, 0);
     const duration = parseSafeNumber(test.duration_minutes, 15);
     const passingMarks = parseSafeNumber(test.passing_marks, totalMarks * 0.4);
 
@@ -1182,7 +1182,7 @@ export const dataService = {
         correct_answer: validAns,
         explanation: q.explanation || null,
         marks: parseSafeNumber(q.marks, 1),
-        negative_marks: parseSafeNumber(q.negative_marks, 0.25),
+        negative_marks: parseSafeNumber(q.negative_marks, 0),
         subject: q.subject || 'General Studies',
         chapter: q.chapter || 'General',
         created_at: q.created_at || new Date().toISOString()
@@ -1369,10 +1369,10 @@ export const dataService = {
       total_questions: selectedQuestions.length,
       total_marks: totalMarks,
       marks_per_question: Number(testMeta.marks_per_question) || 1,
-      negative_marking: Number(testMeta.negative_marking) || 0.25,
+      negative_marking: parseSafeNumber(testMeta.negative_marking, 0),
       duration_minutes: Number(testMeta.duration_minutes) || Math.max(15, selectedQuestions.length),
       passing_marks: Number(testMeta.passing_marks) || Math.round(totalMarks * 0.4),
-      instructions: testMeta.instructions || '1. Read all questions carefully.\n2. Negative marking applies.\n3. Do not refresh the page during test.',
+      instructions: testMeta.instructions || '1. Read all questions carefully.\n2. Negative marking applies if configured.\n3. Do not refresh the page during test.',
       status: 'published',
       is_published: true,
       is_multisection: distinctSections.length > 1,
@@ -1394,12 +1394,14 @@ export const dataService = {
 
     await dataService.saveTest(newTest);
 
-    // Clone and map questions into new test with valid UUIDs
+    // Clone and map questions into new test with valid UUIDs and apply new test's negative marking and marks
     const testQuestions: Question[] = selectedQuestions.map((q, idx) => ({
       ...q,
       id: generateUUID(),
       test_id: newId,
       question_number: idx + 1,
+      negative_marks: parseSafeNumber(newTest.negative_marking, 0),
+      marks: parseSafeNumber(newTest.marks_per_question, parseSafeNumber(q.marks, 1)),
     }));
 
     await dataService.saveQuestions(newId, testQuestions);
@@ -1411,6 +1413,9 @@ export const dataService = {
     selectedQuestions: Question[]
   ): Promise<void> => {
     const existing = await dataService.getQuestions(targetTestId, true);
+    const targetTest = await dataService.getTestBySlugOrId(targetTestId);
+    const testNeg = targetTest ? parseSafeNumber(targetTest.negative_marking, 0) : 0;
+    const testMarks = targetTest ? parseSafeNumber(targetTest.marks_per_question, 1) : 1;
     let startNum = existing.length + 1;
 
     const cloned: Question[] = selectedQuestions.map(q => ({
@@ -1418,6 +1423,8 @@ export const dataService = {
       id: generateUUID(),
       test_id: targetTestId,
       question_number: startNum++,
+      negative_marks: testNeg,
+      marks: parseSafeNumber(q.marks, testMarks),
     }));
 
     const combined = [...existing, ...cloned];
@@ -2011,7 +2018,15 @@ export const dataService = {
         } else {
           wrong++;
           isCorrect = false;
-          marksObtained = - parseSafeNumber(q.negative_marks, parseSafeNumber(test.negative_marking, 0.25));
+          const testNeg = parseSafeNumber(test.negative_marking, 0);
+          let negDeduction = 0;
+          if (testNeg > 0) {
+            negDeduction = q.negative_marks !== undefined ? parseSafeNumber(q.negative_marks, testNeg) : testNeg;
+          } else {
+            // If mock test specifies 0 negative marking, strictly 0 penalty is deducted
+            negDeduction = 0;
+          }
+          marksObtained = - negDeduction;
         }
       }
 

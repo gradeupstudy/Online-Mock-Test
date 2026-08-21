@@ -24,6 +24,8 @@ import { dataService } from '../../services/dataService';
 interface AISmartParseModalProps {
   isOpen: boolean;
   testId?: string;
+  testNegativeMarking?: number;
+  testMarksPerQuestion?: number;
   defaultSubject?: string;
   defaultSection?: string;
   availableSections?: string[];
@@ -35,6 +37,8 @@ interface AISmartParseModalProps {
 export const AISmartParseModal: React.FC<AISmartParseModalProps> = ({
   isOpen,
   testId,
+  testNegativeMarking,
+  testMarksPerQuestion,
   defaultSubject = 'General Studies',
   defaultSection = 'General',
   availableSections = [],
@@ -70,6 +74,20 @@ export const AISmartParseModal: React.FC<AISmartParseModalProps> = ({
     setLogs([]);
     setParsedQuestions([]);
 
+    let targetNegMarks = 0;
+    let targetMarks = 1;
+    if (testId && testId !== 'bank') {
+      if (testNegativeMarking !== undefined) {
+        targetNegMarks = testNegativeMarking;
+      } else {
+        const tObj = await dataService.getTestBySlugOrId(testId);
+        targetNegMarks = tObj ? Number(tObj.negative_marking) || 0 : 0;
+      }
+      if (testMarksPerQuestion !== undefined) {
+        targetMarks = testMarksPerQuestion;
+      }
+    }
+
     try {
       const result = await aiService.smartParseQuestions({
         rawText,
@@ -78,6 +96,8 @@ export const AISmartParseModal: React.FC<AISmartParseModalProps> = ({
         defaultChapter: chapter || 'General',
         defaultTopic: chapter || 'General',
         testId: testId || 'bank',
+        negativeMarks: targetNegMarks,
+        marks: targetMarks,
         onLog: (msg) => setLogs((prev) => [...prev, msg]),
       });
 
@@ -124,11 +144,16 @@ export const AISmartParseModal: React.FC<AISmartParseModalProps> = ({
 
     if (testId && testId !== 'bank') {
       const existing = await dataService.getQuestions(testId);
+      const tObj = await dataService.getTestBySlugOrId(testId);
+      const testNeg = testNegativeMarking !== undefined ? testNegativeMarking : (tObj ? Number(tObj.negative_marking) || 0 : 0);
+      const testMarks = testMarksPerQuestion !== undefined ? testMarksPerQuestion : (tObj ? Number(tObj.marks_per_question) || 1 : 1);
       let startNum = existing.length + 1;
       const renumbered: Question[] = toImport.map((q) => ({
         ...q,
         test_id: testId,
         question_number: startNum++,
+        negative_marks: testNeg,
+        marks: testMarks,
       }));
       const combined = [...existing, ...renumbered];
       await dataService.saveQuestions(testId, combined);
@@ -138,6 +163,8 @@ export const AISmartParseModal: React.FC<AISmartParseModalProps> = ({
         await dataService.saveQuestionToBank({
           ...q,
           test_id: 'bank',
+          negative_marks: 0,
+          marks: 1,
         });
       }
       onToast?.('success', `Imported ${toImport.length} questions to Question Bank!`);

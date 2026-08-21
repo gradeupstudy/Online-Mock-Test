@@ -79,9 +79,9 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
     category: 'Police / HP Exams',
     duration_minutes: 30,
     marks_per_question: 1,
-    negative_marking: 0.25,
+    negative_marking: 0,
     passing_marks: 12,
-    instructions: '1. Read all questions carefully.\n2. Negative marking is applicable for incorrect answers.',
+    instructions: '1. Read all questions carefully.\n2. Negative marking is applicable if configured.\n3. Do not refresh or exit during test.',
     social_gate_enabled: true,
     anti_cheating_enabled: true,
   });
@@ -293,8 +293,8 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
       chapter: editingQuestion.chapter || 'General',
       topic: editingQuestion.chapter || 'General',
       difficulty: editingQuestion.difficulty || 'Medium',
-      marks: editingQuestion.marks || 1,
-      negative_marks: editingQuestion.negative_marks || 0.25,
+      marks: editingQuestion.marks !== undefined ? editingQuestion.marks : 1,
+      negative_marks: editingQuestion.negative_marks !== undefined ? editingQuestion.negative_marks : 0,
       inspection_status: editingQuestion.inspection_status || 'pending',
     };
 

@@ -77,10 +77,10 @@ export const TestManager: React.FC<TestManagerProps> = ({
       total_questions: 20,
       total_marks: 20.0,
       marks_per_question: 1.0,
-      negative_marking: 0.25,
+      negative_marking: 0,
       duration_minutes: 15,
       passing_marks: 8.0,
-      instructions: '1. Duration is 15 minutes.\n2. Each question carries 1 mark.\n3. Negative marking: 0.25 marks per wrong answer.\n4. Complete all questions before submitting.',
+      instructions: '1. Duration is 15 minutes.\n2. Each question carries 1 mark.\n3. Negative marking applies if configured.\n4. Complete all questions before submitting.',
       status: 'published',
       is_published: true,
       social_gate_enabled: true,
@@ -134,7 +134,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
       const totalQuestions = parseSafeNumber(editingTest.total_questions, 10);
       const marksPerQuestion = parseSafeNumber(editingTest.marks_per_question, 1);
       const totalMarks = parseSafeNumber(editingTest.total_marks, totalQuestions * marksPerQuestion);
-      const negativeMark = parseSafeNumber(editingTest.negative_marking, 0.25);
+      const negativeMark = parseSafeNumber(editingTest.negative_marking, 0);
       const duration = parseSafeNumber(editingTest.duration_minutes, 15);
       const passingMarks = parseSafeNumber(editingTest.passing_marks, totalMarks * 0.4);
 
@@ -878,7 +878,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
                     type="number"
                     step="0.05"
                     min="0"
-                    value={editingTest.negative_marking ?? 0.25}
+                    value={editingTest.negative_marking ?? 0}
                     onChange={(e) => setEditingTest({ ...editingTest, negative_marking: parseFloat(e.target.value) || 0 })}
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold text-rose-600 dark:text-rose-400"
                   />

@@ -8,6 +8,8 @@ import { dataService } from '../../services/dataService';
 interface TextJsonImportModalProps {
   isOpen: boolean;
   testId: string;
+  testNegativeMarking?: number;
+  testMarksPerQuestion?: number;
   defaultSubject?: string;
   defaultSection?: string;
   availableSections?: string[];
@@ -19,6 +21,8 @@ interface TextJsonImportModalProps {
 export const TextJsonImportModal: React.FC<TextJsonImportModalProps> = ({
   isOpen,
   testId,
+  testNegativeMarking,
+  testMarksPerQuestion,
   defaultSubject = 'General Studies',
   defaultSection = 'General',
   availableSections = [],
@@ -39,6 +43,8 @@ export const TextJsonImportModal: React.FC<TextJsonImportModalProps> = ({
   }, [defaultSection]);
 
   const effectiveSection = targetSection === 'CUSTOM' ? customSectionInput || 'General' : targetSection;
+  const effectiveNegMarks = testNegativeMarking !== undefined ? testNegativeMarking : 0;
+  const effectiveMarks = testMarksPerQuestion !== undefined ? testMarksPerQuestion : 1;
 
   const handleParseText = () => {
     if (!rawText.trim()) {
@@ -46,7 +52,7 @@ export const TextJsonImportModal: React.FC<TextJsonImportModalProps> = ({
       return;
     }
     setParsing(true);
-    const parseRes = parseTextOrJsonQuestions(rawText, testId, defaultSubject, 'General', effectiveSection);
+    const parseRes = parseTextOrJsonQuestions(rawText, testId, defaultSubject, 'General', effectiveSection, effectiveNegMarks, effectiveMarks);
     setResult(parseRes);
     setParsing(false);
   };
@@ -60,7 +66,7 @@ export const TextJsonImportModal: React.FC<TextJsonImportModalProps> = ({
         if (content) {
           setRawText(content);
           setParsing(true);
-          const parseRes = parseTextOrJsonQuestions(content, testId, defaultSubject, 'General', effectiveSection);
+          const parseRes = parseTextOrJsonQuestions(content, testId, defaultSubject, 'General', effectiveSection, effectiveNegMarks, effectiveMarks);
           setResult(parseRes);
           setParsing(false);
         }
@@ -89,8 +95,8 @@ export const TextJsonImportModal: React.FC<TextJsonImportModalProps> = ({
       subject: q.subject || defaultSubject,
       chapter: q.chapter || 'General',
       section: q.section || effectiveSection,
-      marks: q.marks || 1,
-      negative_marks: q.negative_marks || 0.25,
+      marks: q.marks !== undefined && q.marks !== null ? q.marks : effectiveMarks,
+      negative_marks: q.negative_marks !== undefined && q.negative_marks !== null ? q.negative_marks : effectiveNegMarks,
     }));
 
     const combined = [...existing, ...newQuestions];

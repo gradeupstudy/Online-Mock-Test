@@ -63,7 +63,7 @@ export const BulkMCQInspectionModal: React.FC<BulkMCQInspectionModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      // Reset state on open
+      // Reset state on open only
       setSelectedIds(new Set(questions.map((q) => q.id)));
       setIsAuditing(false);
       setIsCompleted(false);
@@ -71,8 +71,10 @@ export const BulkMCQInspectionModal: React.FC<BulkMCQInspectionModalProps> = ({
       setLogs([]);
       setProgressDone(0);
       setProgressTotal(questions.length);
+      setActiveTabFilter('all');
+      setExpandedId(null);
     }
-  }, [isOpen, questions]);
+  }, [isOpen]);
 
   const targetQuestions = questions.filter((q) => {
     if (scope === 'uninspected') {
@@ -227,9 +229,28 @@ export const BulkMCQInspectionModal: React.FC<BulkMCQInspectionModalProps> = ({
               disabled={targetQuestions.length === 0}
               className="px-6 py-3 bg-slate-950 hover:bg-slate-900 text-amber-300 font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
             >
-              <Sparkles className="w-4 h-4 text-amber-300 animate-spin" />
+              <Sparkles className="w-4 h-4 text-amber-300" />
               <span>Inspect All {targetQuestions.length} MCQs Now</span>
             </button>
+          )}
+
+          {isCompleted && auditResults.length > 0 && (
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setIsCompleted(false)}
+                className="px-3.5 py-2 bg-slate-950/70 hover:bg-slate-950 text-white font-bold text-xs rounded-xl transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Change Settings
+              </button>
+              <button
+                onClick={handleConfirmApplyAll}
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 shrink-0 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Apply All ({auditResults.filter((r) => r.applied).length}) Improvements</span>
+              </button>
+            </div>
           )}
         </div>
 

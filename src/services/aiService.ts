@@ -25,6 +25,8 @@ export interface AIGenerateParams {
   difficulty: string; // Easy, Medium, Hard, Mixed
   customPrompt?: string;
   testId?: string;
+  negativeMarks?: number;
+  marks?: number;
   onLog?: (msg: string) => void;
 }
 
@@ -35,6 +37,8 @@ export interface SmartParseParams {
   defaultChapter?: string;
   defaultTopic?: string;
   testId?: string;
+  negativeMarks?: number;
+  marks?: number;
   onLog?: (msg: string) => void;
 }
 
@@ -361,6 +365,9 @@ CRITICAL RULES:
           throw new Error('AI generated invalid or empty question array.');
         }
 
+        const targetMarks = params.marks !== undefined ? params.marks : 1;
+        const targetNegativeMarks = params.negativeMarks !== undefined ? params.negativeMarks : 0;
+
         const questions: Question[] = questionArray.map((q: any, idx: number) => ({
           id: 'q-ai-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substr(2, 4),
           test_id: params.testId || 'bank',
@@ -379,8 +386,8 @@ CRITICAL RULES:
           chapter: q.chapter || params.chapter || 'General',
           topic: q.topic || params.topic || 'General Topic',
           difficulty: q.difficulty || params.difficulty || 'Medium',
-          marks: 1,
-          negative_marks: 0.25,
+          marks: targetMarks,
+          negative_marks: targetNegativeMarks,
           inspection_status: 'pending',
         }));
 
@@ -488,6 +495,9 @@ Strict JSON Output Schema: Return a JSON ARRAY of parsed question objects.
           throw new Error('Smart Parse could not find any valid MCQs in the provided text.');
         }
 
+        const targetMarks = params.marks !== undefined ? params.marks : 1;
+        const targetNegativeMarks = params.negativeMarks !== undefined ? params.negativeMarks : 0;
+
         const questions: Question[] = questionArray.map((q: any, idx: number) => ({
           id: 'q-parse-' + Date.now() + '-' + idx + '-' + Math.random().toString(36).substr(2, 4),
           test_id: params.testId || 'bank',
@@ -506,8 +516,8 @@ Strict JSON Output Schema: Return a JSON ARRAY of parsed question objects.
           chapter: q.chapter || params.defaultChapter || 'General',
           topic: q.topic || params.defaultTopic || 'General Topic',
           difficulty: q.difficulty || 'Medium',
-          marks: 1,
-          negative_marks: 0.25,
+          marks: targetMarks,
+          negative_marks: targetNegativeMarks,
           inspection_status: 'verified',
         }));
 
@@ -949,7 +959,24 @@ Return strict JSON array with each item matching the MCQ ID and full audit repor
               );
 
               const rawText = response.text || '';
-              let parsed = JSON.parse(rawText);
+              let cleaned = rawText.trim();
+              if (cleaned.startsWith('```json')) {
+                cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+              } else if (cleaned.startsWith('```')) {
+                cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+              }
+
+              let parsed: any;
+              try {
+                parsed = JSON.parse(cleaned);
+              } catch (parseErr) {
+                const match = cleaned.match(/\[\s*\{[\s\S]*\}\s*\]/);
+                if (match) {
+                  parsed = JSON.parse(match[0]);
+                } else {
+                  throw parseErr;
+                }
+              }
               if (!Array.isArray(parsed)) parsed = [parsed];
 
               return parsed.map((item: any) => ({
@@ -1313,7 +1340,24 @@ Strictly adhere to the JSON schema.
           throw new Error('Empty response from 360° Inspection API.');
         }
 
-        const report: MCQ360InspectionReport = JSON.parse(rawText);
+        let cleaned = rawText.trim();
+        if (cleaned.startsWith('```json')) {
+          cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+        } else if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+
+        let report: MCQ360InspectionReport;
+        try {
+          report = JSON.parse(cleaned);
+        } catch (parseErr) {
+          const match = cleaned.match(/\{[\s\S]*\}/);
+          if (match) {
+            report = JSON.parse(match[0]);
+          } else {
+            throw parseErr;
+          }
+        }
         return report;
       }
     );

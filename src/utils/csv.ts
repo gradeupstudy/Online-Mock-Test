@@ -36,7 +36,12 @@ export interface CSVParseResult {
   errors: string[];
 }
 
-export const parseQuestionsCSV = (file: File, testId: string): Promise<CSVParseResult> => {
+export const parseQuestionsCSV = (
+  file: File,
+  testId: string,
+  defaultNegativeMarks: number = 0,
+  defaultMarks: number = 1
+): Promise<CSVParseResult> => {
   return new Promise((resolve) => {
     Papa.parse(file, {
       header: true,
@@ -79,6 +84,11 @@ export const parseQuestionsCSV = (file: File, testId: string): Promise<CSVParseR
             }
           }
 
+          const rawNeg = row.Negative_Marks ?? row.negative_marks ?? row.Negative_Mark ?? row.negative_mark;
+          const negVal = rawNeg !== undefined && rawNeg !== null && String(rawNeg).trim() !== '' ? Number(rawNeg) : defaultNegativeMarks;
+          const rawMarks = row.Marks ?? row.marks;
+          const marksVal = rawMarks !== undefined && rawMarks !== null && String(rawMarks).trim() !== '' ? Number(rawMarks) : defaultMarks;
+
           questions.push({
             id: 'q-csv-' + Date.now() + '-' + idx,
             test_id: testId,
@@ -90,8 +100,8 @@ export const parseQuestionsCSV = (file: File, testId: string): Promise<CSVParseR
             option_d: optionD.trim(),
             correct_answer: answer as 'A' | 'B' | 'C' | 'D',
             explanation: explanation ? explanation.trim() : null,
-            marks: Number(row.Marks || row.marks) || 1,
-            negative_marks: Number(row.Negative_Marks || row.negative_marks) || 0.25,
+            marks: isNaN(marksVal) ? defaultMarks : marksVal,
+            negative_marks: isNaN(negVal) ? defaultNegativeMarks : negVal,
             subject: subject.trim(),
             chapter: chapter.trim()
           });

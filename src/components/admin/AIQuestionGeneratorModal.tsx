@@ -25,6 +25,8 @@ import { dataService } from '../../services/dataService';
 interface AIQuestionGeneratorModalProps {
   isOpen: boolean;
   testId?: string;
+  testNegativeMarking?: number;
+  testMarksPerQuestion?: number;
   defaultSubject?: string;
   defaultSection?: string;
   availableSections?: string[];
@@ -49,6 +51,8 @@ const POPULAR_SUBJECTS = [
 export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> = ({
   isOpen,
   testId,
+  testNegativeMarking,
+  testMarksPerQuestion,
   defaultSubject = 'General Studies',
   defaultSection = 'General',
   availableSections = [],
@@ -120,6 +124,20 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
     setLogs([]);
     setGeneratedQuestions([]);
 
+    let targetNegMarks = 0;
+    let targetMarks = 1;
+    if (testId && testId !== 'bank') {
+      if (testNegativeMarking !== undefined) {
+        targetNegMarks = testNegativeMarking;
+      } else {
+        const tObj = await dataService.getTestBySlugOrId(testId);
+        targetNegMarks = tObj ? Number(tObj.negative_marking) || 0 : 0;
+      }
+      if (testMarksPerQuestion !== undefined) {
+        targetMarks = testMarksPerQuestion;
+      }
+    }
+
     const params: AIGenerateParams = {
       subject: subject.trim(),
       section: subject.trim() || 'General',
@@ -129,6 +147,8 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
       difficulty,
       customPrompt,
       testId: testId || 'bank',
+      negativeMarks: targetNegMarks,
+      marks: targetMarks,
       onLog: (msg) => {
         setLogs((prev) => [...prev, msg]);
       },
@@ -168,12 +188,17 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
 
     if (testId && testId !== 'bank') {
       const existing = await dataService.getQuestions(testId);
+      const tObj = await dataService.getTestBySlugOrId(testId);
+      const testNeg = testNegativeMarking !== undefined ? testNegativeMarking : (tObj ? Number(tObj.negative_marking) || 0 : 0);
+      const testMarks = testMarksPerQuestion !== undefined ? testMarksPerQuestion : (tObj ? Number(tObj.marks_per_question) || 1 : 1);
       let startNum = existing.length + 1;
 
       const newQuestions: Question[] = generatedQuestions.map((q) => ({
         ...q,
         test_id: testId,
         question_number: startNum++,
+        negative_marks: testNeg,
+        marks: testMarks,
       }));
 
       const combined = [...existing, ...newQuestions];
@@ -185,6 +210,8 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
         await dataService.saveQuestionToBank({
           ...q,
           test_id: 'bank',
+          negative_marks: 0,
+          marks: 1,
         });
       }
       onToast?.('success', `Saved ${generatedQuestions.length} AI questions to Question Bank!`);

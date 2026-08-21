@@ -3,7 +3,7 @@ import { Modal } from '../common/Modal';
 import { Upload, FileSpreadsheet, CheckCircle, AlertTriangle, Download, Trash2, ArrowRight } from 'lucide-react';
 import { parseQuestionsCSV, CSVParseResult } from '../../utils/csv';
 import { Question } from '../../types';
-import { dataService } from '../../services/dataService';
+import { dataService, parseSafeNumber } from '../../services/dataService';
 
 interface BulkImportModalProps {
   isOpen: boolean;
@@ -34,17 +34,26 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
       const selectedFile = e.target.files[0];
       setFile(selectedFile);
       setParsing(true);
-      const parseRes = await parseQuestionsCSV(selectedFile, testId);
+      let testNeg = 0;
+      let testMarks = 1;
+      if (testId && testId !== 'bank') {
+        const testObj = await dataService.getTestBySlugOrId(testId);
+        if (testObj) {
+          testNeg = parseSafeNumber(testObj.negative_marking, 0);
+          testMarks = parseSafeNumber(testObj.marks_per_question, 1);
+        }
+      }
+      const parseRes = await parseQuestionsCSV(selectedFile, testId, testNeg, testMarks);
       setResult(parseRes);
       setParsing(false);
     }
   };
 
   const handleDownloadSample = () => {
-    const csvContent = `Question,Option_A,Option_B,Option_C,Option_D,Answer,Explanation,Subject,Chapter
-Who is known as the Father of Indian Constitution?,Mahatma Gandhi,Dr. B. R. Ambedkar,Jawaharlal Nehru,Sardar Patel,B,Dr. Ambedkar was chairman of drafting committee.,Indian Polity,Constitution
-Which river is known as Iravati in Sanskrit?,Beas,Ravi,Satluj,Chenab,B,Ravi river was called Iravati.,HP GK,Rivers of HP
-What is 15% of 200?,20,25,30,35,C,15 * 200 / 100 = 30.,Maths,Percentage`;
+    const csvContent = `Question,Option_A,Option_B,Option_C,Option_D,Answer,Explanation,Subject,Chapter,Marks,Negative_Marks
+Who is known as the Father of Indian Constitution?,Mahatma Gandhi,Dr. B. R. Ambedkar,Jawaharlal Nehru,Sardar Patel,B,Dr. Ambedkar was chairman of drafting committee.,Indian Polity,Constitution,1,0
+Which river is known as Iravati in Sanskrit?,Beas,Ravi,Satluj,Chenab,B,Ravi river was called Iravati.,HP GK,Rivers of HP,1,0
+What is 15% of 200?,20,25,30,35,C,15 * 200 / 100 = 30.,Maths,Percentage,1,0`;
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -61,11 +70,22 @@ What is 15% of 200?,20,25,30,35,C,15 * 200 / 100 = 30.,Maths,Percentage`;
 
     // Get existing questions and append
     const existing = await dataService.getQuestions(testId);
+    let testNeg = 0;
+    let testMarks = 1;
+    if (testId && testId !== 'bank') {
+      const testObj = await dataService.getTestBySlugOrId(testId);
+      if (testObj) {
+        testNeg = parseSafeNumber(testObj.negative_marking, 0);
+        testMarks = parseSafeNumber(testObj.marks_per_question, 1);
+      }
+    }
     let startNum = existing.length + 1;
 
     const newQuestions = result.questions.map((q) => ({
       ...q,
-      question_number: startNum++
+      question_number: startNum++,
+      marks: q.marks !== undefined && q.marks !== null ? q.marks : testMarks,
+      negative_marks: q.negative_marks !== undefined && q.negative_marks !== null ? q.negative_marks : testNeg
     }));
 
     const combined = [...existing, ...newQuestions];

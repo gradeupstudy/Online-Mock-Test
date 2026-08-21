@@ -13,7 +13,9 @@ export function parseTextOrJsonQuestions(
   testId: string,
   defaultSubject: string = 'General Studies',
   defaultChapter: string = 'General',
-  defaultSection: string = 'General'
+  defaultSection: string = 'General',
+  defaultNegativeMarks: number = 0,
+  defaultMarks: number = 1
 ): TextParseResult {
   const trimmed = input.trim();
   const errors: string[] = [];
@@ -71,8 +73,8 @@ export function parseTextOrJsonQuestions(
             subject: item.subject || defaultSubject,
             chapter: item.chapter || defaultChapter,
             section: item.section || item.section_name || defaultSection,
-            marks: item.marks ? Number(item.marks) : 1,
-            negative_marks: item.negative_marks ? Number(item.negative_marks) : 0.25,
+            marks: item.marks !== undefined && item.marks !== null ? Number(item.marks) : defaultMarks,
+            negative_marks: item.negative_marks !== undefined && item.negative_marks !== null ? Number(item.negative_marks) : defaultNegativeMarks,
           });
         });
 
@@ -196,8 +198,8 @@ export function parseTextOrJsonQuestions(
         subject: subject,
         chapter: chapter,
         section: section,
-        marks: 1,
-        negative_marks: 0.25,
+        marks: defaultMarks,
+        negative_marks: defaultNegativeMarks,
       });
     } else {
       errors.push(`Block #${blockIndex + 1}: Could not recognize question text or options.`);
