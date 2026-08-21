@@ -78,6 +78,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   // Selection states for batch actions on mock test questions
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
   const [isGeneratingExplanationId, setIsGeneratingExplanationId] = useState<string | null>(null);
+  const [isRegeneratingQuestionId, setIsRegeneratingQuestionId] = useState<string | null>(null);
   const [isGeneratingEditExplanation, setIsGeneratingEditExplanation] = useState(false);
 
   const [editingQuestion, setEditingQuestion] = useState<Partial<Question> | null>(null);
@@ -127,6 +128,34 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       notify('error', err?.message || 'Failed to generate explanation with AI.');
     } finally {
       setIsGeneratingExplanationId(null);
+    }
+  };
+
+  // 1-Click Single Question Regeneration with AI
+  const handleRegenerateQuestion = async (q: Question) => {
+    try {
+      setIsRegeneratingQuestionId(q.id);
+      const newQuestion = await aiService.regenerateSingleQuestion(q);
+      
+      // Preserve core identifiers and mock test markings
+      const updatedQ: Question = {
+        ...newQuestion,
+        id: q.id,
+        test_id: testId,
+        question_number: q.question_number,
+        marks: q.marks !== undefined ? q.marks : (test?.marks_per_question ?? 1),
+        negative_marks: q.negative_marks !== undefined ? q.negative_marks : (test?.negative_marking ?? 0),
+      };
+
+      const updatedList = questions.map((item) => (item.id === q.id ? updatedQ : item));
+      await dataService.saveQuestions(testId, updatedList);
+      setQuestions(updatedList);
+      notify('success', `✨ Q${q.question_number} regenerated successfully with a fresh AI question!`);
+    } catch (err: any) {
+      console.error('Failed to regenerate question with AI', err);
+      notify('error', err?.message || 'Failed to regenerate question with AI.');
+    } finally {
+      setIsRegeneratingQuestionId(null);
     }
   };
 
@@ -953,6 +982,17 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                 >
                   <ShieldCheck className="w-3.5 h-3.5 fill-slate-950" />
                   <span>360° Inspect</span>
+                </button>
+
+                {/* 1-Click AI Regenerate MCQ Button */}
+                <button
+                  onClick={() => handleRegenerateQuestion(q)}
+                  disabled={isRegeneratingQuestionId === q.id}
+                  className="px-2.5 py-1 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-xs rounded-lg border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer disabled:opacity-50 transition-all shadow-xs mr-1"
+                  title="Regenerate: Replace this MCQ with a fresh, high-quality AI question for this topic"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-purple-600 dark:text-purple-400 ${isRegeneratingQuestionId === q.id ? 'animate-spin' : ''}`} />
+                  <span>{isRegeneratingQuestionId === q.id ? 'Regenerating...' : 'Regenerate'}</span>
                 </button>
 
                 <button

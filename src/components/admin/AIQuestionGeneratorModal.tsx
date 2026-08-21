@@ -76,6 +76,7 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
 
   // Generation & Status States
   const [generating, setGenerating] = useState(false);
+  const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [generatedQuestions, setGeneratedQuestions] = useState<Question[]>([]);
 
@@ -172,6 +173,25 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
     const shuffled = shuffleAndBalanceQuestions(generatedQuestions);
     setGeneratedQuestions(shuffled);
     onToast?.('success', '🔀 Shuffled all options! Correct answers are now evenly distributed across A, B, C, D.');
+  };
+
+  const handleRegenerateSinglePreview = async (index: number) => {
+    const targetQ = generatedQuestions[index];
+    if (!targetQ) return;
+
+    try {
+      setRegeneratingIndex(index);
+      const newQ = await aiService.regenerateSingleQuestion(targetQ);
+      setGeneratedQuestions((prev) =>
+        prev.map((item, idx) => (idx === index ? { ...newQ, question_number: idx + 1 } : item))
+      );
+      onToast?.('success', `✨ Regenerated Q${index + 1} with a fresh AI question!`);
+    } catch (err: any) {
+      console.error('Failed to regenerate preview question', err);
+      onToast?.('error', err?.message || 'Failed to regenerate question.');
+    } finally {
+      setRegeneratingIndex(null);
+    }
   };
 
   const getAnswerDistribution = () => {
@@ -499,11 +519,23 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
             <div className="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 bg-slate-50 dark:bg-slate-900/60">
               {generatedQuestions.map((q, idx) => (
                 <div key={idx} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 text-xs space-y-2">
-                  <div className="flex items-center justify-between font-bold text-slate-900 dark:text-white">
-                    <span>Q{idx + 1}. {q.question_text}</span>
-                    <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 rounded-md shrink-0 font-bold">
-                      Ans: {q.correct_answer}
-                    </span>
+                  <div className="flex items-center justify-between font-bold text-slate-900 dark:text-white gap-2">
+                    <span className="flex-1">Q{idx + 1}. {q.question_text}</span>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleRegenerateSinglePreview(idx)}
+                        disabled={regeneratingIndex === idx}
+                        className="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/60 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-[11px] rounded-md border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        title="Regenerate this specific question with AI"
+                      >
+                        <RefreshCw className={`w-3 h-3 text-purple-600 dark:text-purple-400 ${regeneratingIndex === idx ? 'animate-spin' : ''}`} />
+                        <span>{regeneratingIndex === idx ? 'Regenerating...' : 'Regenerate'}</span>
+                      </button>
+                      <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 rounded-md shrink-0 font-bold">
+                        Ans: {q.correct_answer}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-slate-600 dark:text-slate-300">

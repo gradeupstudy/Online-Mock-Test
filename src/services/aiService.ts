@@ -400,6 +400,135 @@ CRITICAL RULES:
   },
 
   /**
+   * Regenerate a single MCQ: Generates a completely new, fresh question for the given subject/chapter/topic
+   * while maintaining the same question structure, language (Hindi/English), marks, and difficulty.
+   */
+  regenerateSingleQuestion: async (
+    currentQuestion: Question,
+    customInstructions?: string,
+    onLog?: (msg: string) => void
+  ): Promise<Question> => {
+    // Detect if original question was in Hindi
+    const isHindi =
+      /[\u0900-\u097F]/.test(currentQuestion.question_text || '') ||
+      /[\u0900-\u097F]/.test(currentQuestion.subject || '') ||
+      /[\u0900-\u097F]/.test(currentQuestion.chapter || '') ||
+      (currentQuestion.subject || '').toLowerCase().includes('hindi');
+
+    const promptText = `
+You are an expert exam question creator for competitive exams (UPSC, SSC, Banking, State Police, HPPSC, Railways).
+
+TASK:
+Generate 1 SINGLE BRAND NEW, FRESH MULTIPLE CHOICE QUESTION (MCQ) to replace an existing question.
+The new question must be on the EXACT SAME subject/chapter/topic/difficulty, but must be a COMPLETELY DIFFERENT question statement.
+
+OLD QUESTION TO REPLACE (DO NOT REPEAT THIS):
+- Old Question: "${currentQuestion.question_text}"
+- Old Topic: "${currentQuestion.topic || currentQuestion.chapter || 'General'}"
+
+TARGET SPECIFICATIONS:
+- Subject: ${currentQuestion.subject || 'General Studies'}
+- Section: ${currentQuestion.section || 'General'}
+- Chapter: ${currentQuestion.chapter || 'General'}
+- Topic: ${currentQuestion.topic || currentQuestion.chapter || 'General Topic'}
+- Difficulty Level: ${currentQuestion.difficulty || 'Medium'}
+- Language Requirement: ${isHindi ? 'Must be in pure HINDI (Devanagari script)' : 'English (or appropriate bilingual if subject requires)'}
+${customInstructions ? `- Custom Instructions: ${customInstructions}` : ''}
+
+CRITICAL RULES:
+1. Create a fresh, high-quality, exam-grade question.
+2. Provide 4 plausible options (option_a, option_b, option_c, option_d).
+3. "correct_answer" must be 'A', 'B', 'C', or 'D'.
+4. Provide a rich, crystal-clear, factual "explanation".
+5. Return JSON object with keys: question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, subject, section, chapter, topic, difficulty.
+`.trim();
+
+    return aiService.executeWithKeyRotation<Question>(
+      'Regenerate Question',
+      onLog,
+      async (ai) => {
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  question_text: { type: Type.STRING },
+                  option_a: { type: Type.STRING },
+                  option_b: { type: Type.STRING },
+                  option_c: { type: Type.STRING },
+                  option_d: { type: Type.STRING },
+                  correct_answer: { type: Type.STRING },
+                  explanation: { type: Type.STRING },
+                  subject: { type: Type.STRING },
+                  section: { type: Type.STRING },
+                  chapter: { type: Type.STRING },
+                  topic: { type: Type.STRING },
+                  difficulty: { type: Type.STRING },
+                },
+                required: [
+                  'question_text',
+                  'option_a',
+                  'option_b',
+                  'option_c',
+                  'option_d',
+                  'correct_answer',
+                ],
+              },
+            },
+          },
+          onLog,
+          'Regenerate Single Question'
+        );
+
+        const rawText = response.text || '';
+        if (!rawText) throw new Error('Empty response received from AI.');
+
+        let cleaned = rawText.trim();
+        if (cleaned.startsWith('```json')) {
+          cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+        } else if (cleaned.startsWith('```')) {
+          cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+        }
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(cleaned);
+        } catch {
+          const match = cleaned.match(/\{[\s\S]*\}/);
+          if (match) parsed = JSON.parse(match[0]);
+          else throw new Error('Failed to parse regenerated question JSON.');
+        }
+
+        const validAns = (['A', 'B', 'C', 'D'].includes(parsed.correct_answer?.toUpperCase())
+          ? parsed.correct_answer.toUpperCase()
+          : 'A') as 'A' | 'B' | 'C' | 'D';
+
+        return {
+          ...currentQuestion,
+          question_text: parsed.question_text || currentQuestion.question_text,
+          option_a: parsed.option_a || currentQuestion.option_a,
+          option_b: parsed.option_b || currentQuestion.option_b,
+          option_c: parsed.option_c || currentQuestion.option_c,
+          option_d: parsed.option_d || currentQuestion.option_d,
+          correct_answer: validAns,
+          explanation: parsed.explanation || currentQuestion.explanation || '',
+          subject: parsed.subject || currentQuestion.subject || 'General Studies',
+          section: parsed.section || currentQuestion.section || 'General',
+          chapter: parsed.chapter || currentQuestion.chapter || 'General',
+          topic: parsed.topic || currentQuestion.topic || 'General Topic',
+          difficulty: parsed.difficulty || currentQuestion.difficulty || 'Medium',
+          inspection_status: 'pending',
+          quality_score: undefined,
+        };
+      }
+    );
+  },
+
+  /**
    * AI Smart Parse: Parse unformatted, raw text, question papers, copy-pasted MCQs into structured questions
    */
   smartParseQuestions: async (params: SmartParseParams): Promise<Question[]> => {

@@ -59,6 +59,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   // Selected Questions for Batch Operations
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
   const [isGeneratingExplanationId, setIsGeneratingExplanationId] = useState<string | null>(null);
+  const [isRegeneratingQuestionId, setIsRegeneratingQuestionId] = useState<string | null>(null);
   const [isGeneratingEditExplanation, setIsGeneratingEditExplanation] = useState(false);
   const [isDeduplicating, setIsDeduplicating] = useState(false);
 
@@ -421,6 +422,29 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
       onToast?.('error', err?.message || 'Failed to generate explanation.');
     } finally {
       setIsGeneratingExplanationId(null);
+    }
+  };
+
+  // Single Question AI Regenerate in Bank
+  const handleRegenerateBankQuestion = async (q: Question) => {
+    try {
+      setIsRegeneratingQuestionId(q.id);
+      const newQuestion = await aiService.regenerateSingleQuestion(q);
+      const updatedQ: Question = {
+        ...newQuestion,
+        id: q.id,
+        test_id: 'bank',
+        marks: q.marks !== undefined ? q.marks : 1,
+        negative_marks: q.negative_marks !== undefined ? q.negative_marks : 0,
+      };
+
+      await dataService.saveQuestionToBank(updatedQ);
+      setQuestions((prev) => prev.map((item) => (item.id === q.id ? updatedQ : item)));
+      onToast?.('success', `✨ Regenerated question successfully with a fresh AI question!`);
+    } catch (err: any) {
+      onToast?.('error', err?.message || 'Failed to regenerate question with AI.');
+    } finally {
+      setIsRegeneratingQuestionId(null);
     }
   };
 
@@ -971,6 +995,17 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                     >
                       <ShieldCheck className="w-3.5 h-3.5 fill-slate-950" />
                       <span>360° Inspect</span>
+                    </button>
+
+                    {/* 1-Click AI Regenerate Question */}
+                    <button
+                      onClick={() => handleRegenerateBankQuestion(q)}
+                      disabled={isRegeneratingQuestionId === q.id}
+                      className="px-2.5 py-1.5 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-xs rounded-xl border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer disabled:opacity-50 transition-all shadow-xs"
+                      title="Regenerate: Replace this MCQ with a fresh new AI question for this topic"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 text-purple-600 dark:text-purple-400 ${isRegeneratingQuestionId === q.id ? 'animate-spin' : ''}`} />
+                      <span>{isRegeneratingQuestionId === q.id ? 'Regenerating...' : 'Regenerate'}</span>
                     </button>
 
                     <button
