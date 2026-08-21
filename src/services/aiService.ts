@@ -416,15 +416,9 @@ CRITICAL RULES:
       (currentQuestion.subject || '').toLowerCase().includes('hindi');
 
     const promptText = `
-You are an expert exam question creator for competitive exams (UPSC, SSC, Banking, State Police, HPPSC, Railways).
+You are an expert exam question paper creator for competitive exams (UPSC, SSC, Banking, State Police, HPPSC, Railways).
 
-TASK:
-Generate 1 SINGLE BRAND NEW, FRESH MULTIPLE CHOICE QUESTION (MCQ) to replace an existing question.
-The new question must be on the EXACT SAME subject/chapter/topic/difficulty, but must be a COMPLETELY DIFFERENT question statement.
-
-OLD QUESTION TO REPLACE (DO NOT REPEAT THIS):
-- Old Question: "${currentQuestion.question_text}"
-- Old Topic: "${currentQuestion.topic || currentQuestion.chapter || 'General'}"
+GENERATE EXACTLY 1 HIGH-QUALITY MULTIPLE CHOICE QUESTION (MCQ).
 
 TARGET SPECIFICATIONS:
 - Subject: ${currentQuestion.subject || 'General Studies'}
@@ -432,15 +426,17 @@ TARGET SPECIFICATIONS:
 - Chapter: ${currentQuestion.chapter || 'General'}
 - Topic: ${currentQuestion.topic || currentQuestion.chapter || 'General Topic'}
 - Difficulty Level: ${currentQuestion.difficulty || 'Medium'}
-- Language Requirement: ${isHindi ? 'Must be in pure HINDI (Devanagari script)' : 'English (or appropriate bilingual if subject requires)'}
+- Language: ${isHindi ? 'Must be in pure HINDI (Devanagari script)' : 'English'}
 ${customInstructions ? `- Custom Instructions: ${customInstructions}` : ''}
+${currentQuestion.question_text ? `- NOTE: Must be a completely NEW question, different from: "${currentQuestion.question_text.substring(0, 80)}..."` : ''}
 
 CRITICAL RULES:
-1. Create a fresh, high-quality, exam-grade question.
-2. Provide 4 plausible options (option_a, option_b, option_c, option_d).
-3. "correct_answer" must be 'A', 'B', 'C', or 'D'.
-4. Provide a rich, crystal-clear, factual "explanation".
-5. Return JSON object with keys: question_text, option_a, option_b, option_c, option_d, correct_answer, explanation, subject, section, chapter, topic, difficulty.
+1. "question_text" MUST contain ONLY the direct examination question statement (e.g. "${isHindi ? 'हिंदी भाषा की उत्पत्ति किस अपभ्रंश से मानी जाती है?' : 'Which of the following articles of the Constitution...'}").
+   STRICTLY FORBIDDEN: Do NOT include any introductory remarks, reasoning, meta-notes, topic descriptions, or explanations in "question_text".
+2. "option_a", "option_b", "option_c", "option_d" MUST be concise, clean answer options without prefixes like "A." or "B.".
+3. "correct_answer" MUST strictly be 'A', 'B', 'C', or 'D'.
+4. "explanation" MUST be a comprehensive, factual explanation of the correct answer.
+5. Return a JSON array with EXACTLY 1 question object.
 `.trim();
 
     return aiService.executeWithKeyRotation<Question>(
@@ -454,29 +450,32 @@ CRITICAL RULES:
             config: {
               responseMimeType: 'application/json',
               responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  question_text: { type: Type.STRING },
-                  option_a: { type: Type.STRING },
-                  option_b: { type: Type.STRING },
-                  option_c: { type: Type.STRING },
-                  option_d: { type: Type.STRING },
-                  correct_answer: { type: Type.STRING },
-                  explanation: { type: Type.STRING },
-                  subject: { type: Type.STRING },
-                  section: { type: Type.STRING },
-                  chapter: { type: Type.STRING },
-                  topic: { type: Type.STRING },
-                  difficulty: { type: Type.STRING },
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    question_text: { type: Type.STRING },
+                    option_a: { type: Type.STRING },
+                    option_b: { type: Type.STRING },
+                    option_c: { type: Type.STRING },
+                    option_d: { type: Type.STRING },
+                    correct_answer: { type: Type.STRING },
+                    explanation: { type: Type.STRING },
+                    subject: { type: Type.STRING },
+                    section: { type: Type.STRING },
+                    chapter: { type: Type.STRING },
+                    topic: { type: Type.STRING },
+                    difficulty: { type: Type.STRING },
+                  },
+                  required: [
+                    'question_text',
+                    'option_a',
+                    'option_b',
+                    'option_c',
+                    'option_d',
+                    'correct_answer',
+                  ],
                 },
-                required: [
-                  'question_text',
-                  'option_a',
-                  'option_b',
-                  'option_c',
-                  'option_d',
-                  'correct_answer',
-                ],
               },
             },
           },
@@ -498,32 +497,54 @@ CRITICAL RULES:
         try {
           parsed = JSON.parse(cleaned);
         } catch {
-          const match = cleaned.match(/\{[\s\S]*\}/);
-          if (match) parsed = JSON.parse(match[0]);
-          else throw new Error('Failed to parse regenerated question JSON.');
+          const matchArr = cleaned.match(/\[\s*\{[\s\S]*\}\s*\]/);
+          if (matchArr) {
+            parsed = JSON.parse(matchArr[0]);
+          } else {
+            const matchObj = cleaned.match(/\{[\s\S]*\}/);
+            if (matchObj) parsed = JSON.parse(matchObj[0]);
+            else throw new Error('Failed to parse regenerated question JSON.');
+          }
         }
 
-        const validAns = (['A', 'B', 'C', 'D'].includes(parsed.correct_answer?.toUpperCase())
-          ? parsed.correct_answer.toUpperCase()
+        let item: any = Array.isArray(parsed) ? parsed[0] : parsed;
+        if (!item || typeof item !== 'object') {
+          throw new Error('AI returned an invalid question structure.');
+        }
+
+        // Clean option prefixes if any
+        const cleanOption = (txt?: string, fallback = '') => {
+          if (!txt) return fallback;
+          return String(txt).replace(/^[A-Da-d1-4][\.\)\-\:\s]+/g, '').trim() || fallback;
+        };
+
+        // Clean question text if it has Q1., Question 1:, or meta notes
+        let qText = String(item.question_text || '').trim();
+        qText = qText.replace(/^(Q\d*[\.:\-]|Question\s*\d*[\.:\-])\s*/i, '');
+
+        const validAns = (['A', 'B', 'C', 'D'].includes(String(item.correct_answer || '').trim().toUpperCase())
+          ? String(item.correct_answer).trim().toUpperCase()
           : 'A') as 'A' | 'B' | 'C' | 'D';
 
-        return {
+        const regenerated: Question = {
           ...currentQuestion,
-          question_text: parsed.question_text || currentQuestion.question_text,
-          option_a: parsed.option_a || currentQuestion.option_a,
-          option_b: parsed.option_b || currentQuestion.option_b,
-          option_c: parsed.option_c || currentQuestion.option_c,
-          option_d: parsed.option_d || currentQuestion.option_d,
+          question_text: qText || currentQuestion.question_text,
+          option_a: cleanOption(item.option_a, currentQuestion.option_a),
+          option_b: cleanOption(item.option_b, currentQuestion.option_b),
+          option_c: cleanOption(item.option_c, currentQuestion.option_c),
+          option_d: cleanOption(item.option_d, currentQuestion.option_d),
           correct_answer: validAns,
-          explanation: parsed.explanation || currentQuestion.explanation || '',
-          subject: parsed.subject || currentQuestion.subject || 'General Studies',
-          section: parsed.section || currentQuestion.section || 'General',
-          chapter: parsed.chapter || currentQuestion.chapter || 'General',
-          topic: parsed.topic || currentQuestion.topic || 'General Topic',
-          difficulty: parsed.difficulty || currentQuestion.difficulty || 'Medium',
+          explanation: item.explanation || currentQuestion.explanation || '',
+          subject: item.subject || currentQuestion.subject || 'General Studies',
+          section: item.section || currentQuestion.section || 'General',
+          chapter: item.chapter || currentQuestion.chapter || 'General',
+          topic: item.topic || currentQuestion.topic || 'General Topic',
+          difficulty: item.difficulty || currentQuestion.difficulty || 'Medium',
           inspection_status: 'pending',
           quality_score: undefined,
         };
+
+        return shuffleQuestionOptions(regenerated);
       }
     );
   },
