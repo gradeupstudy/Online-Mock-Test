@@ -727,7 +727,31 @@ export const dataService = {
         }
         const { data, error } = await query;
         if (!error && Array.isArray(data)) {
-          const remoteTests = data as Test[];
+          // Read local cache map to preserve local settings if remote is null/undefined
+          const rawLocal = localStorage.getItem(STORAGE_KEYS.TESTS);
+          let localMap: Record<string, Test> = {};
+          try {
+            const parsed = rawLocal ? JSON.parse(rawLocal) : [];
+            if (Array.isArray(parsed)) {
+              parsed.forEach((t: Test) => { if (t?.id) localMap[t.id] = t; });
+            }
+          } catch {}
+
+          const remoteTests = (data as any[]).map(t => {
+            const local = localMap[t.id];
+            const maxAttempts = (t.max_attempts_per_student !== undefined && t.max_attempts_per_student !== null)
+              ? Number(t.max_attempts_per_student)
+              : (local?.max_attempts_per_student !== undefined && local?.max_attempts_per_student !== null)
+              ? Number(local.max_attempts_per_student)
+              : 0;
+
+            return {
+              ...(local || {}),
+              ...t,
+              max_attempts_per_student: maxAttempts
+            } as Test;
+          });
+
           localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(remoteTests));
           if (!includeUnpublished) {
             return remoteTests.filter(t => t.is_published && (t.status === 'published' || !t.status));
@@ -776,7 +800,25 @@ export const dataService = {
         }
         const { data } = await query.limit(1).maybeSingle();
         if (data) {
-          const testData = data as Test;
+          const rawLocal = localStorage.getItem(STORAGE_KEYS.TESTS);
+          let localTest: Test | undefined;
+          try {
+            const parsed = rawLocal ? JSON.parse(rawLocal) : [];
+            localTest = parsed.find((t: Test) => t.id === data.id || t.slug === data.slug);
+          } catch {}
+
+          const maxAttempts = (data.max_attempts_per_student !== undefined && data.max_attempts_per_student !== null)
+            ? Number(data.max_attempts_per_student)
+            : (localTest?.max_attempts_per_student !== undefined && localTest?.max_attempts_per_student !== null)
+            ? Number(localTest.max_attempts_per_student)
+            : 0;
+
+          const testData: Test = {
+            ...(localTest || {}),
+            ...(data as Test),
+            max_attempts_per_student: maxAttempts
+          };
+
           const localTests = await dataService.getTests(true);
           const idx = localTests.findIndex(t => t.id === testData.id);
           if (idx >= 0) localTests[idx] = testData;
@@ -917,7 +959,7 @@ export const dataService = {
           show_correct_answers: sanitizedTest.show_correct_answers ?? true,
           show_explanation: sanitizedTest.show_explanation ?? true,
           enable_leaderboard: sanitizedTest.enable_leaderboard ?? true,
-          max_attempts_per_student: parseSafeNumber(sanitizedTest.max_attempts_per_student, 0),
+          max_attempts_per_student: maxAttempts,
           start_time: sanitizedTest.start_time || null,
           end_time: sanitizedTest.end_time || null,
           created_at: sanitizedTest.created_at,
@@ -945,6 +987,7 @@ export const dataService = {
             negative_marking: sanitizedTest.negative_marking,
             duration_minutes: sanitizedTest.duration_minutes,
             passing_marks: sanitizedTest.passing_marks,
+            max_attempts_per_student: maxAttempts,
             instructions: sanitizedTest.instructions || '',
             status: sanitizedTest.status,
             is_published: sanitizedTest.is_published,
@@ -970,10 +1013,27 @@ export const dataService = {
           }
         }
 
+        // Direct update for max_attempts_per_student to guarantee column synchronization
+        try {
+          await supabase
+            .from('tests')
+            .update({ 
+              max_attempts_per_student: maxAttempts,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', sanitizedTest.id);
+        } catch {
+          // non-fatal
+        }
+
         if (data) {
           const remoteTest = data as Test;
-          // Merge remote with sanitized
-          const finalizedTest = { ...sanitizedTest, ...remoteTest };
+          // Ensure user's sanitized values always take precedence and max_attempts_per_student is strictly preserved
+          const finalizedTest: Test = { 
+            ...remoteTest, 
+            ...sanitizedTest,
+            max_attempts_per_student: maxAttempts 
+          };
           const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
           let localTests: Test[] = raw ? JSON.parse(raw) : [];
           const idx = localTests.findIndex(t => t.id === finalizedTest.id);
@@ -1084,6 +1144,114 @@ export const dataService = {
     }
 
     return duplicated;
+  },
+
+  bulkUpdateTestAttempts: async (testIds: string[], maxAttempts: number): Promise<{ success: boolean; count: number }> => {
+    const cleanAttempts = parseSafeNumber(maxAttempts, 0);
+    if (!testIds || testIds.length === 0) return { success: true, count: 0 };
+    
+    // 1. Update local cache
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
+      let localTests: Test[] = raw ? JSON.parse(raw) : DEMO_TESTS;
+      if (Array.isArray(localTests)) {
+        localTests = localTests.map(t => {
+          if (testIds.includes(t.id)) {
+            return {
+              ...t,
+              max_attempts_per_student: cleanAttempts,
+              updated_at: new Date().toISOString()
+            };
+          }
+          return t;
+        });
+        localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(localTests));
+        window.dispatchEvent(new CustomEvent('gradeup_tests_updated', { detail: { updatedCount: testIds.length } }));
+      }
+    } catch (e) {
+      console.warn('Local bulk attempt update error', e);
+    }
+
+    // 2. Update in Supabase if configured
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const validUUIDs = testIds.filter(id => isValidUUID(id));
+        if (validUUIDs.length > 0) {
+          await supabase
+            .from('tests')
+            .update({
+              max_attempts_per_student: cleanAttempts,
+              updated_at: new Date().toISOString()
+            })
+            .in('id', validUUIDs);
+        }
+      } catch (e) {
+        console.warn('Supabase bulk attempt update error', e);
+      }
+    }
+
+    return { success: true, count: testIds.length };
+  },
+
+  bulkUpdateTestStatus: async (testIds: string[], isPublished: boolean): Promise<{ success: boolean; count: number }> => {
+    if (!testIds || testIds.length === 0) return { success: true, count: 0 };
+    const status: TestStatus = isPublished ? 'published' : 'unpublished';
+
+    // 1. Update local cache
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.TESTS);
+      let localTests: Test[] = raw ? JSON.parse(raw) : DEMO_TESTS;
+      if (Array.isArray(localTests)) {
+        localTests = localTests.map(t => {
+          if (testIds.includes(t.id)) {
+            return {
+              ...t,
+              status,
+              is_published: isPublished,
+              updated_at: new Date().toISOString()
+            };
+          }
+          return t;
+        });
+        localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(localTests));
+        window.dispatchEvent(new CustomEvent('gradeup_tests_updated', { detail: { updatedCount: testIds.length } }));
+      }
+    } catch (e) {
+      console.warn('Local bulk status update error', e);
+    }
+
+    // 2. Update in Supabase
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const validUUIDs = testIds.filter(id => isValidUUID(id));
+        if (validUUIDs.length > 0) {
+          await supabase
+            .from('tests')
+            .update({
+              status,
+              is_published: isPublished,
+              updated_at: new Date().toISOString()
+            })
+            .in('id', validUUIDs);
+        }
+      } catch (e) {
+        console.warn('Supabase bulk status update error', e);
+      }
+    }
+
+    return { success: true, count: testIds.length };
+  },
+
+  bulkDeleteTests: async (testIds: string[]): Promise<{ success: boolean; count: number }> => {
+    if (!testIds || testIds.length === 0) return { success: true, count: 0 };
+
+    for (const id of testIds) {
+      await dataService.deleteTest(id);
+    }
+
+    return { success: true, count: testIds.length };
   },
 
   // ------------------------------------

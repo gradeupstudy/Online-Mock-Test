@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Layers, Youtube, Send, Instagram, MessageCircle, Globe, ShieldCheck, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Square, Layers, Youtube, Send, Instagram, MessageCircle, Globe, ShieldCheck, CheckCircle2, ExternalLink, Zap, Lock, Filter } from 'lucide-react';
 import { Test, TestStatus, SocialPlatform } from '../../types';
 import { dataService, generateUUID, parseSafeNumber } from '../../services/dataService';
 import { Modal } from '../common/Modal';
+import { BulkTestAttemptsModal } from './BulkTestAttemptsModal';
 
 interface TestManagerProps {
   onSelectTestQuestions: (testId: string) => void;
@@ -30,9 +31,15 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterAttempts, setFilterAttempts] = useState('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTest, setEditingTest] = useState<Partial<Test> | null>(null);
   const [deletingTest, setDeletingTest] = useState<Test | null>(null);
+
+  // Bulk Selection & Attempt Control States
+  const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
+  const [isBulkAttemptsModalOpen, setIsBulkAttemptsModalOpen] = useState(false);
+  const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
   useEffect(() => {
     loadTests();
@@ -323,6 +330,94 @@ export const TestManager: React.FC<TestManagerProps> = ({
     ])
   ) as string[];
 
+  // Bulk Selection Handlers
+  const toggleSelectTest = (id: string) => {
+    setSelectedTestIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllFiltered = () => {
+    const allFilteredIds = filteredTests.map((t) => t.id);
+    const allAlreadySelected = allFilteredIds.length > 0 && allFilteredIds.every((id) => selectedTestIds.has(id));
+    if (allAlreadySelected) {
+      setSelectedTestIds((prev) => {
+        const next = new Set(prev);
+        allFilteredIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedTestIds((prev) => {
+        const next = new Set(prev);
+        allFilteredIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  };
+
+  const handleSelectAllTests = () => {
+    setSelectedTestIds(new Set(tests.map((t) => t.id)));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedTestIds(new Set());
+  };
+
+  const handleOpenBulkAttempts = (singleTestId?: string) => {
+    if (singleTestId) {
+      setSelectedTestIds(new Set([singleTestId]));
+    } else if (selectedTestIds.size === 0) {
+      // If none selected, default to all filtered or all tests
+      if (filteredTests.length > 0) {
+        setSelectedTestIds(new Set(filteredTests.map((t) => t.id)));
+      } else {
+        setSelectedTestIds(new Set(tests.map((t) => t.id)));
+      }
+    }
+    setIsBulkAttemptsModalOpen(true);
+  };
+
+  const handleBulkPublish = async (isPublished: boolean) => {
+    if (selectedTestIds.size === 0) return;
+    setIsBulkProcessing(true);
+    try {
+      const ids = Array.from<string>(selectedTestIds);
+      await dataService.bulkUpdateTestStatus(ids, isPublished);
+      notify('success', `${isPublished ? 'Published' : 'Unpublished'} ${ids.length} mock tests!`);
+      await loadTests();
+    } catch (e: any) {
+      notify('error', `Bulk update failed: ${e?.message}`);
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedTestIds.size === 0) return;
+    const count = selectedTestIds.size;
+    if (!window.confirm(`Are you sure you want to permanently delete ${count} selected mock tests? All questions, student results, and analytics will be wiped.`)) {
+      return;
+    }
+    setIsBulkProcessing(true);
+    try {
+      const ids = Array.from<string>(selectedTestIds);
+      await dataService.bulkDeleteTests(ids);
+      notify('success', `Deleted ${count} mock tests successfully.`);
+      handleClearSelection();
+      await loadTests();
+    } catch (e: any) {
+      notify('error', `Bulk delete failed: ${e?.message}`);
+    } finally {
+      setIsBulkProcessing(false);
+    }
+  };
+
   // Filtered tests
   const filteredTests = tests.filter((t) => {
     const title = (t.title || '').toLowerCase();
@@ -335,8 +430,19 @@ export const TestManager: React.FC<TestManagerProps> = ({
     const matchesCategory = filterCategory === 'all' || (t.category || '') === filterCategory;
     const matchesSubject = filterSubject === 'all' || (t.subject || '') === filterSubject;
     const matchesStatus = filterStatus === 'all' || (t.status || 'published') === filterStatus;
-    return matchesQuery && matchesCategory && matchesSubject && matchesStatus;
+    
+    const attempts = t.max_attempts_per_student !== undefined && t.max_attempts_per_student !== null ? Number(t.max_attempts_per_student) : 0;
+    const matchesAttempts = 
+      filterAttempts === 'all' ||
+      (filterAttempts === 'unlimited' && attempts === 0) ||
+      (filterAttempts === 'single' && attempts === 1) ||
+      (filterAttempts === 'multiple' && attempts > 1);
+
+    return matchesQuery && matchesCategory && matchesSubject && matchesStatus && matchesAttempts;
   });
+
+  const isAllFilteredSelected = filteredTests.length > 0 && filteredTests.every((t) => selectedTestIds.has(t.id));
+  const selectedTestsList = tests.filter((t) => selectedTestIds.has(t.id));
 
   return (
     <div className="space-y-6">
@@ -350,19 +456,37 @@ export const TestManager: React.FC<TestManagerProps> = ({
             </span>
           </div>
           <h1 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-1">Mock Test Manager</h1>
-          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Create, configure, publish, and duplicate online mock exams</p>
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Create, configure, publish, and bulk control student attempt limits for online mock exams</p>
         </div>
-        <button
-          onClick={handleOpenCreateModal}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm rounded-xl shadow-md transition-all cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Create Mock Test</span>
-        </button>
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Quick Bulk Attempts Button in Header */}
+          <button
+            type="button"
+            onClick={() => handleOpenBulkAttempts()}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-bold text-xs rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-xs transition-all cursor-pointer shrink-0"
+            title="Bulk control attempt limits across mock tests"
+          >
+            <Zap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>Control Attempt Limits</span>
+            {selectedTestIds.size > 0 && (
+              <span className="px-1.5 py-0.5 bg-indigo-600 text-white rounded-full text-[10px] font-black">
+                {selectedTestIds.size}
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={handleOpenCreateModal}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm rounded-xl shadow-md transition-all cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Create Mock Test</span>
+          </button>
+        </div>
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
         <div className="sm:col-span-2 lg:col-span-2 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
@@ -410,24 +534,149 @@ export const TestManager: React.FC<TestManagerProps> = ({
           <option value="draft">Draft</option>
           <option value="unpublished">Unpublished</option>
         </select>
+
+        {/* Filter by Attempt Limit */}
+        <select
+          value={filterAttempts}
+          onChange={(e) => setFilterAttempts(e.target.value)}
+          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-medium text-slate-900 dark:text-white"
+        >
+          <option value="all">All Attempts Policy</option>
+          <option value="unlimited">∞ Unlimited Only</option>
+          <option value="single">🔒 1 Attempt Only</option>
+          <option value="multiple">⚡ 2+ Attempts</option>
+        </select>
+      </div>
+
+      {/* Bulk Selection Bar & Stats */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSelectAllFiltered}
+            className="flex items-center gap-2 px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 hover:border-blue-500 rounded-xl text-xs font-bold text-slate-800 dark:text-slate-200 shadow-2xs transition-all cursor-pointer"
+          >
+            {isAllFilteredSelected ? (
+              <CheckSquare className="w-4 h-4 text-blue-600" />
+            ) : selectedTestIds.size > 0 ? (
+              <div className="w-4 h-4 rounded bg-blue-600 text-white flex items-center justify-center text-[10px] font-black">
+                -
+              </div>
+            ) : (
+              <Square className="w-4 h-4 text-slate-400" />
+            )}
+            <span>
+              {isAllFilteredSelected
+                ? 'Deselect All Filtered'
+                : `Select All Filtered (${filteredTests.length})`}
+            </span>
+          </button>
+
+          {selectedTestIds.size > 0 && (
+            <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
+              <strong className="text-blue-600 dark:text-blue-400 font-extrabold">{selectedTestIds.size}</strong> of {tests.length} mock tests selected
+            </span>
+          )}
+        </div>
+
+        {selectedTestIds.size > 0 ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleOpenBulkAttempts()}
+              disabled={isBulkProcessing}
+              className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Set Attempt Limits ({selectedTestIds.size})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleBulkPublish(true)}
+              disabled={isBulkProcessing}
+              className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 border border-emerald-300 dark:border-emerald-800 font-bold text-xs rounded-xl transition-all cursor-pointer"
+            >
+              Publish
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleBulkPublish(false)}
+              disabled={isBulkProcessing}
+              className="px-3 py-1.5 bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 hover:bg-amber-100 border border-amber-300 dark:border-amber-800 font-bold text-xs rounded-xl transition-all cursor-pointer"
+            >
+              Unpublish
+            </button>
+
+            <button
+              type="button"
+              onClick={handleBulkDelete}
+              disabled={isBulkProcessing}
+              className="px-3 py-1.5 bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 font-bold text-xs rounded-xl transition-all cursor-pointer"
+            >
+              Delete
+            </button>
+
+            <button
+              type="button"
+              onClick={handleClearSelection}
+              className="px-2.5 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 font-bold text-xs cursor-pointer"
+            >
+              Clear
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleSelectAllTests}
+              className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+            >
+              Select All {tests.length} Tests for Bulk Control
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tests Grid / Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredTests.map((test) => {
+          const isSelected = selectedTestIds.has(test.id);
           const hasSubject = Boolean(test.subject && test.subject.trim());
           const hasSections = Boolean(test.is_multisection && test.sections && test.sections.length > 0);
 
           return (
             <div
               key={test.id}
-              className="group bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-5 sm:p-6 flex flex-col justify-between shadow-md hover:shadow-xl hover:border-blue-400 dark:hover:border-blue-500 transition-all duration-200 relative"
+              onClick={() => toggleSelectTest(test.id)}
+              className={`group bg-white dark:bg-slate-900 rounded-2xl border p-5 sm:p-6 flex flex-col justify-between shadow-md hover:shadow-xl transition-all duration-200 relative cursor-pointer ${
+                isSelected
+                  ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/20 dark:bg-blue-950/20'
+                  : 'border-slate-200/90 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-500'
+              }`}
             >
               <div className="space-y-3.5">
                 
-                {/* Header Row: Category Badge + Test Code + Published Status */}
+                {/* Header Row: Checkbox + Category Badge + Test Code + Published Status */}
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {/* Multi-Select Checkbox */}
+                    <div 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleSelectTest(test.id);
+                      }}
+                      className="cursor-pointer shrink-0"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => {}}
+                        className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer pointer-events-none"
+                      />
+                    </div>
+
                     <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs">
                       {test.category}
                     </span>
@@ -494,21 +743,30 @@ export const TestManager: React.FC<TestManagerProps> = ({
 
                 {/* Status Badges Row: Social Gate + Attempt Limit */}
                 <div className="flex flex-wrap items-center gap-1.5">
-                  {/* Attempt Limit Badge */}
-                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border shadow-2xs ${
-                    (!test.max_attempts_per_student || test.max_attempts_per_student === 0)
-                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60'
-                      : test.max_attempts_per_student === 1
-                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-900/60'
-                      : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60'
-                  }`}>
+                  {/* Interactive Attempt Limit Badge - Click to Configure Attempts! */}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenBulkAttempts(test.id);
+                    }}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border shadow-2xs hover:scale-105 transition-all cursor-pointer ${
+                      (!test.max_attempts_per_student || test.max_attempts_per_student === 0)
+                        ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60 hover:bg-emerald-100'
+                        : test.max_attempts_per_student === 1
+                        ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-900/60 hover:bg-amber-100'
+                        : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60 hover:bg-indigo-100'
+                    }`}
+                    title="Click to change student attempt limit for this test"
+                  >
                     <Users className="w-3.5 h-3.5 shrink-0" />
                     <span>
                       {(!test.max_attempts_per_student || test.max_attempts_per_student === 0)
                         ? '∞ Unlimited Attempts'
                         : `${test.max_attempts_per_student} Attempt${test.max_attempts_per_student > 1 ? 's' : ''} Limit`}
                     </span>
-                  </span>
+                    <Zap className="w-3 h-3 ml-0.5 opacity-60" />
+                  </button>
 
                   {/* Social Gate Status Badge on Card */}
                   {test.social_gate_enabled !== false ? (
@@ -532,7 +790,10 @@ export const TestManager: React.FC<TestManagerProps> = ({
               </div>
 
               {/* Actions Bar */}
-              <div className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800/90 mt-4">
+              <div 
+                className="space-y-2 pt-3 border-t border-slate-100 dark:border-slate-800/90 mt-4"
+                onClick={(e) => e.stopPropagation()}
+              >
                 
                 {/* Primary Action Buttons */}
                 <div className="flex items-center justify-between gap-1.5">
@@ -1542,6 +1803,19 @@ export const TestManager: React.FC<TestManagerProps> = ({
             </div>
           </div>
         </Modal>
+      )}
+
+      {/* Bulk Test Attempts Control Modal */}
+      {isBulkAttemptsModalOpen && (
+        <BulkTestAttemptsModal
+          isOpen={isBulkAttemptsModalOpen}
+          onClose={() => setIsBulkAttemptsModalOpen(false)}
+          selectedTests={selectedTestsList.length > 0 ? selectedTestsList : tests}
+          onSuccess={() => {
+            loadTests();
+            notify('success', `Attempt limits updated successfully for ${selectedTestsList.length || tests.length} mock tests!`);
+          }}
+        />
       )}
 
     </div>

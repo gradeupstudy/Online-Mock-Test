@@ -23,7 +23,8 @@ import {
   Settings2,
   MinusCircle,
   CheckCircle2,
-  RefreshCw
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { Test, Question } from '../../types';
 import { dataService, generateUUID, shuffleQuestionOptions, shuffleAndBalanceQuestions, parseSafeNumber } from '../../services/dataService';
@@ -36,6 +37,8 @@ import { AISmartParseModal } from './AISmartParseModal';
 import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
 import { BulkAIExplanationModal } from './BulkAIExplanationModal';
 import { QuestionBankImportModal } from './QuestionBankImportModal';
+import { DuplicateTrackerModal } from './DuplicateTrackerModal';
+import { detectDuplicateQuestions } from '../../utils/duplicateDetector';
 
 interface QuestionManagerProps {
   testId: string;
@@ -68,6 +71,9 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   const [isBankImportOpen, setIsBankImportOpen] = useState(false);
   const [isBulkInspectOpen, setIsBulkInspectOpen] = useState(false);
   const [isBulkExplanationOpen, setIsBulkExplanationOpen] = useState(false);
+  const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
+  const [focusedDuplicateGroupId, setFocusedDuplicateGroupId] = useState<string | null>(null);
+  const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
   
   // Bulk negative marking and marks controls
   const [bulkNegativeMarksInput, setBulkNegativeMarksInput] = useState<number>(0);
@@ -434,7 +440,22 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   // Subjects for filter
   const subjects = Array.from(new Set(questions.map(q => q.subject))).filter(Boolean);
 
+  // Accurate Duplicate Detection for Mock Test
+  const duplicateAnalysis = React.useMemo(() => {
+    return detectDuplicateQuestions(questions);
+  }, [questions]);
+
+  const {
+    groups: duplicateGroups,
+    duplicateIdMap,
+    duplicateIdsSet,
+    totalDuplicateCount: totalDuplicateQuestionsCount,
+  } = duplicateAnalysis;
+
   const filteredQuestions = questions.filter(q => {
+    if (showOnlyDuplicates && !duplicateIdsSet.has(q.id)) {
+      return false;
+    }
     const matchesSearch = q.question_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           q.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
                           q.chapter?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -502,6 +523,21 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             <Shuffle className="w-4 h-4 text-indigo-200" />
             <span>Shuffle Options</span>
           </button>
+
+          {/* DUPLICATE AUDIT BUTTON */}
+          {duplicateGroups.length > 0 && (
+            <button
+              onClick={() => {
+                setFocusedDuplicateGroupId(null);
+                setIsDuplicateModalOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer animate-pulse"
+              title="Duplicate MCQ Audit Report for this mock test"
+            >
+              <AlertCircle className="w-4 h-4 text-rose-200" />
+              <span>Duplicate Report ({duplicateGroups.length})</span>
+            </button>
+          )}
 
           <button
             onClick={() => setIsAiModalOpen(true)}
@@ -883,16 +919,38 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           </div>
         </div>
 
-        <select
-          value={selectedSubject}
-          onChange={(e) => setSelectedSubject(e.target.value)}
-          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-bold"
-        >
-          <option value="all">All Subjects ({questions.length})</option>
-          {subjects.map(s => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2">
+          {totalDuplicateQuestionsCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowOnlyDuplicates(!showOnlyDuplicates)}
+              className={`px-3 py-2 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                showOnlyDuplicates
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-sm'
+                  : 'bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 border-rose-200 dark:border-rose-900/60 hover:bg-rose-100'
+              }`}
+            >
+              <AlertCircle className="w-3.5 h-3.5" />
+              <span>Duplicates</span>
+              <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+                showOnlyDuplicates ? 'bg-white text-rose-600' : 'bg-rose-600 text-white'
+              }`}>
+                {totalDuplicateQuestionsCount}
+              </span>
+            </button>
+          )}
+
+          <select
+            value={selectedSubject}
+            onChange={(e) => setSelectedSubject(e.target.value)}
+            className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-bold"
+          >
+            <option value="all">All Subjects ({questions.length})</option>
+            {subjects.map(s => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Questions List */}
@@ -956,6 +1014,25 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                   <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-500 text-xs font-medium rounded-md">
                     Pending Audit
                   </span>
+                )}
+
+                {duplicateIdMap.has(q.id) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const match = duplicateIdMap.get(q.id);
+                      if (match) {
+                        setFocusedDuplicateGroupId(match.group.groupId);
+                        setIsDuplicateModalOpen(true);
+                      }
+                    }}
+                    className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-md flex items-center gap-1 cursor-pointer shadow-xs transition-all animate-pulse"
+                    title="Click to view duplicate comparison report"
+                  >
+                    <AlertCircle className="w-3 h-3" />
+                    <span>Duplicate ({duplicateIdMap.get(q.id)?.group.confidence}% Match)</span>
+                    <span className="text-[9px] bg-white/20 px-1 py-0.2 rounded font-bold underline">Compare ⇄</span>
+                  </button>
                 )}
               </div>
 
@@ -1573,6 +1650,23 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           </div>
         </Modal>
       )}
+
+      {/* Duplicate Tracker Modal */}
+      <DuplicateTrackerModal
+        isOpen={isDuplicateModalOpen}
+        onClose={() => {
+          setIsDuplicateModalOpen(false);
+          setFocusedDuplicateGroupId(null);
+        }}
+        groups={duplicateGroups}
+        totalDuplicateCount={totalDuplicateQuestionsCount}
+        onRefreshData={loadTestAndQuestions}
+        onToast={notify}
+        initialFocusedGroupId={focusedDuplicateGroupId}
+        onEditQuestion={(q) => {
+          setEditingQuestion(q);
+        }}
+      />
 
     </div>
   );
