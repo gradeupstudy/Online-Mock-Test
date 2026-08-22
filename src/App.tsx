@@ -289,6 +289,11 @@ export default function App() {
           <StudentRegistration
             test={selectedTest}
             onStartExam={handleStartExam}
+            onBackToHome={handleBackToDirectory}
+            onViewPreviousAttempt={(attempt) => {
+              setCompletedAttempt(attempt);
+              setViewMode('student_result');
+            }}
             onToast={showToast}
           />
         )}

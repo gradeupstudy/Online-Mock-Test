@@ -842,6 +842,8 @@ export const dataService = {
 
     const cleanCode = (test.test_code || `TEST-${Math.floor(1000 + Math.random() * 9000)}`).trim().toUpperCase();
 
+    const maxAttempts = parseSafeNumber(test.max_attempts_per_student, 0);
+
     const sanitizedTest: Test = {
       ...test,
       id: validId,
@@ -855,6 +857,7 @@ export const dataService = {
       negative_marking: negativeMark,
       duration_minutes: duration,
       passing_marks: passingMarks,
+      max_attempts_per_student: maxAttempts,
       status,
       is_published: isPublished,
       created_at: test.created_at || new Date().toISOString(),
@@ -914,7 +917,7 @@ export const dataService = {
           show_correct_answers: sanitizedTest.show_correct_answers ?? true,
           show_explanation: sanitizedTest.show_explanation ?? true,
           enable_leaderboard: sanitizedTest.enable_leaderboard ?? true,
-          max_attempts_per_student: parseSafeNumber(sanitizedTest.max_attempts_per_student, 1),
+          max_attempts_per_student: parseSafeNumber(sanitizedTest.max_attempts_per_student, 0),
           start_time: sanitizedTest.start_time || null,
           end_time: sanitizedTest.end_time || null,
           created_at: sanitizedTest.created_at,
@@ -1753,6 +1756,74 @@ export const dataService = {
   // ------------------------------------
   // STUDENT REGISTRATION & ATTEMPTS
   // ------------------------------------
+  getStudentAttemptsForTest: async (testId: string, mobile: string): Promise<Attempt[]> => {
+    const cleanMobile = (mobile || '').trim();
+    if (!cleanMobile) return [];
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        let query = supabase
+          .from('attempts')
+          .select('*')
+          .eq('student_mobile', cleanMobile)
+          .in('status', ['completed', 'auto_submitted'])
+          .order('created_at', { ascending: false });
+
+        if (isValidUUID(testId)) {
+          query = query.eq('test_id', testId);
+        }
+        const { data, error } = await query;
+        if (!error && data && data.length > 0) {
+          return data as Attempt[];
+        }
+      } catch (e) {
+        console.warn('Supabase getStudentAttemptsForTest failed', e);
+      }
+    }
+    const attempts = await dataService.getAttempts(testId);
+    return attempts.filter(a => a.student_mobile === cleanMobile && (a.status === 'completed' || a.status === 'auto_submitted'));
+  },
+
+  checkStudentAttemptEligibility: async (
+    test: Test,
+    mobile: string
+  ): Promise<{ allowed: boolean; currentAttempts: number; maxAttempts: number; previousAttempts: Attempt[]; reason?: string }> => {
+    const cleanMobile = (mobile || '').trim();
+    const maxAttempts = test.max_attempts_per_student !== undefined && test.max_attempts_per_student !== null 
+      ? Number(test.max_attempts_per_student) 
+      : 0;
+
+    // 0 or negative represents Unlimited Attempts
+    if (maxAttempts <= 0) {
+      return { allowed: true, currentAttempts: 0, maxAttempts: 0, previousAttempts: [] };
+    }
+
+    if (!cleanMobile) {
+      return { allowed: true, currentAttempts: 0, maxAttempts, previousAttempts: [] };
+    }
+
+    const previousAttempts = await dataService.getStudentAttemptsForTest(test.id, cleanMobile);
+    const count = previousAttempts.length;
+
+    if (count >= maxAttempts) {
+      return {
+        allowed: false,
+        currentAttempts: count,
+        maxAttempts,
+        previousAttempts,
+        reason: `Attempt Limit Exceeded: You have already completed this mock test ${count} time${count > 1 ? 's' : ''}. The maximum allowed attempt limit is ${maxAttempts}.`
+      };
+    }
+
+    return {
+      allowed: true,
+      currentAttempts: count,
+      maxAttempts,
+      previousAttempts
+    };
+  },
+
   checkPreviousAttempt: async (testId: string, mobile: string): Promise<Attempt | null> => {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {

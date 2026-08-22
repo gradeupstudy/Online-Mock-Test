@@ -57,7 +57,7 @@ export const TestIntro: React.FC<TestIntroProps> = ({ test, onBack, onProceedToS
         </p>
 
         {/* Stats Summary Bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800 text-center">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-100 dark:border-slate-800 text-center">
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase">Time Allowed</p>
             <p className="text-lg font-black text-slate-900 dark:text-white mt-0.5">{test.duration_minutes} Mins</p>
@@ -76,6 +76,15 @@ export const TestIntro: React.FC<TestIntroProps> = ({ test, onBack, onProceedToS
           <div>
             <p className="text-[10px] text-slate-400 font-bold uppercase">Negative Marking</p>
             <p className="text-lg font-black text-rose-600 dark:text-rose-400 mt-0.5">-{test.negative_marking}</p>
+          </div>
+
+          <div className="col-span-2 sm:col-span-1">
+            <p className="text-[10px] text-slate-400 font-bold uppercase">Attempt Policy</p>
+            <p className="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-0.5">
+              {(!test.max_attempts_per_student || test.max_attempts_per_student === 0) 
+                ? '∞ Unlimited' 
+                : `${test.max_attempts_per_student} Max`}
+            </p>
           </div>
         </div>
       </div>
@@ -100,6 +109,19 @@ export const TestIntro: React.FC<TestIntroProps> = ({ test, onBack, onProceedToS
             <div>
               <p className="font-bold text-slate-900 dark:text-white">Negative Marking Policy</p>
               <p className="text-xs text-slate-500">For each incorrect attempt, {test.negative_marking} marks will be deducted from your total score.</p>
+            </div>
+          </div>
+
+          {/* Attempt Policy Rule */}
+          <div className="flex items-start gap-3 p-3 bg-slate-50 dark:bg-slate-800/40 rounded-xl">
+            <ShieldCheck className="w-4 h-4 text-indigo-500 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold text-slate-900 dark:text-white">Student Attempt Policy</p>
+              <p className="text-xs text-slate-500">
+                {(!test.max_attempts_per_student || test.max_attempts_per_student === 0)
+                  ? 'Unlimited attempts are allowed. You can re-take this mock test anytime for practice.'
+                  : `Each student is allowed a maximum of ${test.max_attempts_per_student} attempt${test.max_attempts_per_student > 1 ? 's' : ''} on their registered mobile number.`}
+              </p>
             </div>
           </div>
 

@@ -98,7 +98,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
       show_correct_answers: true,
       show_explanation: true,
       enable_leaderboard: true,
-      max_attempts_per_student: 1
+      max_attempts_per_student: 0
     });
     setIsModalOpen(true);
   };
@@ -106,6 +106,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const handleOpenEditModal = (test: Test) => {
     setEditingTest({
       ...test,
+      max_attempts_per_student: test.max_attempts_per_student !== undefined ? Number(test.max_attempts_per_student) : 0,
       social_gate_enabled: test.social_gate_enabled ?? true,
       social_gate_mode: test.social_gate_mode || 'global',
       social_platform_ids: test.social_platform_ids && test.social_platform_ids.length > 0 
@@ -137,6 +138,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
       const negativeMark = parseSafeNumber(editingTest.negative_marking, 0);
       const duration = parseSafeNumber(editingTest.duration_minutes, 15);
       const passingMarks = parseSafeNumber(editingTest.passing_marks, totalMarks * 0.4);
+      const maxAttempts = parseSafeNumber(editingTest.max_attempts_per_student, 0);
 
       const testToSave: Test = {
         ...(editingTest as Test),
@@ -150,6 +152,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
         negative_marking: negativeMark,
         duration_minutes: duration,
         passing_marks: passingMarks,
+        max_attempts_per_student: maxAttempts,
         status: (editingTest.status as TestStatus) || 'published',
         is_published: editingTest.status === 'published' || editingTest.is_published === true
       };
@@ -489,23 +492,40 @@ export const TestManager: React.FC<TestManagerProps> = ({
                   </div>
                 </div>
 
-                {/* Social Gate Status Badge on Card */}
-                <div>
+                {/* Status Badges Row: Social Gate + Attempt Limit */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {/* Attempt Limit Badge */}
+                  <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold border shadow-2xs ${
+                    (!test.max_attempts_per_student || test.max_attempts_per_student === 0)
+                      ? 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900/60'
+                      : test.max_attempts_per_student === 1
+                      ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-900/60'
+                      : 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-900/60'
+                  }`}>
+                    <Users className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {(!test.max_attempts_per_student || test.max_attempts_per_student === 0)
+                        ? '∞ Unlimited Attempts'
+                        : `${test.max_attempts_per_student} Attempt${test.max_attempts_per_student > 1 ? 's' : ''} Limit`}
+                    </span>
+                  </span>
+
+                  {/* Social Gate Status Badge on Card */}
                   {test.social_gate_enabled !== false ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60 shadow-2xs">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/60 shadow-2xs">
                       <ShieldCheck className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                       <span className="truncate">
                         {test.social_gate_mode === 'custom_links'
-                          ? `Custom Channels (${test.custom_social_platforms?.length || 0})`
+                          ? `Custom (${test.custom_social_platforms?.length || 0})`
                           : test.social_gate_mode === 'custom_selection'
-                          ? `Selected Channels (${test.social_platform_ids?.length || 0})`
-                          : 'Global Social Gate (Active)'}
+                          ? `Selected (${test.social_platform_ids?.length || 0})`
+                          : 'Global Gate'}
                       </span>
                     </span>
                   ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
                       <XCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span>Social Gate Disabled</span>
+                      <span>Gate Off</span>
                     </span>
                   )}
                 </div>
@@ -943,6 +963,116 @@ export const TestManager: React.FC<TestManagerProps> = ({
                   <option value="draft">🟡 Draft (Admin Only)</option>
                   <option value="unpublished">🔴 Unpublished (Hidden)</option>
                 </select>
+              </div>
+            </div>
+
+            {/* Student Attempt Limit Configuration */}
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-100 dark:bg-indigo-900/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
+                    <Users className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 dark:text-white">
+                        Student Attempt Limit
+                      </h4>
+                      <span className="px-2 py-0.5 text-[10px] font-black rounded-md border shadow-2xs">
+                        {(!editingTest.max_attempts_per_student || editingTest.max_attempts_per_student === 0) ? (
+                          <span className="text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950 border-emerald-300 dark:border-emerald-800">
+                            ∞ Unlimited Attempts
+                          </span>
+                        ) : (
+                          <span className="text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950 border-indigo-300 dark:border-indigo-800">
+                            {editingTest.max_attempts_per_student} Attempt{editingTest.max_attempts_per_student > 1 ? 's' : ''} Max
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Set how many times each student can attempt this mock test using their mobile number.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Preset Options */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {[
+                    { label: 'Unlimited (∞)', val: 0 },
+                    { label: '1 Attempt (Strict)', val: 1 },
+                    { label: '2 Attempts', val: 2 },
+                    { label: '3 Attempts', val: 3 },
+                    { label: '5 Attempts', val: 5 },
+                  ].map((preset) => {
+                    const isSelected = (editingTest.max_attempts_per_student ?? 0) === preset.val;
+                    return (
+                      <button
+                        key={preset.val}
+                        type="button"
+                        onClick={() => setEditingTest({ ...editingTest, max_attempts_per_student: preset.val })}
+                        className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                    Custom Attempt Limit (Enter 0 for Unlimited):
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    value={editingTest.max_attempts_per_student ?? 0}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setEditingTest({ ...editingTest, max_attempts_per_student: isNaN(val) || val < 0 ? 0 : val });
+                    }}
+                    className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-bold text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-indigo-500"
+                    placeholder="0 = Unlimited, 1 = Single attempt..."
+                  />
+                </div>
+
+                <div className="flex items-center p-3 bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 text-xs">
+                  {(!editingTest.max_attempts_per_student || editingTest.max_attempts_per_student === 0) ? (
+                    <div className="text-emerald-700 dark:text-emerald-300 space-y-0.5">
+                      <p className="font-bold flex items-center gap-1">
+                        <span>✨ Unlimited Practice Mode</span>
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Students can practice and re-attempt this exam unlimited times without restrictions.
+                      </p>
+                    </div>
+                  ) : editingTest.max_attempts_per_student === 1 ? (
+                    <div className="text-amber-700 dark:text-amber-300 space-y-0.5">
+                      <p className="font-bold flex items-center gap-1">
+                        <span>🔒 Single Strict Attempt</span>
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        High-stakes exam mode. Students can only attempt once per mobile number.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-indigo-700 dark:text-indigo-300 space-y-0.5">
+                      <p className="font-bold flex items-center gap-1">
+                        <span>🎯 Limited to {editingTest.max_attempts_per_student} Attempts</span>
+                      </p>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Students can attempt up to {editingTest.max_attempts_per_student} times before access is locked.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

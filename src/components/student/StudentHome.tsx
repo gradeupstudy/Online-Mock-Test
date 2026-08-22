@@ -331,12 +331,24 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
                     </div>
                   </div>
 
-                  {/* Negative marking note */}
-                  {test.negative_marking > 0 && (
-                    <p className="text-[11px] text-rose-600 dark:text-rose-400 font-semibold flex items-center gap-1">
-                      <span>• Negative Marking: -{test.negative_marking} per wrong answer</span>
-                    </p>
-                  )}
+                  {/* Rules summary: Negative marking & Attempt Limit */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                    {(!test.max_attempts_per_student || test.max_attempts_per_student === 0) ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-900/60">
+                        <span>∞ Unlimited Practice</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-bold bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-900/60">
+                        <span>⚡ Max {test.max_attempts_per_student} Attempt{test.max_attempts_per_student > 1 ? 's' : ''}</span>
+                      </span>
+                    )}
+
+                    {test.negative_marking > 0 && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-semibold bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-900/60">
+                        <span>Neg: -{test.negative_marking}</span>
+                      </span>
+                    )}
+                  </div>
 
                 </div>
 
