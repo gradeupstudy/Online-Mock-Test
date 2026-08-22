@@ -15,11 +15,14 @@ import {
   Zap,
   HelpCircle,
   Upload,
-  Shuffle
+  Shuffle,
+  ShieldCheck
 } from 'lucide-react';
 import { Question } from '../../types';
 import { aiService, shuffleAndBalanceQuestions } from '../../services/aiService';
 import { dataService } from '../../services/dataService';
+import { MCQInspectionModal } from './MCQInspectionModal';
+import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
 
 interface AISmartParseModalProps {
   isOpen: boolean;
@@ -56,6 +59,24 @@ export const AISmartParseModal: React.FC<AISmartParseModalProps> = ({
   const [logs, setLogs] = useState<string[]>([]);
   const [parsedQuestions, setParsedQuestions] = useState<Question[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+
+  // 360° AI Inspection States
+  const [inspectingQuestion, setInspectingQuestion] = useState<Question | null>(null);
+  const [isBulkInspectOpen, setIsBulkInspectOpen] = useState(false);
+
+  const handleApplySingleInspection = (updatedQuestion: Question) => {
+    setParsedQuestions((prev) =>
+      prev.map((q) => (q.id === updatedQuestion.id ? updatedQuestion : q))
+    );
+    setInspectingQuestion(null);
+    onToast?.('success', `Updated & verified question with 360° AI quality audit!`);
+  };
+
+  const handleApplyBulkInspection = (improvedQuestions: Question[]) => {
+    setParsedQuestions(improvedQuestions);
+    setIsBulkInspectOpen(false);
+    onToast?.('success', `Applied 360° AI Quality Audit & Auto-Fix to parsed questions!`);
+  };
 
   React.useEffect(() => {
     if (isOpen) {
@@ -314,7 +335,17 @@ Explanation: 'Army' represents a group of soldiers, hence collective noun.
                 </span>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkInspectOpen(true)}
+                  className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-lg shadow-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                  title="Run 360° AI Quality Inspection & 1-click Auto-Repair across all parsed questions"
+                >
+                  <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                  <span>360° Inspect All ({parsedQuestions.length})</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={handleShuffleOptions}
@@ -337,7 +368,7 @@ Explanation: 'Army' represents a group of soldiers, hence collective noun.
             <div className="max-h-96 overflow-y-auto border border-slate-200 dark:border-slate-800 rounded-2xl p-4 space-y-3 bg-slate-50 dark:bg-slate-900/60">
               {parsedQuestions.map((q, idx) => (
                 <div 
-                  key={idx} 
+                  key={q.id || idx} 
                   className={`bg-white dark:bg-slate-800 p-4 rounded-xl border transition-all text-xs space-y-2 ${selectedIndices.has(idx) ? 'border-emerald-500 shadow-xs ring-1 ring-emerald-500/20' : 'border-slate-200 dark:border-slate-700 opacity-60'}`}
                 >
                   <div className="flex items-start gap-3">
@@ -345,32 +376,55 @@ Explanation: 'Army' represents a group of soldiers, hence collective noun.
                       type="checkbox"
                       checked={selectedIndices.has(idx)}
                       onChange={() => toggleSelect(idx)}
-                      className="mt-1 w-4 h-4 rounded text-emerald-600 cursor-pointer"
+                      className="mt-1 w-4 h-4 rounded text-emerald-600 cursor-pointer shrink-0"
                     />
                     <div className="flex-1 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span className="font-bold text-slate-900 dark:text-white text-sm">
+                        <span className="font-bold text-slate-900 dark:text-white text-sm flex-1">
                           Q{idx + 1}. {q.question_text}
                         </span>
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 rounded-md font-bold shrink-0">
-                          Ans: {q.correct_answer}
-                        </span>
+
+                        <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                          {q.quality_score !== undefined && (
+                            <span className={`px-2 py-0.5 rounded-md text-[11px] font-black flex items-center gap-1 border ${
+                              q.quality_score >= 85
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800'
+                                : 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800'
+                            }`}>
+                              <ShieldCheck className="w-3 h-3" /> QA {q.quality_score}/100
+                            </span>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => setInspectingQuestion(q)}
+                            className="px-2.5 py-1 bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900/70 text-amber-950 dark:text-amber-200 font-extrabold text-[11px] rounded-lg border border-amber-300 dark:border-amber-700 flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                            title="360° AI Inspection: Check factuality, question quality, distractors & 1-click Auto Fix before saving"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                            <span>360° Inspect</span>
+                          </button>
+
+                          <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200 rounded-lg font-black shrink-0 border border-emerald-200 dark:border-emerald-800">
+                            Ans: {q.correct_answer}
+                          </span>
+                        </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-slate-600 dark:text-slate-300">
-                        <div>A. {q.option_a}</div>
-                        <div>B. {q.option_b}</div>
-                        <div>C. {q.option_c}</div>
-                        <div>D. {q.option_d}</div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-900/40 p-2.5 rounded-lg">
+                        <div className={q.correct_answer === 'A' ? 'font-bold text-emerald-600 dark:text-emerald-400' : ''}>A. {q.option_a}</div>
+                        <div className={q.correct_answer === 'B' ? 'font-bold text-emerald-600 dark:text-emerald-400' : ''}>B. {q.option_b}</div>
+                        <div className={q.correct_answer === 'C' ? 'font-bold text-emerald-600 dark:text-emerald-400' : ''}>C. {q.option_c}</div>
+                        <div className={q.correct_answer === 'D' ? 'font-bold text-emerald-600 dark:text-emerald-400' : ''}>D. {q.option_d}</div>
                       </div>
 
                       {q.explanation && (
-                        <div className="text-[11px] text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2 rounded-lg">
+                        <div className="text-[11px] text-amber-900 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 p-2.5 rounded-lg border border-amber-200/60 dark:border-amber-800/40">
                           <b>Explanation:</b> {q.explanation}
                         </div>
                       )}
 
-                      <div className="flex items-center gap-2 pt-1 text-[10px] text-slate-400">
+                      <div className="flex items-center gap-2 pt-1 text-[10px] text-slate-400 flex-wrap">
                         <span>Subject: {q.subject}</span>
                         {q.section && <span>• Section: {q.section}</span>}
                         {q.chapter && <span>• Chapter: {q.chapter}</span>}
@@ -392,7 +446,7 @@ Explanation: 'Army' represents a group of soldiers, hence collective noun.
               <button
                 onClick={handleConfirmSave}
                 disabled={selectedIndices.size === 0}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50"
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 disabled:opacity-50 cursor-pointer"
               >
                 <CheckCircle className="w-4 h-4" /> Save {selectedIndices.size} Questions {testId && testId !== 'bank' ? 'to Test' : 'to Question Bank'}
               </button>
@@ -401,6 +455,29 @@ Explanation: 'Army' represents a group of soldiers, hence collective noun.
         )}
 
       </div>
+
+      {/* 360° SINGLE MCQ INSPECTION & REPAIR MODAL */}
+      {inspectingQuestion && (
+        <MCQInspectionModal
+          isOpen={!!inspectingQuestion}
+          question={inspectingQuestion}
+          onClose={() => setInspectingQuestion(null)}
+          onApplyImprovement={handleApplySingleInspection}
+          onToast={onToast}
+        />
+      )}
+
+      {/* 360° BULK MCQ AUDIT & REPAIR MODAL */}
+      {isBulkInspectOpen && (
+        <BulkMCQInspectionModal
+          isOpen={isBulkInspectOpen}
+          testTitle={subject ? `${subject} (Parsed Preview Set)` : 'AI Parsed Questions'}
+          questions={parsedQuestions}
+          onClose={() => setIsBulkInspectOpen(false)}
+          onApplyAllImprovements={handleApplyBulkInspection}
+          onToast={onToast}
+        />
+      )}
     </Modal>
   );
 };

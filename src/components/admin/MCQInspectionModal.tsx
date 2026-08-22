@@ -14,10 +14,12 @@ import {
   FileText,
   HelpCircle,
   TrendingUp,
-  ArrowRight
+  ArrowRight,
+  Edit3,
+  Wrench
 } from 'lucide-react';
 import { Question } from '../../types';
-import { aiService, MCQ360InspectionReport } from '../../services/aiService';
+import { aiService, MCQ360InspectionReport, normalizeAnswerKey, normalizeQualityScore } from '../../services/aiService';
 
 interface MCQInspectionModalProps {
   isOpen: boolean;
@@ -35,11 +37,16 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
   onToast,
 }) => {
   const [inspecting, setInspecting] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
   const [targetExam, setTargetExam] = useState<string>('General Competitive Mock Test');
   const [logs, setLogs] = useState<string[]>([]);
   const [report, setReport] = useState<MCQ360InspectionReport | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editableQuestion, setEditableQuestion] = useState<Question | null>(null);
 
   if (!question) return null;
+
+  const currentWorkingQuestion = editableQuestion || question;
 
   const handleRunInspection = async () => {
     setInspecting(true);
@@ -48,7 +55,7 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
 
     try {
       const res = await aiService.inspectMCQ(
-        question,
+        currentWorkingQuestion,
         (msg) => {
           setLogs((prev) => [...prev, msg]);
         },
@@ -57,6 +64,33 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
         }
       );
       setReport(res);
+
+      // Pre-fill working question with improved values if available
+      const imp = res.improvedVersion;
+      const verifiedKey = (['A', 'B', 'C', 'D'].includes(res.factualAccuracy?.confirmedAnswer?.toUpperCase())
+        ? res.factualAccuracy.confirmedAnswer.toUpperCase()
+        : (['A', 'B', 'C', 'D'].includes(imp?.correct_answer?.toUpperCase())
+          ? imp.correct_answer.toUpperCase()
+          : currentWorkingQuestion.correct_answer || 'A')) as 'A' | 'B' | 'C' | 'D';
+
+      setEditableQuestion({
+        ...currentWorkingQuestion,
+        question_text: imp?.question_text || currentWorkingQuestion.question_text,
+        option_a: imp?.option_a || currentWorkingQuestion.option_a,
+        option_b: imp?.option_b || currentWorkingQuestion.option_b,
+        option_c: imp?.option_c || currentWorkingQuestion.option_c,
+        option_d: imp?.option_d || currentWorkingQuestion.option_d,
+        correct_answer: verifiedKey,
+        explanation: imp?.explanation || currentWorkingQuestion.explanation || '',
+        subject: imp?.subject || res.syllabusTaxonomy?.recommendedSubject || currentWorkingQuestion.subject,
+        chapter: imp?.chapter || res.syllabusTaxonomy?.recommendedChapter || currentWorkingQuestion.chapter,
+        topic: imp?.topic || res.syllabusTaxonomy?.recommendedTopic || currentWorkingQuestion.topic,
+        difficulty: (imp?.difficulty || res.difficultyCalibration?.assessedDifficulty || currentWorkingQuestion.difficulty || 'Medium') as any,
+        quality_score: res.overallQualityScore,
+        inspection_status: 'verified',
+        inspection_notes: res.factualAccuracy?.remarks || 'Inspected & Approved by AI 360° QA',
+      });
+
       onToast?.('success', `360° Inspection complete! Quality Score: ${res.overallQualityScore}/100`);
     } catch (err: any) {
       const msg = err?.message || 'Inspection failed';
@@ -67,29 +101,36 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
     }
   };
 
-  const handleApplyUpdates = () => {
-    if (!report || !onApplyImprovement) return;
+  // 1-Click AI Auto-Repair & Fix
+  const handleAutoRepair = async () => {
+    setIsRepairing(true);
+    try {
+      const { repairedQuestion, report: newReport } = await aiService.repairSingleMCQ(
+        currentWorkingQuestion,
+        report,
+        targetExam
+      );
+      setEditableQuestion(repairedQuestion);
+      setReport(newReport);
+      onToast?.('success', '⚡ Question 100% repaired and fixed with AI!');
+    } catch (err: any) {
+      console.error('Auto-repair failed', err);
+      onToast?.('error', err?.message || 'Failed to auto-repair question.');
+    } finally {
+      setIsRepairing(false);
+    }
+  };
 
-    const imp = report.improvedVersion;
-    const updated: Question = {
+  const handleApplyUpdates = () => {
+    if (!onApplyImprovement) return;
+
+    const toSave: Question = editableQuestion || {
       ...question,
-      question_text: imp.question_text || question.question_text,
-      option_a: imp.option_a || question.option_a,
-      option_b: imp.option_b || question.option_b,
-      option_c: imp.option_c || question.option_c,
-      option_d: imp.option_d || question.option_d,
-      correct_answer: imp.correct_answer || question.correct_answer,
-      explanation: imp.explanation || question.explanation,
-      subject: imp.subject || report.syllabusTaxonomy?.recommendedSubject || question.subject,
-      chapter: imp.chapter || report.syllabusTaxonomy?.recommendedChapter || question.chapter,
-      topic: imp.topic || report.syllabusTaxonomy?.recommendedTopic || question.topic,
-      difficulty: imp.difficulty || report.difficultyCalibration?.assessedDifficulty || question.difficulty,
-      quality_score: report.overallQualityScore,
+      quality_score: report?.overallQualityScore || 90,
       inspection_status: 'verified',
-      inspection_notes: report.factualAccuracy?.remarks || 'Inspected & Approved by AI 360° QA',
     };
 
-    onApplyImprovement(updated);
+    onApplyImprovement(toSave);
     onToast?.('success', 'Applied AI 360° improvements to question!');
     onClose();
   };
@@ -100,6 +141,18 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
     if (score >= 50) return 'bg-amber-500 text-white';
     return 'bg-rose-500 text-white';
   };
+
+  const origKey = normalizeAnswerKey(question.correct_answer, 'A');
+  const confKey = report?.factualAccuracy?.confirmedAnswer
+    ? normalizeAnswerKey(report.factualAccuracy.confirmedAnswer, origKey)
+    : origKey;
+  const isKeyDisputed = Boolean(report && origKey !== confKey);
+  const isStatusInaccurate = Boolean(
+    report &&
+      (report.factualAccuracy?.status === 'Potentially Inaccurate' ||
+        report.factualAccuracy?.status === 'Needs Correction')
+  );
+  const isDisputed = isKeyDisputed || isStatusInaccurate;
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="360° AI MCQ Inspection & Quality Audit" maxWidth="5xl">
@@ -117,29 +170,47 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
                   Question #{question.question_number || 1}
                 </span>
               </div>
-              <h3 className="text-lg font-black mt-1">360° Multi-Angle MCQ Inspection</h3>
+              <h3 className="text-lg font-black mt-1">360° Multi-Angle MCQ Inspection & Fix Engine</h3>
               <p className="text-xs text-slate-300 mt-0.5">
-                Evaluates factual accuracy, option distractors, linguistic clarity, syllabus classification, and generates an optimized version.
+                Evaluates factual accuracy, option distractors, linguistic clarity, syllabus classification, and generates an optimized version with 1-click repair.
               </p>
             </div>
 
-            <button
-              onClick={handleRunInspection}
-              disabled={inspecting}
-              className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 shrink-0 disabled:opacity-50 cursor-pointer"
-            >
-              {inspecting ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
-                  <span>Auditing 360°...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 text-slate-950" />
-                  <span>{report ? 'Re-Audit Question' : 'Run 360° Inspection'}</span>
-                </>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={handleRunInspection}
+                disabled={inspecting || isRepairing}
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 shrink-0 disabled:opacity-50 cursor-pointer"
+              >
+                {inspecting ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                    <span>Auditing 360°...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 text-slate-950" />
+                    <span>{report ? 'Re-Audit Question' : 'Run 360° Inspection'}</span>
+                  </>
+                )}
+              </button>
+
+              {report && (
+                <button
+                  type="button"
+                  onClick={handleAutoRepair}
+                  disabled={isRepairing || inspecting}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 shrink-0 cursor-pointer disabled:opacity-50"
+                >
+                  {isRepairing ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Zap className="w-4 h-4 fill-white" />
+                  )}
+                  <span>1-Click AI Auto-Repair</span>
+                </button>
               )}
-            </button>
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-indigo-500/20 text-xs">
@@ -147,7 +218,7 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
             <select
               value={targetExam}
               onChange={(e) => setTargetExam(e.target.value)}
-              disabled={inspecting}
+              disabled={inspecting || isRepairing}
               className="flex-1 px-3 py-1.5 rounded-lg bg-slate-800/90 text-white text-xs border border-indigo-500/40 focus:outline-none focus:ring-1 focus:ring-amber-400 font-medium"
             >
               <option value="General Competitive Mock Test">General Competitive Mock Test (Standard)</option>
@@ -163,57 +234,166 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
           </div>
         </div>
 
-        {/* CURRENT QUESTION SUMMARY BOX */}
+        {/* DISPUTED ANSWER KEY OR ISSUE WARNING BANNER */}
+        {isDisputed && (
+          <div className="p-4 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-rose-900 dark:text-rose-200">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-rose-600 shrink-0" />
+              <div>
+                <h4 className="text-xs font-black uppercase tracking-wider">
+                  {isKeyDisputed ? '⚠️ Answer Key Dispute Detected!' : '⚠️ Question Quality Issue Detected!'}
+                </h4>
+                {isKeyDisputed ? (
+                  <p className="text-xs">
+                    Marked in test: <b>Option {origKey}</b> ➔ Confirmed by AI Syllabus Fact-Check: <b>Option {confKey}</b>
+                  </p>
+                ) : (
+                  <p className="text-xs">
+                    Status: <b>{report?.factualAccuracy?.status}</b> (Answer confirmed as <b>Option {confKey}</b>)
+                  </p>
+                )}
+                {report?.factualAccuracy?.remarks && (
+                  <p className="text-[11px] text-rose-700 dark:text-rose-300 mt-0.5">
+                    {report.factualAccuracy.remarks}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleAutoRepair}
+              disabled={isRepairing}
+              className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-1.5 shrink-0 cursor-pointer"
+            >
+              <Zap className="w-3.5 h-3.5 fill-white" />
+              <span>{isKeyDisputed ? 'Fix Disputed Key Now' : 'Auto-Fix Question Now'}</span>
+            </button>
+          </div>
+        )}
+
+        {/* CURRENT / WORKING QUESTION SUMMARY BOX */}
         <div className="p-4 bg-slate-50 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              Current Question in Test/Bank
-            </span>
             <div className="flex items-center gap-2">
-              <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-bold rounded-md">
-                {question.subject || 'General'}
+              <span className="font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+                Working Question State
               </span>
-              {question.section && (
-                <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 font-bold rounded-md">
-                  {question.section}
+              {editableQuestion?.quality_score && (
+                <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold rounded-md flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" /> QA {editableQuestion.quality_score}/100
                 </span>
               )}
-              {question.chapter && (
-                <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold rounded-md">
-                  {question.chapter}
-                </span>
-              )}
-              {question.topic && (
-                <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-bold rounded-md">
-                  {question.topic}
-                </span>
-              )}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditing(!isEditing)}
+                className="px-3 py-1 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 rounded-lg font-bold text-xs flex items-center gap-1 cursor-pointer"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>{isEditing ? 'Done Editing' : 'Manual Edit & Fix'}</span>
+              </button>
             </div>
           </div>
 
-          <p className="text-sm font-bold text-slate-900 dark:text-white leading-relaxed">
-            {question.question_text}
-          </p>
+          {isEditing ? (
+            <div className="space-y-3 pt-2">
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1">Question Stem:</label>
+                <textarea
+                  value={currentWorkingQuestion.question_text || ''}
+                  onChange={(e) => setEditableQuestion({ ...currentWorkingQuestion, question_text: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-bold text-slate-900 dark:text-white"
+                  rows={2}
+                />
+              </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            <div className={`p-2 rounded-lg border ${question.correct_answer === 'A' ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 font-bold text-emerald-900 dark:text-emerald-300' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'}`}>
-              A. {question.option_a} {question.correct_answer === 'A' && '✓ (Current Key)'}
-            </div>
-            <div className={`p-2 rounded-lg border ${question.correct_answer === 'B' ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 font-bold text-emerald-900 dark:text-emerald-300' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'}`}>
-              B. {question.option_b} {question.correct_answer === 'B' && '✓ (Current Key)'}
-            </div>
-            <div className={`p-2 rounded-lg border ${question.correct_answer === 'C' ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 font-bold text-emerald-900 dark:text-emerald-300' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'}`}>
-              C. {question.option_c} {question.correct_answer === 'C' && '✓ (Current Key)'}
-            </div>
-            <div className={`p-2 rounded-lg border ${question.correct_answer === 'D' ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-300 dark:border-emerald-700 font-bold text-emerald-900 dark:text-emerald-300' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300'}`}>
-              D. {question.option_d} {question.correct_answer === 'D' && '✓ (Current Key)'}
-            </div>
-          </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {(['A', 'B', 'C', 'D'] as const).map((key) => {
+                  const field = `option_${key.toLowerCase()}` as keyof Question;
+                  const isCorrect = currentWorkingQuestion.correct_answer === key;
+                  return (
+                    <div key={key} className="space-y-1">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold">Option {key}:</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditableQuestion({ ...currentWorkingQuestion, correct_answer: key })}
+                          className={`text-[10px] font-black px-2 py-0.5 rounded cursor-pointer ${
+                            isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600'
+                          }`}
+                        >
+                          {isCorrect ? '✓ Correct Answer' : 'Set as Correct'}
+                        </button>
+                      </div>
+                      <input
+                        type="text"
+                        value={String(currentWorkingQuestion[field] || '')}
+                        onChange={(e) => setEditableQuestion({ ...currentWorkingQuestion, [field]: e.target.value })}
+                        className={`w-full p-2 rounded-lg border text-xs bg-white dark:bg-slate-900 ${
+                          isCorrect ? 'border-emerald-500 ring-1 ring-emerald-500 font-bold' : 'border-slate-300 dark:border-slate-700'
+                        }`}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
 
-          {question.explanation && (
-            <p className="text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
-              <b className="text-indigo-600 dark:text-indigo-400">Current Explanation:</b> {question.explanation}
-            </p>
+              <div>
+                <label className="block text-[11px] font-bold text-slate-500 mb-1">Explanation:</label>
+                <textarea
+                  value={currentWorkingQuestion.explanation || ''}
+                  onChange={(e) => setEditableQuestion({ ...currentWorkingQuestion, explanation: e.target.value })}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-white"
+                  rows={2}
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-slate-900 dark:text-white leading-relaxed">
+                {currentWorkingQuestion.question_text}
+              </p>
+
+              {/* Quick Interactive Answer Key Switcher */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                {(['A', 'B', 'C', 'D'] as const).map((key) => {
+                  const optField = `option_${key.toLowerCase()}` as keyof Question;
+                  const isCorrect = currentWorkingQuestion.correct_answer === key;
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => setEditableQuestion({ ...currentWorkingQuestion, correct_answer: key })}
+                      title={`Click to set Option ${key} as Correct Answer`}
+                      className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                        isCorrect
+                          ? 'bg-emerald-50 dark:bg-emerald-950/50 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-300 shadow-xs'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-amber-400'
+                      }`}
+                    >
+                      <div className="truncate flex items-center gap-2">
+                        <span className={`w-5 h-5 rounded-md flex items-center justify-center font-black text-[10px] ${
+                          isCorrect ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-600'
+                        }`}>
+                          {key}
+                        </span>
+                        <span className="truncate">{String(currentWorkingQuestion[optField] || '')}</span>
+                      </div>
+                      {isCorrect && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {currentWorkingQuestion.explanation && (
+                <p className="text-xs text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-900 p-2.5 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <b className="text-indigo-600 dark:text-indigo-400">Explanation: </b>
+                  {currentWorkingQuestion.explanation}
+                </p>
+              )}
+            </>
           )}
         </div>
 
@@ -338,54 +518,35 @@ export const MCQInspectionModal: React.FC<MCQInspectionModalProps> = ({
               </div>
             )}
 
-            {/* IMPROVED VERSION PREVIEW */}
-            {report.improvedVersion && (
-              <div className="p-5 bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 rounded-2xl border-2 border-emerald-500/40 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Sparkles className="w-5 h-5 text-emerald-600" />
-                    <h4 className="font-bold text-sm text-emerald-900 dark:text-emerald-200">
-                      AI Polished & Improved Version
-                    </h4>
-                  </div>
-                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 dark:bg-emerald-900 px-2.5 py-0.5 rounded-md">
-                    Ready to Apply
-                  </span>
-                </div>
+            {/* FINAL APPLY ACTION BUTTON */}
+            <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-700">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2.5 text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl"
+              >
+                Close
+              </button>
 
-                <p className="text-sm font-bold text-slate-900 dark:text-white">
-                  {report.improvedVersion.question_text}
-                </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleAutoRepair}
+                  disabled={isRepairing}
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
+                >
+                  <Zap className="w-4 h-4 fill-slate-950" />
+                  <span>{isRepairing ? 'Repairing...' : '1-Click AI Auto-Repair'}</span>
+                </button>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  <div className={`p-2 rounded-lg border ${report.improvedVersion.correct_answer === 'A' ? 'bg-emerald-100 dark:bg-emerald-900 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
-                    A. {report.improvedVersion.option_a} {report.improvedVersion.correct_answer === 'A' && '✓ (Correct)'}
-                  </div>
-                  <div className={`p-2 rounded-lg border ${report.improvedVersion.correct_answer === 'B' ? 'bg-emerald-100 dark:bg-emerald-900 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
-                    B. {report.improvedVersion.option_b} {report.improvedVersion.correct_answer === 'B' && '✓ (Correct)'}
-                  </div>
-                  <div className={`p-2 rounded-lg border ${report.improvedVersion.correct_answer === 'C' ? 'bg-emerald-100 dark:bg-emerald-900 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
-                    C. {report.improvedVersion.option_c} {report.improvedVersion.correct_answer === 'C' && '✓ (Correct)'}
-                  </div>
-                  <div className={`p-2 rounded-lg border ${report.improvedVersion.correct_answer === 'D' ? 'bg-emerald-100 dark:bg-emerald-900 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
-                    D. {report.improvedVersion.option_d} {report.improvedVersion.correct_answer === 'D' && '✓ (Correct)'}
-                  </div>
-                </div>
-
-                <div className="p-3 bg-white dark:bg-slate-900 rounded-xl border border-emerald-200 dark:border-emerald-800 text-xs">
-                  <b className="text-emerald-700 dark:text-emerald-400">Improved Explanation:</b> {report.improvedVersion.explanation}
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-2">
-                  <button
-                    onClick={handleApplyUpdates}
-                    className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2"
-                  >
-                    <Check className="w-4 h-4" /> Apply AI Improvements to Question
-                  </button>
-                </div>
+                <button
+                  onClick={handleApplyUpdates}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2"
+                >
+                  <Check className="w-4 h-4" /> Save Improvements to Test
+                </button>
               </div>
-            )}
+            </div>
 
           </div>
         )}

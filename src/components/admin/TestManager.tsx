@@ -1811,9 +1811,12 @@ export const TestManager: React.FC<TestManagerProps> = ({
           isOpen={isBulkAttemptsModalOpen}
           onClose={() => setIsBulkAttemptsModalOpen(false)}
           selectedTests={selectedTestsList.length > 0 ? selectedTestsList : tests}
+          allTests={tests}
+          onUpdateSelection={(ids) => setSelectedTestIds(new Set(ids))}
+          onRefreshData={loadTests}
+          onToast={notify}
           onSuccess={() => {
             loadTests();
-            notify('success', `Attempt limits updated successfully for ${selectedTestsList.length || tests.length} mock tests!`);
           }}
         />
       )}

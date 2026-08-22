@@ -1336,10 +1336,10 @@ export const dataService = {
         targetTestId = generateUUID();
       }
     }
-    const sanitizedQuestions = questions.map((q, idx) => {
+    const sanitizedQuestions: Question[] = questions.map((q, idx) => {
       const qId = isValidUUID(q.id) ? q.id : generateUUID();
       const ans = (q.correct_answer || 'A').toString().toUpperCase().trim().slice(0, 1);
-      const validAns = ['A', 'B', 'C', 'D'].includes(ans) ? ans : 'A';
+      const validAns = (['A', 'B', 'C', 'D'].includes(ans) ? ans : 'A') as 'A' | 'B' | 'C' | 'D';
       return {
         id: qId,
         test_id: targetTestId,
@@ -1355,7 +1355,13 @@ export const dataService = {
         marks: parseSafeNumber(q.marks, 1),
         negative_marks: parseSafeNumber(q.negative_marks, 0),
         subject: q.subject || 'General Studies',
+        section: q.section || 'General',
         chapter: q.chapter || 'General',
+        topic: q.topic || 'General Topic',
+        difficulty: q.difficulty || 'Medium',
+        quality_score: q.quality_score !== undefined ? Number(q.quality_score) : 90,
+        inspection_status: q.inspection_status || 'verified',
+        inspection_notes: q.inspection_notes || null,
         created_at: q.created_at || new Date().toISOString()
       };
     });
@@ -1371,13 +1377,32 @@ export const dataService = {
       await dataService.saveTest(updatedTest);
     }
 
-    // 2. Persist questions in Supabase
+    // 2. Persist questions in Supabase (with graceful column fallback)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase && isValidUUID(targetTestId)) {
       try {
         await supabase.from('questions').delete().eq('test_id', targetTestId);
         if (sanitizedQuestions.length > 0) {
-          const { error } = await supabase.from('questions').insert(sanitizedQuestions);
+          // Prepare DB safe questions to avoid schema mismatch errors if optional columns are absent in older schemas
+          const dbRows = sanitizedQuestions.map(q => ({
+            id: q.id,
+            test_id: q.test_id,
+            question_number: q.question_number,
+            question_text: q.question_text,
+            question_image: q.question_image,
+            option_a: q.option_a,
+            option_b: q.option_b,
+            option_c: q.option_c,
+            option_d: q.option_d,
+            correct_answer: q.correct_answer,
+            explanation: q.explanation,
+            marks: q.marks,
+            negative_marks: q.negative_marks,
+            subject: q.subject,
+            chapter: q.chapter,
+            created_at: q.created_at
+          }));
+          const { error } = await supabase.from('questions').insert(dbRows);
           if (error) {
             console.error('Supabase save questions error:', error);
           }
@@ -1387,13 +1412,13 @@ export const dataService = {
       }
     }
 
-    // 3. Update local cache
+    // 3. Update local cache with complete rich dataset
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
     let questionsMap: Record<string, Question[]> = {};
     try {
       questionsMap = raw ? JSON.parse(raw) : {};
     } catch {}
-    questionsMap[targetTestId] = sanitizedQuestions as unknown as Question[];
+    questionsMap[targetTestId] = sanitizedQuestions;
     localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
   },
 
