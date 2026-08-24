@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Square, Layers, Youtube, Send, Instagram, MessageCircle, Globe, ShieldCheck, CheckCircle2, ExternalLink, Zap, Lock, Filter } from 'lucide-react';
+import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Square, Layers, Youtube, Send, Instagram, MessageCircle, Globe, ShieldCheck, CheckCircle2, ExternalLink, Zap, Lock, Filter, Sparkles } from 'lucide-react';
 import { Test, TestStatus, SocialPlatform } from '../../types';
 import { dataService, generateUUID, parseSafeNumber } from '../../services/dataService';
 import { Modal } from '../common/Modal';
 import { BulkTestAttemptsModal } from './BulkTestAttemptsModal';
+import { BulkAITestGeneratorModal } from './BulkAITestGeneratorModal';
 
 interface TestManagerProps {
   onSelectTestQuestions: (testId: string) => void;
@@ -39,6 +40,8 @@ export const TestManager: React.FC<TestManagerProps> = ({
   // Bulk Selection & Attempt Control States
   const [selectedTestIds, setSelectedTestIds] = useState<Set<string>>(new Set());
   const [isBulkAttemptsModalOpen, setIsBulkAttemptsModalOpen] = useState(false);
+  const [isBulkAIGeneratorOpen, setIsBulkAIGeneratorOpen] = useState(false);
+  const [testsForBulkAI, setTestsForBulkAI] = useState<Test[]>([]);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
 
   useEffect(() => {
@@ -383,6 +386,20 @@ export const TestManager: React.FC<TestManagerProps> = ({
     setIsBulkAttemptsModalOpen(true);
   };
 
+  const handleOpenBulkAIGenerator = (singleTest?: Test) => {
+    if (singleTest) {
+      setTestsForBulkAI([singleTest]);
+    } else if (selectedTestIds.size > 0) {
+      const selected = tests.filter((t) => selectedTestIds.has(t.id));
+      setTestsForBulkAI(selected.length > 0 ? selected : tests);
+    } else if (filteredTests.length > 0) {
+      setTestsForBulkAI(filteredTests);
+    } else {
+      setTestsForBulkAI(tests);
+    }
+    setIsBulkAIGeneratorOpen(true);
+  };
+
   const handleBulkPublish = async (isPublished: boolean) => {
     if (selectedTestIds.size === 0) return;
     setIsBulkProcessing(true);
@@ -459,6 +476,22 @@ export const TestManager: React.FC<TestManagerProps> = ({
           <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">Create, configure, publish, and bulk control student attempt limits for online mock exams</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Bulk AI MCQ Generator Button */}
+          <button
+            type="button"
+            onClick={() => handleOpenBulkAIGenerator()}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer shrink-0"
+            title="Generate AI MCQs across multiple mock tests simultaneously"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>Bulk AI MCQ Generator</span>
+            {selectedTestIds.size > 0 && (
+              <span className="px-1.5 py-0.5 bg-amber-400 text-slate-950 rounded-full text-[10px] font-black">
+                {selectedTestIds.size}
+              </span>
+            )}
+          </button>
+
           {/* Quick Bulk Attempts Button in Header */}
           <button
             type="button"
@@ -581,6 +614,17 @@ export const TestManager: React.FC<TestManagerProps> = ({
 
         {selectedTestIds.size > 0 ? (
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handleOpenBulkAIGenerator()}
+              disabled={isBulkProcessing}
+              className="px-3.5 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="Generate MCQs with AI for selected tests"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <span>⚡ Generate AI MCQs ({selectedTestIds.size})</span>
+            </button>
+
             <button
               type="button"
               onClick={() => handleOpenBulkAttempts()}
@@ -834,6 +878,15 @@ export const TestManager: React.FC<TestManagerProps> = ({
                   >
                     <Share2 className="w-3.5 h-3.5" />
                     <span>Copy Link</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleOpenBulkAIGenerator(test)}
+                    className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/60 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 rounded-lg font-bold flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                    title="Generate MCQs with AI for this test"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                    <span>AI MCQs</span>
                   </button>
 
                   <button
@@ -1816,6 +1869,21 @@ export const TestManager: React.FC<TestManagerProps> = ({
           onRefreshData={loadTests}
           onToast={notify}
           onSuccess={() => {
+            loadTests();
+          }}
+        />
+      )}
+
+      {/* Bulk AI Question Generator Modal */}
+      {isBulkAIGeneratorOpen && (
+        <BulkAITestGeneratorModal
+          isOpen={isBulkAIGeneratorOpen}
+          onClose={() => setIsBulkAIGeneratorOpen(false)}
+          selectedTests={testsForBulkAI.length > 0 ? testsForBulkAI : selectedTestsList.length > 0 ? selectedTestsList : tests}
+          allTests={tests}
+          onSelectTestQuestions={onSelectTestQuestions}
+          onToast={notify}
+          onSuccess={(updatedTests, totalCount) => {
             loadTests();
           }}
         />

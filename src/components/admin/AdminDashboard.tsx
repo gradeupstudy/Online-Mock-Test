@@ -32,6 +32,7 @@ import { SocialGateManager } from './SocialGateManager';
 import { AdminSettingsView } from './AdminSettingsView';
 import { BulkImportModal } from './BulkImportModal';
 import { ReportedMCQsManager } from './ReportedMCQsManager';
+import { BulkAITestGeneratorModal } from './BulkAITestGeneratorModal';
 
 export type AdminTab = 'dashboard' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
 
@@ -60,6 +61,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Bulk import state
   const [bulkImportTestId, setBulkImportTestId] = useState<string>('');
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
+  const [isBulkAIGeneratorOpen, setIsBulkAIGeneratorOpen] = useState(false);
 
   // Stats
   const [tests, setTests] = useState<Test[]>([]);
@@ -442,11 +444,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
+                  onClick={() => setIsBulkAIGeneratorOpen(true)}
+                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>Multi-Test AI MCQ Generator</span>
+                </button>
+
+                <button
                   onClick={() => handleTabChange('bank')}
-                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/20 backdrop-blur-md transition-all flex items-center gap-2 cursor-pointer"
                 >
                   <HelpCircle className="w-4 h-4 text-blue-200" />
-                  <span>Open Master Question Bank</span>
+                  <span>Master Question Bank</span>
                 </button>
               </div>
             </div>
@@ -656,6 +666,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }}
         onToast={safeToast}
       />
+
+      {/* BULK AI TEST GENERATOR MODAL */}
+      {isBulkAIGeneratorOpen && (
+        <BulkAITestGeneratorModal
+          isOpen={isBulkAIGeneratorOpen}
+          onClose={() => setIsBulkAIGeneratorOpen(false)}
+          selectedTests={tests.slice(0, 3)}
+          allTests={tests}
+          onSelectTestQuestions={(testId) => handleOpenQuestionsForTest(testId)}
+          onToast={safeToast}
+          onSuccess={() => {
+            loadDashboardData();
+          }}
+        />
+      )}
 
     </div>
   );
