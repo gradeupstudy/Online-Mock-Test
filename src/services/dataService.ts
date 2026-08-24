@@ -1,4 +1,4 @@
-import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus } from '../types';
+import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus, QuestionReport, ReportStatus } from '../types';
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 
@@ -62,7 +62,8 @@ const STORAGE_KEYS = {
   ANSWERS: 'gradeup_answers',
   SOCIAL: 'gradeup_social_platforms',
   SETTINGS: 'gradeup_admin_settings',
-  ACTIVE_ATTEMPT: 'gradeup_active_attempt_'
+  ACTIVE_ATTEMPT: 'gradeup_active_attempt_',
+  REPORTS: 'gradeup_question_reports'
 };
 
 // Initialize local storage with default structure
@@ -82,6 +83,9 @@ const initLocalStorage = () => {
   }
   if (!localStorage.getItem(STORAGE_KEYS.SETTINGS)) {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEMO_ADMIN_SETTINGS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.REPORTS)) {
+    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify([]));
   }
 };
 
@@ -853,6 +857,16 @@ export const dataService = {
 
   getPublicShareableUrl: (slugOrCode: string): string => {
     let origin = window.location.origin;
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+      if (raw) {
+        const s = JSON.parse(raw);
+        if (s.website_url && s.website_url.startsWith('http')) {
+          origin = s.website_url.replace(/\/+$/, '');
+        }
+      }
+    } catch {}
+
     if (origin.includes('-dev-')) {
       origin = origin.replace('-dev-', '-pre-');
     }
@@ -1440,6 +1454,10 @@ export const dataService = {
     questions.sort((a, b) => a.question_number - b.question_number);
     await dataService.saveQuestions(testId, questions);
     return cleanQuestion;
+  },
+
+  updateQuestion: async (question: Question): Promise<Question> => {
+    return dataService.saveQuestion(question.test_id, question);
   },
 
   deleteQuestion: async (testId: string, questionId: string): Promise<void> => {
@@ -2676,5 +2694,253 @@ export const dataService = {
     const leaderboard = await dataService.getLeaderboard(realTestId, 1000);
     const found = leaderboard.find(l => l.attempt_id === attemptId);
     return found ? found.rank : 1;
+  },
+
+  // ------------------------------------
+  // QUESTION REPORTS (STUDENT FEEDBACK & ISSUE TRACKER)
+  // ------------------------------------
+  submitQuestionReport: async (
+    reportInput: Omit<QuestionReport, 'id' | 'created_at' | 'status'> & { status?: ReportStatus }
+  ): Promise<QuestionReport> => {
+    const newReport: QuestionReport = {
+      id: generateUUID(),
+      test_id: reportInput.test_id,
+      test_title: reportInput.test_title || 'Mock Test',
+      question_id: reportInput.question_id,
+      question_number: reportInput.question_number || 1,
+      question_text: reportInput.question_text || '',
+      option_a: reportInput.option_a || '',
+      option_b: reportInput.option_b || '',
+      option_c: reportInput.option_c || '',
+      option_d: reportInput.option_d || '',
+      correct_answer: reportInput.correct_answer || '',
+      explanation: reportInput.explanation || null,
+      student_name: reportInput.student_name || 'Aspirant',
+      student_mobile: reportInput.student_mobile || '',
+      student_email: reportInput.student_email || null,
+      issue_type: reportInput.issue_type,
+      student_comment: reportInput.student_comment.trim(),
+      status: reportInput.status || 'pending',
+      admin_notes: '',
+      resolved_at: null,
+      created_at: new Date().toISOString()
+    };
+
+    // Try Supabase if configured
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase.from('question_reports').insert([newReport]);
+      } catch (err) {
+        console.warn('Supabase submit question report error:', err);
+      }
+    }
+
+    // Save to localStorage
+    const raw = localStorage.getItem(STORAGE_KEYS.REPORTS);
+    let reports: QuestionReport[] = [];
+    try {
+      reports = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(reports)) reports = [];
+    } catch {
+      reports = [];
+    }
+
+    reports.unshift(newReport);
+    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reports));
+
+    // Dispatch custom event for real-time badge & dashboard counters
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_reports_updated', { detail: newReport }));
+    } catch {}
+
+    return newReport;
+  },
+
+  getQuestionReports: async (filter?: {
+    testId?: string;
+    status?: ReportStatus | 'all';
+    issueType?: string;
+  }): Promise<QuestionReport[]> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        let query = supabase.from('question_reports').select('*').order('created_at', { ascending: false });
+        if (filter?.testId && filter.testId !== 'all') {
+          query = query.eq('test_id', filter.testId);
+        }
+        if (filter?.status && filter.status !== 'all') {
+          query = query.eq('status', filter.status);
+        }
+        if (filter?.issueType && filter.issueType !== 'all') {
+          query = query.eq('issue_type', filter.issueType);
+        }
+        const { data, error } = await query;
+        if (!error && data && Array.isArray(data)) {
+          // Merge or sync locally
+          localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(data));
+          return data as QuestionReport[];
+        }
+      } catch (err) {
+        console.warn('Supabase fetch question reports error:', err);
+      }
+    }
+
+    // Fallback to local storage
+    const raw = localStorage.getItem(STORAGE_KEYS.REPORTS);
+    let reports: QuestionReport[] = [];
+    try {
+      reports = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(reports)) reports = [];
+    } catch {
+      reports = [];
+    }
+
+    return reports.filter((r) => {
+      if (filter?.testId && filter.testId !== 'all' && r.test_id !== filter.testId) {
+        return false;
+      }
+      if (filter?.status && filter.status !== 'all' && r.status !== filter.status) {
+        return false;
+      }
+      if (filter?.issueType && filter.issueType !== 'all' && r.issue_type !== filter.issueType) {
+        return false;
+      }
+      return true;
+    });
+  },
+
+  updateQuestionReportStatus: async (
+    reportId: string,
+    status: ReportStatus,
+    adminNotes?: string
+  ): Promise<QuestionReport | null> => {
+    const supabase = getSupabaseClient();
+    const resolvedAt = (status === 'resolved' || status === 'dismissed') ? new Date().toISOString() : null;
+
+    if (isSupabaseConfigured() && supabase && isValidUUID(reportId)) {
+      try {
+        await supabase
+          .from('question_reports')
+          .update({
+            status,
+            admin_notes: adminNotes || '',
+            resolved_at: resolvedAt
+          })
+          .eq('id', reportId);
+      } catch (err) {
+        console.warn('Supabase update question report error:', err);
+      }
+    }
+
+    const raw = localStorage.getItem(STORAGE_KEYS.REPORTS);
+    let reports: QuestionReport[] = [];
+    try {
+      reports = raw ? JSON.parse(raw) : [];
+    } catch {}
+
+    const idx = reports.findIndex((r) => r.id === reportId);
+    if (idx !== -1) {
+      reports[idx] = {
+        ...reports[idx],
+        status,
+        admin_notes: adminNotes !== undefined ? adminNotes : reports[idx].admin_notes,
+        resolved_at: resolvedAt
+      };
+      localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(reports));
+
+      try {
+        window.dispatchEvent(new CustomEvent('gradeup_reports_updated'));
+      } catch {}
+
+      return reports[idx];
+    }
+    return null;
+  },
+
+  deleteQuestionReport: async (reportId: string): Promise<void> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase && isValidUUID(reportId)) {
+      try {
+        await supabase.from('question_reports').delete().eq('id', reportId);
+      } catch (err) {
+        console.warn('Supabase delete question report error:', err);
+      }
+    }
+
+    const raw = localStorage.getItem(STORAGE_KEYS.REPORTS);
+    let reports: QuestionReport[] = [];
+    try {
+      reports = raw ? JSON.parse(raw) : [];
+    } catch {}
+
+    const filtered = reports.filter((r) => r.id !== reportId);
+    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(filtered));
+
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_reports_updated'));
+    } catch {}
+  },
+
+  bulkUpdateQuestionReports: async (
+    reportIds: string[],
+    status: ReportStatus
+  ): Promise<void> => {
+    const supabase = getSupabaseClient();
+    const resolvedAt = (status === 'resolved' || status === 'dismissed') ? new Date().toISOString() : null;
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase
+          .from('question_reports')
+          .update({ status, resolved_at: resolvedAt })
+          .in('id', reportIds);
+      } catch (err) {
+        console.warn('Supabase bulk update question reports error:', err);
+      }
+    }
+
+    const raw = localStorage.getItem(STORAGE_KEYS.REPORTS);
+    let reports: QuestionReport[] = [];
+    try {
+      reports = raw ? JSON.parse(raw) : [];
+    } catch {}
+
+    const updated = reports.map((r) => {
+      if (reportIds.includes(r.id)) {
+        return { ...r, status, resolved_at: resolvedAt };
+      }
+      return r;
+    });
+
+    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(updated));
+
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_reports_updated'));
+    } catch {}
+  },
+
+  deleteQuestionReportsBulk: async (reportIds: string[]): Promise<void> => {
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase.from('question_reports').delete().in('id', reportIds);
+      } catch (err) {
+        console.warn('Supabase bulk delete question reports error:', err);
+      }
+    }
+
+    const raw = localStorage.getItem(STORAGE_KEYS.REPORTS);
+    let reports: QuestionReport[] = [];
+    try {
+      reports = raw ? JSON.parse(raw) : [];
+    } catch {}
+
+    const filtered = reports.filter((r) => !reportIds.includes(r.id));
+    localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify(filtered));
+
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_reports_updated'));
+    } catch {}
   }
 };

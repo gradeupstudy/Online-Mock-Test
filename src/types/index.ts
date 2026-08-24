@@ -207,3 +207,37 @@ export interface SubmitAttemptResult {
 }
 
 export type QuestionStatus = 'not_visited' | 'visited' | 'answered' | 'marked_for_review' | 'answered_marked';
+
+export type ReportStatus = 'pending' | 'reviewed' | 'resolved' | 'dismissed';
+
+export type ReportIssueType = 
+  | 'wrong_answer_key'
+  | 'question_error'
+  | 'typo_grammar'
+  | 'ambiguous_options'
+  | 'out_of_syllabus'
+  | 'other';
+
+export interface QuestionReport {
+  id: string;
+  test_id: string;
+  test_title?: string;
+  question_id: string;
+  question_number?: number;
+  question_text?: string;
+  option_a?: string;
+  option_b?: string;
+  option_c?: string;
+  option_d?: string;
+  correct_answer?: string;
+  explanation?: string | null;
+  student_name?: string;
+  student_mobile?: string;
+  student_email?: string | null;
+  issue_type: ReportIssueType;
+  student_comment: string;
+  status: ReportStatus;
+  admin_notes?: string;
+  resolved_at?: string | null;
+  created_at: string;
+}

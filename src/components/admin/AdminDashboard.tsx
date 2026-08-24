@@ -18,9 +18,10 @@ import {
   ArrowUpRight,
   Sparkles,
   Zap,
-  FolderPlus
+  FolderPlus,
+  Flag
 } from 'lucide-react';
-import { Test, Attempt } from '../../types';
+import { Test, Attempt, QuestionReport } from '../../types';
 import { dataService } from '../../services/dataService';
 import { TestManager } from './TestManager';
 import { QuestionManager } from './QuestionManager';
@@ -30,8 +31,9 @@ import { TestAnalytics } from './TestAnalytics';
 import { SocialGateManager } from './SocialGateManager';
 import { AdminSettingsView } from './AdminSettingsView';
 import { BulkImportModal } from './BulkImportModal';
+import { ReportedMCQsManager } from './ReportedMCQsManager';
 
-export type AdminTab = 'dashboard' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'social' | 'settings';
+export type AdminTab = 'dashboard' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
 
 interface AdminDashboardProps {
   onNavigateTab?: (tab: AdminTab, testId?: string) => void;
@@ -62,6 +64,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Stats
   const [tests, setTests] = useState<Test[]>([]);
   const [attempts, setAttempts] = useState<Attempt[]>([]);
+  const [pendingReportsCount, setPendingReportsCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -71,18 +74,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       loadDashboardData();
     };
 
+    const handleReportsUpdated = () => {
+      dataService.getQuestionReports({ status: 'pending' }).then((reps) => {
+        setPendingReportsCount(reps.length);
+      });
+    };
+
     window.addEventListener('gradeup_tests_updated', handleTestsUpdated);
+    window.addEventListener('gradeup_reports_updated', handleReportsUpdated);
     return () => {
       window.removeEventListener('gradeup_tests_updated', handleTestsUpdated);
+      window.removeEventListener('gradeup_reports_updated', handleReportsUpdated);
     };
   }, []);
 
   const loadDashboardData = async () => {
     setLoading(true);
-    const fetchedTests = await dataService.getTests(true);
-    const fetchedAttempts = await dataService.getAttempts();
+    const [fetchedTests, fetchedAttempts, fetchedReports] = await Promise.all([
+      dataService.getTests(true),
+      dataService.getAttempts(),
+      dataService.getQuestionReports({ status: 'pending' })
+    ]);
     setTests(fetchedTests);
     setAttempts(fetchedAttempts);
+    setPendingReportsCount(fetchedReports.length);
     if (fetchedTests.length > 0 && !selectedTestIdForQuestions) {
       setSelectedTestIdForQuestions(fetchedTests[0].id);
     }
@@ -205,6 +220,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
 
           <button
+            onClick={() => handleTabChange('reports')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer relative ${
+              activeTab === 'reports'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Flag className="w-4 h-4 text-rose-500" />
+            <span>Reported MCQs</span>
+            {pendingReportsCount > 0 && (
+              <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                activeTab === 'reports' ? 'bg-white text-rose-700' : 'bg-rose-600 text-white animate-pulse'
+              }`}>
+                {pendingReportsCount}
+              </span>
+            )}
+          </button>
+
+          <button
             onClick={() => handleTabChange('social')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
               activeTab === 'social'
@@ -256,6 +290,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
           
+          {/* PENDING REPORTS ALERT BANNER */}
+          {pendingReportsCount > 0 && (
+            <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-rose-100 dark:bg-rose-900/60 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                  <Flag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black text-rose-900 dark:text-rose-200 flex items-center gap-2">
+                    <span>{pendingReportsCount} MCQ Error {pendingReportsCount === 1 ? 'Report' : 'Reports'} Pending Review</span>
+                    <span className="px-2 py-0.5 bg-rose-600 text-white rounded-full text-[10px] font-black uppercase">Action Needed</span>
+                  </h4>
+                  <p className="text-xs text-rose-700/80 dark:text-rose-300/80 mt-0.5">
+                    Students have reported issues or disputed answer keys during mock test attempts. Review them now.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleTabChange('reports')}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white font-black text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 shrink-0 cursor-pointer self-start sm:self-center"
+              >
+                <span>Review Reports</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           {/* STATS OVERVIEW CARDS */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             
@@ -566,6 +628,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {activeTab === 'analytics' && (
         <TestAnalytics />
+      )}
+
+      {activeTab === 'reports' && (
+        <ReportedMCQsManager
+          onToast={safeToast}
+          onNavigateToQuestion={(testId) => handleOpenQuestionsForTest(testId)}
+        />
       )}
 
       {activeTab === 'social' && (

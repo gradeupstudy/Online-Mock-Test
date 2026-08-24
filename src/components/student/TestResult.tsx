@@ -18,11 +18,14 @@ import {
   Sparkles,
   Users,
   Target,
-  BarChart3
+  BarChart3,
+  Flag
 } from 'lucide-react';
 import { Attempt, Test, Question, PublicLeaderboardEntry } from '../../types';
 import { dataService } from '../../services/dataService';
 import { printOfficialScorecard } from '../../utils/printScorecard';
+import { ReportMCQModal } from './ReportMCQModal';
+import { ShareScorecardModal } from './ShareScorecardModal';
 
 interface TestResultProps {
   attempt: Attempt;
@@ -39,6 +42,9 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   const [activeTab, setActiveTab] = useState<'summary' | 'solutions' | 'leaderboard'>('summary');
   const [solutionFilter, setSolutionFilter] = useState<'all' | 'correct' | 'wrong' | 'unattempted'>('all');
   const [isRefreshingBoard, setIsRefreshingBoard] = useState(false);
+  const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
+  const [reportedQuestionIds, setReportedQuestionIds] = useState<Record<string, boolean>>({});
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   useEffect(() => {
     loadResultData();
@@ -81,19 +87,7 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   };
 
   const handleShare = () => {
-    const shareUrl = dataService.getPublicShareableUrl(test?.slug || attempt.test_id);
-    const textToShare = `🎯 I scored ${attempt.score} marks (${attempt.percentage}%) and secured Rank #${myRank} on Gradeup Study's "${test?.title || 'Mock Test'}"! Try it now:`;
-    
-    if (navigator.share) {
-      navigator.share({
-        title: `Gradeup Study Scorecard - ${attempt.student_name}`,
-        text: textToShare,
-        url: shareUrl
-      }).catch(() => {});
-    } else {
-      navigator.clipboard.writeText(`${textToShare} ${shareUrl}`);
-      onToast?.('success', 'Scorecard & Test link copied to clipboard!');
-    }
+    setIsShareModalOpen(true);
   };
 
   // Filter solutions
@@ -439,18 +433,37 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
                       )}
                     </div>
                     
-                    <span className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase flex items-center gap-1 ${
-                      resp.status === 'correct'
-                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
-                        : resp.status === 'wrong'
-                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
-                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                    }`}>
-                      {resp.status === 'correct' && <CheckCircle className="w-3.5 h-3.5" />}
-                      {resp.status === 'wrong' && <XCircle className="w-3.5 h-3.5" />}
-                      {resp.status === 'unattempted' && <HelpCircle className="w-3.5 h-3.5" />}
-                      <span>{resp.status} ({resp.marks_awarded > 0 ? `+${resp.marks_awarded}` : resp.marks_awarded})</span>
-                    </span>
+                    <div className="flex items-center gap-2">
+                      {reportedQuestionIds[q.id] ? (
+                        <span className="px-2 py-0.5 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 font-bold text-[11px] rounded-lg border border-rose-200 dark:border-rose-800 flex items-center gap-1">
+                          <Flag className="w-3 h-3 fill-rose-500 text-rose-500" />
+                          <span>Reported</span>
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setReportingQuestion(q)}
+                          className="px-2 py-0.5 bg-slate-100 hover:bg-rose-50 text-slate-600 hover:text-rose-700 dark:bg-slate-800 dark:hover:bg-rose-950/50 dark:text-slate-400 dark:hover:text-rose-300 font-bold text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 hover:border-rose-200 transition-colors flex items-center gap-1 cursor-pointer print:hidden"
+                          title="Report mistake or dispute answer key in this question"
+                        >
+                          <Flag className="w-3 h-3" />
+                          <span>Report</span>
+                        </button>
+                      )}
+
+                      <span className={`px-2.5 py-1 rounded-lg text-xs font-black uppercase flex items-center gap-1 ${
+                        resp.status === 'correct'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300'
+                          : resp.status === 'wrong'
+                          ? 'bg-rose-100 text-rose-800 dark:bg-rose-950 dark:text-rose-300'
+                          : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                      }`}>
+                        {resp.status === 'correct' && <CheckCircle className="w-3.5 h-3.5" />}
+                        {resp.status === 'wrong' && <XCircle className="w-3.5 h-3.5" />}
+                        {resp.status === 'unattempted' && <HelpCircle className="w-3.5 h-3.5" />}
+                        <span>{resp.status} ({resp.marks_awarded > 0 ? `+${resp.marks_awarded}` : resp.marks_awarded})</span>
+                      </span>
+                    </div>
                   </div>
 
                   <p className="font-bold text-slate-900 dark:text-white text-base leading-relaxed">
@@ -687,6 +700,31 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
 
         </div>
       )}
+
+      {/* REPORT MCQ MODAL */}
+      <ReportMCQModal
+        isOpen={Boolean(reportingQuestion)}
+        onClose={() => setReportingQuestion(null)}
+        question={reportingQuestion}
+        test={test}
+        studentName={attempt.student_name}
+        studentMobile={attempt.student_mobile}
+        onReportSubmitted={(qId) => {
+          setReportedQuestionIds((prev) => ({ ...prev, [qId]: true }));
+        }}
+        onToast={onToast}
+      />
+
+      {/* SHARE SCORECARD MODAL */}
+      <ShareScorecardModal
+        isOpen={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        attempt={attempt}
+        test={test}
+        rank={myRank}
+        totalCandidates={totalAspirants}
+        onToast={onToast}
+      />
 
     </div>
   );

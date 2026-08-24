@@ -103,16 +103,19 @@ export interface InspectMCQOptions {
 }
 
 /**
- * Normalizes raw model output for answer keys (e.g., "Option D", "Option (D)", "D.", "(D)", "D: अव्यय")
+ * Normalizes raw model output for answer keys (e.g., "Option D", "Option Option D", "Option (D)", "D.", "(D)", "D: अव्यय")
  * to strict single uppercase char 'A' | 'B' | 'C' | 'D'.
  */
 export function normalizeAnswerKey(val: any, fallback: 'A' | 'B' | 'C' | 'D' = 'A'): 'A' | 'B' | 'C' | 'D' {
-  if (!val) return fallback;
-  const str = String(val).trim().toUpperCase();
+  if (val === undefined || val === null) return fallback;
+  let str = String(val).trim().toUpperCase();
+  // Strip repeated "OPTION" or "OPT" or "CHOICE" or "ANS" words e.g. "OPTION OPTION D" -> "D"
+  str = str.replace(/^(OPTION\s*|OPT\s*|CHOICE\s*|ANSWER\s*|ANS\s*)+/i, '').trim();
+
   if (['A', 'B', 'C', 'D'].includes(str)) {
     return str as 'A' | 'B' | 'C' | 'D';
   }
-  // Extract clean option letter if wrapped in words like "Option D", "(D)", "D."
+  // Extract clean option letter if wrapped in words like "(D)", "D.", "D) ...", "D: ..."
   const match = str.match(/OPTION\s*([A-D])/i) || str.match(/\b([A-D])\b/) || str.match(/([A-D])[\.\:\)\-\s]/);
   if (match && ['A', 'B', 'C', 'D'].includes(match[1].toUpperCase())) {
     return match[1].toUpperCase() as 'A' | 'B' | 'C' | 'D';

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Clock, ShieldAlert, CheckCircle2, Bookmark, XCircle, ChevronLeft, ChevronRight, Menu, ZoomIn, ZoomOut, Save, AlertTriangle, ArrowRight, Grid, AlertCircle } from 'lucide-react';
+import { Clock, ShieldAlert, CheckCircle2, Bookmark, XCircle, ChevronLeft, ChevronRight, Menu, ZoomIn, ZoomOut, Save, AlertTriangle, ArrowRight, Grid, AlertCircle, Flag } from 'lucide-react';
 import { Test, Question, Attempt } from '../../types';
 import { StudentRegistrationData } from './StudentRegistration';
 import { dataService } from '../../services/dataService';
 import { Modal } from '../common/Modal';
+import { ReportMCQModal } from './ReportMCQModal';
 
 interface TestInterfaceProps {
   test: Test;
@@ -46,6 +47,10 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
 
   // Anti-cheating warning counter
   const [tabSwitchCount, setTabSwitchCount] = useState(0);
+
+  // Question Report modal state
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportedQuestionIds, setReportedQuestionIds] = useState<Record<string, boolean>>({});
 
   // Refs
   const timerRef = useRef<NodeJS.Timeout | null>(null);
@@ -420,6 +425,23 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
                       <span>{currentQuestion.section || currentQuestion.subject}</span>
                     </span>
                   )}
+                  {/* REPORT QUESTION BUTTON */}
+                  {reportedQuestionIds[currentQuestion.id] ? (
+                    <span className="px-2.5 py-1 bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 font-black text-xs rounded-lg border border-rose-300 dark:border-rose-800 flex items-center gap-1">
+                      <Flag className="w-3 h-3 fill-rose-500 text-rose-500" />
+                      <span>Reported</span>
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsReportModalOpen(true)}
+                      className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-bold text-xs rounded-lg border border-rose-200 dark:border-rose-800/60 transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Report mistake or issue in this MCQ / प्रश्न रिपोर्ट करें"
+                    >
+                      <Flag className="w-3 h-3 text-rose-500" />
+                      <span>Report</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -712,6 +734,21 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
 
         </div>
       </Modal>
+
+      {/* REPORT MCQ MODAL */}
+      <ReportMCQModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        question={currentQuestion}
+        test={test}
+        studentName={studentData.full_name}
+        studentMobile={studentData.mobile_number}
+        studentEmail={studentData.email}
+        onReportSubmitted={(qId) => {
+          setReportedQuestionIds((prev) => ({ ...prev, [qId]: true }));
+        }}
+        onToast={notify}
+      />
 
     </div>
   );
