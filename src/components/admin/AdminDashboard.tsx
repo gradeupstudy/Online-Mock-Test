@@ -33,6 +33,7 @@ import { AdminSettingsView } from './AdminSettingsView';
 import { BulkImportModal } from './BulkImportModal';
 import { ReportedMCQsManager } from './ReportedMCQsManager';
 import { BulkAITestGeneratorModal } from './BulkAITestGeneratorModal';
+import { SupabaseStorageIndicator } from './SupabaseStorageIndicator';
 
 export type AdminTab = 'dashboard' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
 
@@ -292,6 +293,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
           
+          {/* SUPABASE LIVE STORAGE & DATABASE QUOTA INDICATOR */}
+          <SupabaseStorageIndicator
+            onOpenSupabaseModal={onOpenSupabaseModal}
+            onToast={safeToast}
+          />
+
           {/* PENDING REPORTS ALERT BANNER */}
           {pendingReportsCount > 0 && (
             <div className="p-4 rounded-2xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900/60 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fadeIn">

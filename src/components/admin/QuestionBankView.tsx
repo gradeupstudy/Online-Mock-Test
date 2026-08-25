@@ -35,6 +35,7 @@ import { AIQuestionGeneratorModal } from './AIQuestionGeneratorModal';
 import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
 import { BulkAIExplanationModal } from './BulkAIExplanationModal';
 import { DuplicateTrackerModal } from './DuplicateTrackerModal';
+import { CompletePDFImportModal } from './CompletePDFImportModal';
 import { detectDuplicateQuestions, DuplicateGroup } from '../../utils/duplicateDetector';
 
 interface QuestionBankViewProps {
@@ -68,6 +69,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   // Modals
   const [isAiGenModalOpen, setIsAiGenModalOpen] = useState(false);
   const [isSmartParseModalOpen, setIsSmartParseModalOpen] = useState(false);
+  const [isPdfOcrModalOpen, setIsPdfOcrModalOpen] = useState(false);
   const [isBulkInspectOpen, setIsBulkInspectOpen] = useState(false);
   const [isBulkExplanationOpen, setIsBulkExplanationOpen] = useState(false);
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
@@ -503,6 +505,15 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
             >
               <AlertCircle className="w-4 h-4 text-rose-200" />
               <span>Duplicate Audit ({duplicateGroups.length} Groups)</span>
+            </button>
+
+            <button
+              onClick={() => setIsPdfOcrModalOpen(true)}
+              className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+              title="Full PDF Document OCR: Extract every question & answer key from uploaded PDF documents"
+            >
+              <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+              <span>Complete PDF OCR</span>
             </button>
 
             <button
@@ -1501,6 +1512,18 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
         }
         onClose={() => setIsBulkExplanationOpen(false)}
         onApplyExplanations={handleApplyBulkExplanations}
+        onToast={onToast}
+      />
+
+      {/* COMPLETE PDF OCR ENGINE MODAL */}
+      <CompletePDFImportModal
+        isOpen={isPdfOcrModalOpen}
+        testId="bank"
+        availableTests={tests}
+        onClose={() => setIsPdfOcrModalOpen(false)}
+        onSuccessImport={() => {
+          loadBankData();
+        }}
         onToast={onToast}
       />
 

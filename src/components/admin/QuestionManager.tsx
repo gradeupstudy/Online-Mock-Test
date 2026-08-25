@@ -38,6 +38,7 @@ import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
 import { BulkAIExplanationModal } from './BulkAIExplanationModal';
 import { QuestionBankImportModal } from './QuestionBankImportModal';
 import { DuplicateTrackerModal } from './DuplicateTrackerModal';
+import { CompletePDFImportModal } from './CompletePDFImportModal';
 import { detectDuplicateQuestions } from '../../utils/duplicateDetector';
 
 interface QuestionManagerProps {
@@ -67,6 +68,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isSmartParseOpen, setIsSmartParseOpen] = useState(false);
+  const [isPdfOcrModalOpen, setIsPdfOcrModalOpen] = useState(false);
   const [isTextModalOpen, setIsTextModalOpen] = useState(false);
   const [isBankImportOpen, setIsBankImportOpen] = useState(false);
   const [isBulkInspectOpen, setIsBulkInspectOpen] = useState(false);
@@ -538,6 +540,15 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
               <span>Duplicate Report ({duplicateGroups.length})</span>
             </button>
           )}
+
+          <button
+            onClick={() => setIsPdfOcrModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+            title="Complete PDF MCQ OCR: Extract all questions & answer keys across entire PDF document"
+          >
+            <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+            <span>PDF OCR Engine</span>
+          </button>
 
           <button
             onClick={() => setIsAiModalOpen(true)}
@@ -1650,6 +1661,20 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           </div>
         </Modal>
       )}
+
+      {/* Complete PDF OCR Engine Modal */}
+      <CompletePDFImportModal
+        isOpen={isPdfOcrModalOpen}
+        testId={testId}
+        testTitle={test?.title}
+        testNegativeMarking={test?.negative_marking !== undefined ? Number(test.negative_marking) : 0}
+        testMarksPerQuestion={test?.marks_per_question !== undefined ? Number(test.marks_per_question) : 1}
+        onClose={() => setIsPdfOcrModalOpen(false)}
+        onSuccessImport={() => {
+          loadTestAndQuestions();
+        }}
+        onToast={notify}
+      />
 
       {/* Duplicate Tracker Modal */}
       <DuplicateTrackerModal

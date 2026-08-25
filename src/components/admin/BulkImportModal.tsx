@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Modal } from '../common/Modal';
-import { Upload, FileSpreadsheet, CheckCircle, AlertTriangle, Download, Trash2, ArrowRight } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, AlertTriangle, Download, Trash2, ArrowRight, Sparkles, FileText } from 'lucide-react';
 import { parseQuestionsCSV, CSVParseResult } from '../../utils/csv';
 import { Question } from '../../types';
 import { dataService, parseSafeNumber } from '../../services/dataService';
+import { CompletePDFImportModal } from './CompletePDFImportModal';
 
 interface BulkImportModalProps {
   isOpen: boolean;
@@ -28,6 +29,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
   const [file, setFile] = useState<File | null>(null);
   const [parsing, setParsing] = useState(false);
   const [result, setResult] = useState<CSVParseResult | null>(null);
+  const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -103,10 +105,37 @@ What is 15% of 200?,20,25,30,35,C,15 * 200 / 100 = 30.,Maths,Percentage,1,0`;
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Bulk Import Questions via CSV" maxWidth="4xl">
-      <div className="space-y-6">
-        
-        {/* Helper Instructions & Sample Button */}
+    <>
+      <Modal isOpen={isOpen} onClose={onClose} title="Bulk Import Questions (CSV / PDF)" maxWidth="4xl">
+        <div className="space-y-6">
+
+          {/* Quick Switch to PDF OCR Engine */}
+          <div className="p-4 bg-gradient-to-r from-purple-900/10 via-indigo-900/10 to-blue-900/10 dark:from-purple-950/40 dark:to-blue-950/40 rounded-2xl border border-purple-200 dark:border-purple-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-purple-600 text-white shrink-0 shadow-xs">
+                <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+              </div>
+              <div>
+                <p className="font-bold text-slate-900 dark:text-white text-sm">
+                  Have a Complete Question Paper or Book in PDF format?
+                </p>
+                <p className="text-slate-600 dark:text-slate-300">
+                  Use the Full PDF OCR Engine to extract all questions, answers, Hindi text & answer keys automatically.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                onClose();
+                setIsPdfModalOpen(true);
+              }}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all shrink-0 cursor-pointer"
+            >
+              <FileText className="w-4 h-4" /> Open Complete PDF OCR
+            </button>
+          </div>
+          
+          {/* Helper Instructions & Sample Button */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-blue-50 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900 text-xs">
           <div>
             <p className="font-bold text-blue-900 dark:text-blue-200 text-sm">CSV Format Guidelines</p>
@@ -216,7 +245,19 @@ What is 15% of 200?,20,25,30,35,C,15 * 200 / 100 = 30.,Maths,Percentage,1,0`;
           </div>
         )}
 
-      </div>
-    </Modal>
+        </div>
+      </Modal>
+
+      {/* COMPLETE PDF OCR ENGINE MODAL */}
+      <CompletePDFImportModal
+        isOpen={isPdfModalOpen}
+        testId={testId}
+        onClose={() => setIsPdfModalOpen(false)}
+        onSuccessImport={() => {
+          onSuccessImport();
+        }}
+        onToast={notify}
+      />
+    </>
   );
 };

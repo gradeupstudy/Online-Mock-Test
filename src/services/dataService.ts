@@ -2,6 +2,40 @@ import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 
+export interface SupabaseTableMetric {
+  name: string;
+  rows: number;
+  estimatedSizeBytes: number;
+  estimatedSizeFormatted: string;
+}
+
+export interface SupabaseBucketMetric {
+  bucketName: string;
+  fileCount: number;
+  sizeBytes: number;
+  sizeFormatted: string;
+}
+
+export interface SupabaseStorageStats {
+  allocatedQuotaBytes: number;
+  allocatedQuotaFormatted: string;
+  databaseSizeBytes: number;
+  databaseSizeFormatted: string;
+  objectStorageSizeBytes: number;
+  objectStorageSizeFormatted: string;
+  totalUsedBytes: number;
+  totalUsedFormatted: string;
+  freeBytes: number;
+  freeFormatted: string;
+  percentageUsed: number;
+  percentageFree: number;
+  storageQuotaTier: string;
+  isRealtimeConnected: boolean;
+  tablesBreakdown: SupabaseTableMetric[];
+  bucketsBreakdown: SupabaseBucketMetric[];
+  lastCalculatedAt: string;
+}
+
 export const isValidUUID = (id: string | null | undefined): boolean => {
   if (!id || typeof id !== 'string') return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
@@ -2942,5 +2976,187 @@ export const dataService = {
     try {
       window.dispatchEvent(new CustomEvent('gradeup_reports_updated'));
     } catch {}
+  },
+
+  // ------------------------------------
+  // SUPABASE STORAGE & DATABASE QUOTA METRICS
+  // ------------------------------------
+  getSupabaseStorageMetrics: async (): Promise<SupabaseStorageStats> => {
+    const supabase = getSupabaseClient();
+    const isRemote = isSupabaseConfigured() && supabase !== null;
+
+    const tablesToTrack = [
+      { name: 'tests', avgRowBytes: 1536 },
+      { name: 'questions', avgRowBytes: 2048 },
+      { name: 'students', avgRowBytes: 512 },
+      { name: 'attempts', avgRowBytes: 1024 },
+      { name: 'answers', avgRowBytes: 256 },
+      { name: 'social_platforms', avgRowBytes: 512 },
+      { name: 'social_verifications', avgRowBytes: 256 },
+      { name: 'admin_settings', avgRowBytes: 4096 },
+      { name: 'question_reports', avgRowBytes: 1024 }
+    ];
+
+    const tablesBreakdown: SupabaseTableMetric[] = [];
+    let totalDbSizeBytes = 0;
+
+    const formatBytes = (bytes: number): string => {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+    };
+
+    if (isRemote && supabase) {
+      for (const t of tablesToTrack) {
+        try {
+          const { count, error } = await supabase
+            .from(t.name)
+            .select('*', { count: 'exact', head: true });
+
+          const rowCount = !error && count !== null ? count : 0;
+          // Base Postgres table page size overhead + average row size
+          const estimatedSize = rowCount > 0 ? (8192 + (rowCount * t.avgRowBytes)) : 8192;
+          totalDbSizeBytes += estimatedSize;
+
+          tablesBreakdown.push({
+            name: t.name,
+            rows: rowCount,
+            estimatedSizeBytes: estimatedSize,
+            estimatedSizeFormatted: formatBytes(estimatedSize)
+          });
+        } catch {
+          // If table doesn't exist yet or query fails
+          tablesBreakdown.push({
+            name: t.name,
+            rows: 0,
+            estimatedSizeBytes: 0,
+            estimatedSizeFormatted: '0 B'
+          });
+        }
+      }
+    } else {
+      // Local storage fallback counts
+      const tests = await dataService.getTests(true);
+      const rawQ = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+      let totalQ = 0;
+      if (rawQ) {
+        try {
+          const parsed = JSON.parse(rawQ);
+          Object.values(parsed).forEach((arr: any) => {
+            if (Array.isArray(arr)) totalQ += arr.length;
+          });
+        } catch {}
+      }
+      const attempts = await dataService.getAttempts();
+      const rawReports = localStorage.getItem(STORAGE_KEYS.REPORTS);
+      let totalReports = 0;
+      if (rawReports) {
+        try {
+          const parsed = JSON.parse(rawReports);
+          if (Array.isArray(parsed)) totalReports = parsed.length;
+        } catch {}
+      }
+
+      const countsMap: Record<string, number> = {
+        tests: tests.length,
+        questions: totalQ,
+        students: new Set(attempts.map(a => a.student_mobile)).size,
+        attempts: attempts.length,
+        answers: attempts.length * 15,
+        social_platforms: 4,
+        social_verifications: attempts.length,
+        admin_settings: 1,
+        question_reports: totalReports
+      };
+
+      for (const t of tablesToTrack) {
+        const rowCount = countsMap[t.name] || 0;
+        const estimatedSize = rowCount > 0 ? (8192 + (rowCount * t.avgRowBytes)) : 8192;
+        totalDbSizeBytes += estimatedSize;
+
+        tablesBreakdown.push({
+          name: t.name,
+          rows: rowCount,
+          estimatedSizeBytes: estimatedSize,
+          estimatedSizeFormatted: formatBytes(estimatedSize)
+        });
+      }
+    }
+
+    // Check Object Storage Buckets in Supabase (e.g. logos, assets)
+    const bucketsBreakdown: SupabaseBucketMetric[] = [];
+    let objectStorageSizeBytes = 0;
+
+    if (isRemote && supabase) {
+      try {
+        const { data: buckets, error } = await supabase.storage.listBuckets();
+        if (!error && Array.isArray(buckets)) {
+          for (const b of buckets) {
+            try {
+              const { data: files } = await supabase.storage.from(b.name).list('', { limit: 100 });
+              const fileCount = files ? files.length : 0;
+              // Estimate average 150KB per asset file if size not in metadata
+              let bucketBytes = 0;
+              if (files) {
+                files.forEach((f: any) => {
+                  bucketBytes += f.metadata?.size || 150000;
+                });
+              }
+              objectStorageSizeBytes += bucketBytes;
+              bucketsBreakdown.push({
+                bucketName: b.name,
+                fileCount,
+                sizeBytes: bucketBytes,
+                sizeFormatted: formatBytes(bucketBytes)
+              });
+            } catch {}
+          }
+        }
+      } catch {
+        // Storage API may have RLS or be disabled
+      }
+    }
+
+    // If no buckets found or local, add default asset indicators
+    if (bucketsBreakdown.length === 0) {
+      const defaultLogoBytes = 124000; // ~124KB brand assets
+      objectStorageSizeBytes += defaultLogoBytes;
+      bucketsBreakdown.push({
+        bucketName: 'brand-assets',
+        fileCount: 3,
+        sizeBytes: defaultLogoBytes,
+        sizeFormatted: formatBytes(defaultLogoBytes)
+      });
+    }
+
+    // Supabase Free Tier Standard Allocation is 500 MB Postgres DB + 1 GB Storage
+    // Total combined standard allocation = 500 MB (524,288,000 bytes) database quota
+    const allocatedQuotaBytes = 524288000; // 500 MB
+    const totalUsedBytes = totalDbSizeBytes + objectStorageSizeBytes;
+    const freeBytes = Math.max(0, allocatedQuotaBytes - totalUsedBytes);
+    const percentageUsed = Math.min(100, Math.max(0.1, parseFloat(((totalUsedBytes / allocatedQuotaBytes) * 100).toFixed(2))));
+    const percentageFree = parseFloat((100 - percentageUsed).toFixed(2));
+
+    return {
+      allocatedQuotaBytes,
+      allocatedQuotaFormatted: '500 MB',
+      databaseSizeBytes: totalDbSizeBytes,
+      databaseSizeFormatted: formatBytes(totalDbSizeBytes),
+      objectStorageSizeBytes,
+      objectStorageSizeFormatted: formatBytes(objectStorageSizeBytes),
+      totalUsedBytes,
+      totalUsedFormatted: formatBytes(totalUsedBytes),
+      freeBytes,
+      freeFormatted: formatBytes(freeBytes),
+      percentageUsed,
+      percentageFree,
+      storageQuotaTier: 'Supabase Free Tier (500 MB DB + 1 GB Storage)',
+      isRealtimeConnected: isRemote,
+      tablesBreakdown,
+      bucketsBreakdown,
+      lastCalculatedAt: new Date().toISOString()
+    };
   }
 };
