@@ -75,6 +75,7 @@ export interface PDFProcessOptions {
   file: File;
   startPage?: number;
   endPage?: number;
+  taxonomyMode?: 'auto_multi' | 'single_override'; // 'auto_multi' lets AI determine subject & chapter per question; 'single_override' applies fixed default to all
   defaultSubject?: string;
   defaultChapter?: string;
   defaultTopic?: string;
@@ -285,6 +286,7 @@ export const pdfOcrEngine = {
       file,
       startPage = 1,
       endPage,
+      taxonomyMode = 'auto_multi',
       defaultSubject = 'General Studies',
       defaultChapter = 'General',
       defaultTopic = 'General Topic',
@@ -357,6 +359,7 @@ export const pdfOcrEngine = {
         const chunkMCQs = await pdfOcrEngine.processPageChunk({
           pages: chunkPages,
           globalAnswerKeyMap,
+          taxonomyMode,
           defaultSubject,
           defaultChapter,
           defaultTopic,
@@ -445,6 +448,7 @@ export const pdfOcrEngine = {
   processPageChunk: async (params: {
     pages: RawPageData[];
     globalAnswerKeyMap: Map<number, string>;
+    taxonomyMode?: 'auto_multi' | 'single_override';
     defaultSubject: string;
     defaultChapter: string;
     defaultTopic: string;
@@ -452,7 +456,16 @@ export const pdfOcrEngine = {
     languageMode: 'auto' | 'bilingual' | 'english' | 'hindi';
     onLog?: (msg: string) => void;
   }): Promise<ExtractedPDFMCQ[]> => {
-    const { pages, globalAnswerKeyMap, defaultSubject, defaultChapter, defaultTopic, standardizeTaxonomy = true, onLog } = params;
+    const {
+      pages,
+      globalAnswerKeyMap,
+      taxonomyMode = 'auto_multi',
+      defaultSubject,
+      defaultChapter,
+      defaultTopic,
+      standardizeTaxonomy = true,
+      onLog,
+    } = params;
 
     // Combine page texts with clear page boundary markers
     let combinedText = '';
@@ -480,6 +493,28 @@ export const pdfOcrEngine = {
       : 'No separate answer key table found yet; extract inline answers from the questions.';
 
     const canonicalSubjectsList = getAllCanonicalSubjectNames().join(', ');
+
+    const taxonomyInstructions = taxonomyMode === 'auto_multi'
+      ? `4. MULTI-SUBJECT & MULTI-CHAPTER AUTO-DETECTION (AI DYNAMIC CLASSIFICATION):
+   - This PDF may contain questions from MULTIPLE SUBJECTS and MULTIPLE CHAPTERS (e.g. History, Geography, Polity & Constitution, Indian Economy, General Science, Quantitative Aptitude, Reasoning & Mental Ability, English Grammar & Comprehension, Hindi Language & Grammar, Current Affairs, Computer Awareness, Himachal Pradesh GK, etc.).
+   - You MUST analyze each question's domain, formulas, keywords, concepts, and section headers on the page to determine its specific genuine Subject and Chapter.
+   - Choose the Subject from standard Master Subjects: [${canonicalSubjectsList}].
+   - Examples of Subject & Chapter classification:
+     • Math / Numbers / Percentage / Algebra / Geometry / SI-CI / Time & Work -> Subject: "Quantitative Aptitude", Chapter: "..."
+     • Logic / Series / Puzzles / Blood Relations / Syllogism / Coding-Decoding -> Subject: "Reasoning & Mental Ability", Chapter: "..."
+     • Physics / Chemistry / Biology / Laws of Motion / Optics / Cells -> Subject: "General Science", Chapter: "..."
+     • Constitution / Articles / Parliament / President / Judiciary / Rights -> Subject: "Polity & Constitution", Chapter: "..."
+     • Rivers / Mountains / Climate / Soils / Maps / Minerals -> Subject: "Geography", Chapter: "..."
+     • Ancient / Medieval / Modern History / Freedom Movement -> Subject: "History", Chapter: "..."
+     • English Vocabulary / Idioms / Tenses / Error Spotting -> Subject: "English Grammar & Comprehension", Chapter: "..."
+     • हिन्दी व्याकरण / संधि / समास / विलोम / पर्यायवाची / मुहावरे -> Subject: "Hindi Language & Grammar", Chapter: "..."
+   - DO NOT force all questions to a single default subject! Classify each question according to its genuine content.
+   - (Only fallback to "${defaultSubject}" / "${defaultChapter}" if subject cannot be determined).`
+      : `4. FIXED SINGLE SUBJECT & CHAPTER OVERRIDE:
+   - For this single-topic document, set every question to:
+     • Subject: "${defaultSubject}"
+     • Chapter: "${defaultChapter}"
+     • Topic: "${defaultTopic}"`;
 
     const systemPrompt = `
 You are the world's most accurate Exam PDF Question Extraction & OCR Engine.
@@ -526,13 +561,9 @@ CRITICAL EXTRACTION RULES:
        - Set answer_status = "needs_review"
        - Add to validation_issues: "No answer found in document; requires admin review"
 
-4. CRITICAL SUBJECT & CHAPTER TAXONOMY RULES (PREVENT DUPLICATE VARIATIONS):
-   - DO NOT create disparate/fragmented variations for subjects or chapters (e.g., use "History", NEVER "Indian History", "General History", or "History GK").
-   - DO NOT create disparate variations for chapters (e.g., use "Mauryan Empire", NEVER "MAuryan Dynesty", "The Mauryas", or "Maurya Dynasty").
-   - Choose Subject from the Standard Master Subjects: [${canonicalSubjectsList}] or use default: "${defaultSubject}".
-   - Default Subject: "${defaultSubject}"
-   - Default Chapter: "${defaultChapter}"
-   - Default Topic: "${defaultTopic}"
+${taxonomyInstructions}
+
+5. FIELD DETAILS:
    - explanation: Extract the explanation if given in the text/solution, else null or concise rationale.
    - difficulty: "Easy" | "Medium" | "Hard" | "Moderate".
    - source_page: Integer page number where question starts (${pages[0].pageNumber}).
@@ -681,10 +712,21 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
             valStatus = valStatus === 'invalid' ? 'invalid' : 'needs_review';
           }
 
-          // Apply Taxonomy Canonicalization
-          const rawSubj = item.subject || defaultSubject;
-          const rawChap = item.chapter || defaultChapter;
-          const rawTop = item.topic || defaultTopic;
+          // Apply Taxonomy Resolution (AI Auto-Detection per question vs Single Fixed Override)
+          let rawSubj: string;
+          let rawChap: string;
+          let rawTop: string;
+
+          if (taxonomyMode === 'single_override') {
+            rawSubj = defaultSubject || item.subject || 'General Studies';
+            rawChap = defaultChapter || item.chapter || 'General';
+            rawTop = defaultTopic || item.topic || 'General Topic';
+          } else {
+            // auto_multi mode: Trust the AI's detected subject and chapter per question
+            rawSubj = (item.subject && String(item.subject).trim()) ? String(item.subject).trim() : (defaultSubject || 'General Studies');
+            rawChap = (item.chapter && String(item.chapter).trim()) ? String(item.chapter).trim() : (defaultChapter || 'General');
+            rawTop = (item.topic && String(item.topic).trim()) ? String(item.topic).trim() : (defaultTopic || 'General Topic');
+          }
 
           const taxonomy = standardizeTaxonomy
             ? normalizeQuestionTaxonomy({ subject: rawSubj, chapter: rawChap, topic: rawTop })

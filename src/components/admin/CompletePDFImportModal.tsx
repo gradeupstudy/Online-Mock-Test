@@ -30,7 +30,8 @@ import {
   Sliders,
   Languages,
   Tag,
-  FolderKanban
+  FolderKanban,
+  Cpu
 } from 'lucide-react';
 import {
   pdfOcrEngine,
@@ -86,11 +87,13 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
   const [pageRangeMode, setPageRangeMode] = useState<'all' | 'custom'>('all');
   const [startPageInput, setStartPageInput] = useState<number>(1);
   const [endPageInput, setEndPageInput] = useState<number>(50);
-  const [defaultSubject, setDefaultSubject] = useState<string>('History');
-  const [defaultChapter, setDefaultChapter] = useState<string>('Mauryan Empire');
+  const [taxonomyMode, setTaxonomyMode] = useState<'auto_multi' | 'single_override'>('auto_multi');
+  const [defaultSubject, setDefaultSubject] = useState<string>('General Studies');
+  const [defaultChapter, setDefaultChapter] = useState<string>('General');
   const [defaultTopic, setDefaultTopic] = useState<string>('General Topic');
   const [standardizeTaxonomy, setStandardizeTaxonomy] = useState<boolean>(true);
   const [languageMode, setLanguageMode] = useState<'auto' | 'bilingual' | 'english' | 'hindi'>('auto');
+  const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>('all');
 
   // Destination Target
   const [targetDestination, setTargetDestination] = useState<string>(testId || 'bank');
@@ -109,6 +112,12 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingDraft, setEditingDraft] = useState<ExtractedPDFMCQ | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Dual Language Conversion State
+  const [isConvertingDualLang, setIsConvertingDualLang] = useState(false);
+  const [dualLangProgress, setDualLangProgress] = useState<{ current: number; total: number; message: string } | null>(null);
+  const [convertingSingleIdx, setConvertingSingleIdx] = useState<number | null>(null);
+  const [isConvertingDraft, setIsConvertingDraft] = useState(false);
 
   // Available Canonical lists
   const canonicalSubjects = getAllCanonicalSubjectNames();
@@ -159,6 +168,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
         file: pdfFile,
         startPage: fromP,
         endPage: toP,
+        taxonomyMode,
         defaultSubject: finalSubject,
         defaultChapter: finalChapter,
         defaultTopic,
@@ -310,6 +320,126 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
     }
   };
 
+  // 1-Click Dual Language Conversion for All or Selected Extracted MCQs
+  const handleBatchConvertToDualLanguage = async (scope: 'all' | 'selected' = 'all') => {
+    const targetIndices = scope === 'selected'
+      ? extractedQuestions.map((q, idx) => (q.selected ? idx : -1)).filter((idx) => idx !== -1)
+      : extractedQuestions.map((_, idx) => idx);
+
+    if (targetIndices.length === 0) {
+      notify('error', scope === 'selected' ? 'Please select at least one question to convert.' : 'No questions found to convert.');
+      return;
+    }
+
+    const questionsToConvert = targetIndices.map((idx) => extractedQuestions[idx]);
+
+    setIsConvertingDualLang(true);
+    setDualLangProgress({
+      current: 0,
+      total: questionsToConvert.length,
+      message: `Initializing Dual Language translation engine for ${questionsToConvert.length} MCQs...`,
+    });
+
+    try {
+      notify('info', `Translating ${questionsToConvert.length} MCQs into Dual Language (English + Hindi)...`);
+      const convertedResults = await aiService.bulkConvertToDualLanguageMCQs(
+        questionsToConvert,
+        (done, total, logMsg) => {
+          setDualLangProgress({ current: done, total, message: logMsg });
+        }
+      );
+
+      // Merge converted results back into extractedQuestions
+      setExtractedQuestions((prev) => {
+        const updated = [...prev];
+        targetIndices.forEach((origIdx, cIdx) => {
+          const conv = convertedResults[cIdx];
+          if (conv) {
+            updated[origIdx] = {
+              ...updated[origIdx],
+              question_text: conv.question_text || updated[origIdx].question_text,
+              question_hi: conv.question_hi || updated[origIdx].question_hi || '',
+              option_a: conv.option_a || updated[origIdx].option_a,
+              option_b: conv.option_b || updated[origIdx].option_b,
+              option_c: conv.option_c || updated[origIdx].option_c,
+              option_d: conv.option_d || updated[origIdx].option_d,
+              correct_answer: conv.correct_answer || updated[origIdx].correct_answer,
+              explanation: conv.explanation || updated[origIdx].explanation,
+              confidence: Math.max(updated[origIdx].confidence || 90, 95),
+            };
+          }
+        });
+        return updated;
+      });
+
+      notify('success', `🎉 Successfully converted ${convertedResults.length} MCQs into Dual Language (English + Hindi)!`);
+    } catch (err: any) {
+      console.error('Batch dual language conversion error:', err);
+      notify('error', 'Dual Language conversion failed: ' + (err?.message || err));
+    } finally {
+      setIsConvertingDualLang(false);
+      setDualLangProgress(null);
+    }
+  };
+
+  // 1-Click Dual Language for single MCQ card
+  const handleConvertSingleQuestionToDualLang = async (q: ExtractedPDFMCQ, idx: number) => {
+    try {
+      setConvertingSingleIdx(idx);
+      notify('info', `Translating Q${q.question_number} to Dual Language (English + Hindi)...`);
+      const res = await aiService.convertSingleToDualLanguage(q);
+      setExtractedQuestions((prev) =>
+        prev.map((item, i) =>
+          i === idx
+            ? {
+                ...item,
+                question_text: res.question_text,
+                question_hi: res.question_hi,
+                option_a: res.option_a,
+                option_b: res.option_b,
+                option_c: res.option_c,
+                option_d: res.option_d,
+                correct_answer: res.correct_answer,
+                explanation: res.explanation,
+                confidence: Math.max(item.confidence || 90, 96),
+              }
+            : item
+        )
+      );
+      notify('success', `Converted Q${q.question_number} into Dual Language (English + Hindi)!`);
+    } catch (err: any) {
+      notify('error', 'Translation failed: ' + (err?.message || err));
+    } finally {
+      setConvertingSingleIdx(null);
+    }
+  };
+
+  // Convert active editing draft to dual language
+  const handleConvertDraftToDualLang = async () => {
+    if (!editingDraft) return;
+    try {
+      setIsConvertingDraft(true);
+      notify('info', 'Translating question draft to Dual Language...');
+      const res = await aiService.convertSingleToDualLanguage(editingDraft);
+      setEditingDraft({
+        ...editingDraft,
+        question_text: res.question_text,
+        question_hi: res.question_hi,
+        option_a: res.option_a,
+        option_b: res.option_b,
+        option_c: res.option_c,
+        option_d: res.option_d,
+        correct_answer: res.correct_answer,
+        explanation: res.explanation,
+      });
+      notify('success', 'Draft successfully converted to Dual Language!');
+    } catch (err: any) {
+      notify('error', 'Translation error: ' + (err?.message || err));
+    } finally {
+      setIsConvertingDraft(false);
+    }
+  };
+
   // Download Valid JSON format matching user specifications
   const handleDownloadJSON = () => {
     const exportData = {
@@ -412,6 +542,11 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
       if (activeFilterTab === 'conflict' && q.answer_status !== 'conflict') return false;
       if (activeFilterTab === 'duplicate' && q.duplicate_status === 'unique') return false;
 
+      // Subject Filter (from breakdown chips)
+      if (selectedSubjectFilter !== 'all' && q.subject.toLowerCase() !== selectedSubjectFilter.toLowerCase()) {
+        return false;
+      }
+
       // Search query
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
@@ -424,6 +559,14 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
       }
       return true;
     });
+
+  // Calculate Subject Breakdown stats for extracted questions
+  const subjectDistributionMap = extractedQuestions.reduce<Record<string, number>>((acc, q) => {
+    const subj = q.subject || 'General Studies';
+    acc[subj] = (acc[subj] || 0) + 1;
+    return acc;
+  }, {});
+  const uniqueDetectedSubjects = Object.keys(subjectDistributionMap);
 
   const selectedCount = extractedQuestions.filter((q) => q.selected).length;
 
@@ -522,6 +665,100 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
               )}
             </div>
 
+            {/* TAXONOMY STRATEGY SELECTOR (AI Auto-Detect vs Single Fixed Override) */}
+            <div className="space-y-3 p-4 rounded-2xl bg-gradient-to-br from-indigo-50/80 via-purple-50/50 to-blue-50/60 dark:from-slate-800/80 dark:via-indigo-950/40 dark:to-slate-800/80 border border-indigo-200/80 dark:border-indigo-800/70">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                    <span>Subject & Chapter Assignment Strategy (विषय एवं अध्याय चयन)</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5">
+                    Choose how subjects and chapters are assigned to extracted questions:
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 text-[10px] font-bold text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 px-2.5 py-1 rounded-lg border border-indigo-200 dark:border-indigo-800 shadow-2xs self-start sm:self-auto">
+                  <Cpu className="w-3.5 h-3.5 text-indigo-500" />
+                  <span>Gemini Multimodal OCR</span>
+                </div>
+              </div>
+
+              {/* Two Option Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                {/* Option 1: AI Auto-Detect (Dynamic Multi-Subject) */}
+                <div
+                  onClick={() => setTaxonomyMode('auto_multi')}
+                  className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                    taxonomyMode === 'auto_multi'
+                      ? 'border-purple-600 bg-white dark:bg-slate-900 shadow-md ring-2 ring-purple-500/20'
+                      : 'border-slate-200 dark:border-slate-700/80 bg-white/70 dark:bg-slate-800/50 hover:border-purple-300 dark:hover:border-purple-700'
+                  }`}
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-black text-xs text-slate-900 dark:text-white">
+                        <span className="w-4 h-4 rounded-full border-2 border-purple-600 flex items-center justify-center shrink-0">
+                          {taxonomyMode === 'auto_multi' && <span className="w-2 h-2 rounded-full bg-purple-600" />}
+                        </span>
+                        <span>✨ AI Auto-Detect (Dynamic Multi-Subject)</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 text-[10px] font-black uppercase tracking-wider">
+                        Recommended
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 pl-6 leading-relaxed">
+                      <strong>Best for Full Mock Tests, PYQs & Mixed Books.</strong> AI automatically reads each question, formulas, & section headers to assign its genuine Subject (History, Geography, Polity, Science, Math, Reasoning, etc.) & Chapter. <em>No manual entry required.</em>
+                    </p>
+                  </div>
+
+                  <div className="mt-2.5 pl-6 flex flex-wrap gap-1.5 text-[10px]">
+                    <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 font-bold border border-purple-200 dark:border-purple-800">
+                      Multi-Subject Auto Classifier
+                    </span>
+                    <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-bold border border-blue-200 dark:border-blue-800">
+                      Auto Chapter Extraction
+                    </span>
+                  </div>
+                </div>
+
+                {/* Option 2: Single Fixed Override */}
+                <div
+                  onClick={() => setTaxonomyMode('single_override')}
+                  className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                    taxonomyMode === 'single_override'
+                      ? 'border-indigo-600 bg-white dark:bg-slate-900 shadow-md ring-2 ring-indigo-500/20'
+                      : 'border-slate-200 dark:border-slate-700/80 bg-white/70 dark:bg-slate-800/50 hover:border-indigo-300 dark:hover:border-indigo-700'
+                  }`}
+                >
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 font-black text-xs text-slate-900 dark:text-white">
+                        <span className="w-4 h-4 rounded-full border-2 border-indigo-600 flex items-center justify-center shrink-0">
+                          {taxonomyMode === 'single_override' && <span className="w-2 h-2 rounded-full bg-indigo-600" />}
+                        </span>
+                        <span>📌 Fixed Single Subject & Chapter</span>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 text-[10px] font-bold">
+                        Single Topic PDF
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 pl-6 leading-relaxed">
+                      <strong>Best for Chapter-Specific PDFs</strong> (e.g. <em>'300 MCQs on Indus Valley'</em> or <em>'Percentage MCQs'</em>). Forces all extracted questions to share the specified Master Subject and Chapter.
+                    </p>
+                  </div>
+
+                  <div className="mt-2.5 pl-6 flex flex-wrap gap-1.5 text-[10px]">
+                    <span className="px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 font-bold border border-indigo-200 dark:border-indigo-800">
+                      Uniform Override
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             {/* CONFIGURATION GRID */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
               
@@ -563,59 +800,102 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                 </select>
               </div>
 
-              {/* Default Subject Fallback with Canonical Suggestions */}
+              {/* Master Subject: Auto vs Fixed */}
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <Layers className="w-3.5 h-3.5 text-emerald-500" />
                     <span>Master Subject</span>
                   </span>
-                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Standardized</span>
+                  <span className={`text-[10px] font-semibold ${taxonomyMode === 'auto_multi' ? 'text-purple-600 dark:text-purple-400 font-bold' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                    {taxonomyMode === 'auto_multi' ? '✨ AI Dynamic' : 'Single Override'}
+                  </span>
                 </label>
-                <input
-                  type="text"
-                  list="canonical-subjects-list"
-                  value={defaultSubject}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setDefaultSubject(val);
-                    const chaps = getCanonicalChaptersForSubject(val);
-                    if (chaps.length > 0 && !chaps.includes(defaultChapter)) {
-                      setDefaultChapter(chaps[0]);
-                    }
-                  }}
-                  placeholder="e.g. History, Geography, Polity..."
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
-                />
-                <datalist id="canonical-subjects-list">
-                  {canonicalSubjects.map((subj) => (
-                    <option key={subj} value={subj} />
-                  ))}
-                </datalist>
+
+                {taxonomyMode === 'auto_multi' ? (
+                  <div className="px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800/60 bg-purple-50/50 dark:bg-purple-950/30 text-purple-950 dark:text-purple-200 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      <Sparkles className="w-3 h-3 text-purple-600 dark:text-purple-400 shrink-0" />
+                      <span>Auto-Detect per Question</span>
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
+                      <span>Fallback:</span>
+                      <select
+                        value={defaultSubject}
+                        onChange={(e) => setDefaultSubject(e.target.value)}
+                        className="bg-white dark:bg-slate-900 px-1.5 py-0.5 rounded border border-purple-200 dark:border-purple-800 text-[10px] font-bold text-slate-800 dark:text-slate-200"
+                      >
+                        {canonicalSubjects.map((s) => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      list="canonical-subjects-list"
+                      value={defaultSubject}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDefaultSubject(val);
+                        const chaps = getCanonicalChaptersForSubject(val);
+                        if (chaps.length > 0 && !chaps.includes(defaultChapter)) {
+                          setDefaultChapter(chaps[0]);
+                        }
+                      }}
+                      placeholder="e.g. History, Geography, Polity..."
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                    />
+                    <datalist id="canonical-subjects-list">
+                      {canonicalSubjects.map((subj) => (
+                        <option key={subj} value={subj} />
+                      ))}
+                    </datalist>
+                  </>
+                )}
               </div>
 
-              {/* Default Chapter Fallback with Canonical Suggestions */}
+              {/* Master Chapter: Auto vs Fixed */}
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                   <span className="flex items-center gap-1.5">
                     <FolderKanban className="w-3.5 h-3.5 text-indigo-500" />
                     <span>Master Chapter</span>
                   </span>
-                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">Single Unified Name</span>
+                  <span className={`text-[10px] font-semibold ${taxonomyMode === 'auto_multi' ? 'text-purple-600 dark:text-purple-400 font-bold' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                    {taxonomyMode === 'auto_multi' ? '✨ AI Dynamic' : 'Single Override'}
+                  </span>
                 </label>
-                <input
-                  type="text"
-                  list="canonical-chapters-list"
-                  value={defaultChapter}
-                  onChange={(e) => setDefaultChapter(e.target.value)}
-                  placeholder="e.g. Mauryan Empire, Rivers..."
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
-                />
-                <datalist id="canonical-chapters-list">
-                  {availableChapters.map((chap) => (
-                    <option key={chap} value={chap} />
-                  ))}
-                </datalist>
+
+                {taxonomyMode === 'auto_multi' ? (
+                  <div className="px-3 py-2 rounded-xl border border-purple-200 dark:border-purple-800/60 bg-purple-50/50 dark:bg-purple-950/30 text-purple-950 dark:text-purple-200 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      <Sparkles className="w-3 h-3 text-purple-600 dark:text-purple-400 shrink-0" />
+                      <span>Auto-Detect per Question</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                      Extracted directly from question context
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="text"
+                      list="canonical-chapters-list"
+                      value={defaultChapter}
+                      onChange={(e) => setDefaultChapter(e.target.value)}
+                      placeholder="e.g. Mauryan Empire, Rivers..."
+                      className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                    />
+                    <datalist id="canonical-chapters-list">
+                      {availableChapters.map((chap) => (
+                        <option key={chap} value={chap} />
+                      ))}
+                    </datalist>
+                  </>
+                )}
               </div>
 
               {/* TAXONOMY HARMONIZATION BANNER & TOGGLE */}
@@ -632,7 +912,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                       </span>
                     </div>
                     <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
-                      Merges fragmented variations into a single master name (e.g. <em>'Indian History' / 'General History'</em> ➔ <strong>'History'</strong>, <em>'MAuryan Dynesty' / 'The Mauryas'</em> ➔ <strong>'Mauryan Empire'</strong>).
+                      Merges fragmented variations into master canonical taxonomy (e.g. <em>'Indian History' / 'General History'</em> ➔ <strong>'History'</strong>, <em>'MAuryan Dynesty' / 'The Mauryas'</em> ➔ <strong>'Mauryan Empire'</strong>).
                     </p>
                   </div>
                 </div>
@@ -939,6 +1219,20 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
               {/* Search & Export & Batch Tools */}
               <div className="flex flex-wrap items-center gap-2">
                 <button
+                  onClick={() => handleBatchConvertToDualLanguage('all')}
+                  disabled={isConvertingDualLang || extractedQuestions.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/80 text-xs font-bold text-purple-700 dark:text-purple-300 shadow-xs cursor-pointer transition-all disabled:opacity-50"
+                  title="1-Click Dual Language: Convert all extracted MCQs to Bilingual English + Hindi"
+                >
+                  {isConvertingDualLang ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-purple-600 dark:text-purple-400" />
+                  ) : (
+                    <Languages className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                  )}
+                  <span>1-Click Dual Language (द्विभाषी)</span>
+                </button>
+
+                <button
                   onClick={handleBatchStandardizeTaxonomy}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/80 text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-xs cursor-pointer transition-colors"
                   title="Standardize all subjects & chapters to master unified names"
@@ -970,8 +1264,50 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
 
             </div>
 
+            {/* SUBJECT BREAKDOWN CHIPS (Multi-Subject Filter) */}
+            {uniqueDetectedSubjects.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 p-2.5 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/40 text-xs">
+                <span className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-300 flex items-center gap-1 mr-1">
+                  <Layers className="w-3 h-3" />
+                  <span>Detected Subjects:</span>
+                </span>
+
+                <button
+                  onClick={() => setSelectedSubjectFilter('all')}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all cursor-pointer ${
+                    selectedSubjectFilter === 'all'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-indigo-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  All Subjects ({extractedQuestions.length})
+                </button>
+
+                {uniqueDetectedSubjects.map((subj) => {
+                  const count = subjectDistributionMap[subj];
+                  const isSelected = selectedSubjectFilter.toLowerCase() === subj.toLowerCase();
+                  return (
+                    <button
+                      key={subj}
+                      onClick={() => setSelectedSubjectFilter(isSelected ? 'all' : subj)}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                        isSelected
+                          ? 'bg-purple-600 text-white shadow-xs'
+                          : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-purple-50 dark:hover:bg-purple-950/50 border border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <span>{subj}</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${isSelected ? 'bg-purple-800 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400'}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* SELECTION BAR */}
-            <div className="flex items-center justify-between text-xs px-1 text-slate-500">
+            <div className="flex flex-wrap items-center justify-between text-xs px-1 gap-2 text-slate-500">
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleSelectAllFiltered(true)}
@@ -986,6 +1322,21 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                 >
                   Deselect All
                 </button>
+
+                {selectedCount > 0 && selectedCount < extractedQuestions.length && (
+                  <>
+                    <span>•</span>
+                    <button
+                      onClick={() => handleBatchConvertToDualLanguage('selected')}
+                      disabled={isConvertingDualLang}
+                      className="inline-flex items-center gap-1 font-black text-purple-700 dark:text-purple-300 hover:underline cursor-pointer"
+                      title="Convert only the selected questions to Dual Language"
+                    >
+                      <Languages className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                      <span>Convert Selected ({selectedCount}) to Dual Lang</span>
+                    </button>
+                  </>
+                )}
               </div>
 
               <div>
@@ -993,6 +1344,33 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                 {extractedQuestions.length} questions selected for import
               </div>
             </div>
+
+            {/* DUAL LANGUAGE CONVERSION LIVE PROGRESS BANNER */}
+            {isConvertingDualLang && dualLangProgress && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-900/90 via-indigo-900/90 to-blue-900/90 text-white shadow-lg border border-purple-500/30 space-y-2.5">
+                <div className="flex items-center justify-between text-xs font-bold">
+                  <div className="flex items-center gap-2">
+                    <Languages className="w-4 h-4 text-purple-300 animate-pulse" />
+                    <span className="text-sm font-black">Converting MCQs to Dual Language (English + Hindi / द्विभाषी)...</span>
+                  </div>
+                  <span className="bg-purple-800/80 px-2.5 py-0.5 rounded-full text-[11px] font-mono border border-purple-400/30">
+                    {dualLangProgress.current} / {dualLangProgress.total} ({Math.round((dualLangProgress.current / (dualLangProgress.total || 1)) * 100)}%)
+                  </span>
+                </div>
+                
+                {/* Progress Bar */}
+                <div className="w-full bg-slate-800/80 rounded-full h-2 overflow-hidden border border-purple-500/20">
+                  <div
+                    className="bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-400 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${Math.round((dualLangProgress.current / (dualLangProgress.total || 1)) * 100)}%` }}
+                  />
+                </div>
+
+                <div className="text-[11px] text-purple-200 truncate font-mono">
+                  {dualLangProgress.message}
+                </div>
+              </div>
+            )}
 
             {/* QUESTIONS LIST */}
             <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1 scrollbar-thin">
@@ -1012,12 +1390,26 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                     {isEditing && editingDraft ? (
                       /* INLINE EDIT FORM */
                       <div className="space-y-3 text-xs">
-                        <div className="flex items-center justify-between font-bold text-slate-900 dark:text-white">
+                        <div className="flex flex-wrap items-center justify-between font-bold text-slate-900 dark:text-white gap-2">
                           <span>Editing Question #{editingDraft.question_number}</span>
                           <div className="flex items-center gap-2">
                             <button
+                              type="button"
+                              onClick={handleConvertDraftToDualLang}
+                              disabled={isConvertingDraft}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/80 rounded-lg border border-purple-200 dark:border-purple-800 cursor-pointer transition-colors"
+                              title="Auto-translate this draft into English + Hindi"
+                            >
+                              {isConvertingDraft ? (
+                                <RefreshCw className="w-3 h-3 animate-spin text-purple-600" />
+                              ) : (
+                                <Languages className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                              )}
+                              <span>Auto-Translate Dual Lang</span>
+                            </button>
+                            <button
                               onClick={() => handleSaveEdit(idx)}
-                              className="px-3 py-1 bg-emerald-600 text-white rounded-lg font-bold flex items-center gap-1"
+                              className="px-3 py-1 bg-emerald-600 text-white rounded-lg font-bold flex items-center gap-1 cursor-pointer"
                             >
                               <Check className="w-3.5 h-3.5" /> Save
                             </button>
@@ -1026,7 +1418,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                                 setEditingIndex(null);
                                 setEditingDraft(null);
                               }}
-                              className="px-3 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg font-bold"
+                              className="px-3 py-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg font-bold cursor-pointer"
                             >
                               Cancel
                             </button>
@@ -1125,8 +1517,11 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                             <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-500 text-[10px] font-semibold">
                               📄 Page {q.source_page}
                             </span>
-                            <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 text-[10px] font-bold">
-                              {q.subject} • {q.chapter}
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-black border border-indigo-200 dark:border-indigo-800 shadow-2xs">
+                              <Layers className="w-2.5 h-2.5 text-indigo-500" />
+                              <span>{q.subject}</span>
+                              <span className="text-indigo-400">›</span>
+                              <span className="font-semibold text-slate-700 dark:text-slate-300">{q.chapter}</span>
                             </span>
                           </div>
 
@@ -1158,6 +1553,21 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                                 ⚠️ Needs Review
                               </span>
                             )}
+
+                            {/* Dual Language Button */}
+                            <button
+                              onClick={() => handleConvertSingleQuestionToDualLang(q, idx)}
+                              disabled={convertingSingleIdx === idx}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-bold text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-purple-100 rounded-lg bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900/60 border border-purple-200 dark:border-purple-800/70 cursor-pointer transition-all disabled:opacity-50"
+                              title="1-Click Dual Language: Convert this MCQ to English + Hindi"
+                            >
+                              {convertingSingleIdx === idx ? (
+                                <RefreshCw className="w-3 h-3 animate-spin text-purple-600" />
+                              ) : (
+                                <Languages className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+                              )}
+                              <span>Dual Lang</span>
+                            </button>
 
                             {/* Edit Button */}
                             <button

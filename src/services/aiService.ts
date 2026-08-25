@@ -1901,6 +1901,326 @@ Return strict JSON object matching the schema.
   },
 
   /**
+   * 1-Click Dual Language Converter (Single Question):
+   * Converts a single MCQ (Question Text, Options A-D, and Explanation) into high-academic Dual Language (English + Hindi / द्विभाषी).
+   */
+  convertSingleToDualLanguage: async (
+    question: {
+      question_number?: number;
+      question_text: string;
+      question_hi?: string | null;
+      option_a: string;
+      option_b: string;
+      option_c: string;
+      option_d: string;
+      correct_answer: string;
+      explanation?: string | null;
+      subject?: string;
+      chapter?: string;
+      topic?: string;
+    },
+    onLog?: (msg: string) => void
+  ): Promise<{
+    question_text: string;
+    question_hi: string;
+    option_a: string;
+    option_b: string;
+    option_c: string;
+    option_d: string;
+    correct_answer: 'A' | 'B' | 'C' | 'D';
+    explanation: string;
+  }> => {
+    return aiService.executeWithKeyRotation(
+      'Dual Language MCQ Conversion',
+      onLog,
+      async (ai) => {
+        const promptText = `
+You are a premier Bilingual Examination Board Editor and Master Translator (English <-> Hindi / Devanagari).
+Convert the following Multiple Choice Question (MCQ) into a complete, professional DUAL LANGUAGE (Bilingual: English + Hindi) format.
+
+INPUT QUESTION:
+- Question Number: ${question.question_number || 1}
+- Question Text: "${question.question_text}"
+${question.question_hi ? `- Existing Hindi Text: "${question.question_hi}"` : ''}
+- Option A: "${question.option_a}"
+- Option B: "${question.option_b}"
+- Option C: "${question.option_c}"
+- Option D: "${question.option_d}"
+- Correct Answer: "${question.correct_answer || 'A'}"
+- Explanation: "${question.explanation || 'None provided'}"
+- Subject: "${question.subject || 'General'}" | Chapter: "${question.chapter || 'General'}"
+
+CONVERSION RULES:
+1. DUAL LANGUAGE QUESTION TEXT:
+   - Provide BOTH the English statement AND the accurate Hindi (Devanagari) translation separated clearly by a newline ('\\n').
+   - Example: "Which organelle is known as the powerhouse of the cell?\\nकोशिका का पावर हाउस किस कोशिकांग को कहा जाता है?"
+2. QUESTION_HI:
+   - Provide the standalone, pure Hindi translation in "question_hi".
+3. DUAL LANGUAGE OPTIONS:
+   - For option_a, option_b, option_c, option_d, provide both English and Hindi versions cleanly formatted as: "English Term / हिन्दी शब्द" (e.g. "Mitochondria / माइटोकॉन्ड्रिया" or "Robert Hooke / रॉबर्ट हुक").
+   - If numbers/dates/formulas only (e.g. "1947" or "50%"), preserve them clearly.
+4. CORRECT ANSWER:
+   - STRICTLY preserve the exact same correct option letter (A, B, C, or D). DO NOT change the answer key.
+5. DUAL LANGUAGE EXPLANATION:
+   - Provide a comprehensive bilingual explanation containing both the English reasoning and the Hindi explanation (व्याख्या).
+
+Return strict JSON object.
+`.trim();
+
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  question_text: { type: Type.STRING },
+                  question_hi: { type: Type.STRING },
+                  option_a: { type: Type.STRING },
+                  option_b: { type: Type.STRING },
+                  option_c: { type: Type.STRING },
+                  option_d: { type: Type.STRING },
+                  correct_answer: { type: Type.STRING },
+                  explanation: { type: Type.STRING },
+                },
+                required: [
+                  'question_text',
+                  'question_hi',
+                  'option_a',
+                  'option_b',
+                  'option_c',
+                  'option_d',
+                  'correct_answer',
+                  'explanation',
+                ],
+              },
+            },
+          },
+          onLog,
+          'Convert Single MCQ to Dual Language'
+        );
+
+        const rawText = response.text || '';
+        let parsed: any;
+        try {
+          parsed = JSON.parse(rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, ''));
+        } catch {
+          const match = rawText.match(/\{[\s\S]*\}/);
+          if (match) parsed = JSON.parse(match[0]);
+          else throw new Error('Failed to parse dual language response.');
+        }
+
+        const validAns = normalizeAnswerKey(parsed.correct_answer, normalizeAnswerKey(question.correct_answer, 'A'));
+
+        return {
+          question_text: parsed.question_text || question.question_text,
+          question_hi: parsed.question_hi || parsed.question_text || '',
+          option_a: parsed.option_a || question.option_a,
+          option_b: parsed.option_b || question.option_b,
+          option_c: parsed.option_c || question.option_c,
+          option_d: parsed.option_d || question.option_d,
+          correct_answer: validAns,
+          explanation: parsed.explanation || question.explanation || `Option ${validAns} is the correct answer.`,
+        };
+      }
+    );
+  },
+
+  /**
+   * 1-Click Dual Language Converter for Multiple MCQs (Batch Processing):
+   * Efficiently converts an array of MCQs into Dual Language (English + Hindi / द्विभाषी)
+   * in optimized chunks with progress reporting and resilient model fallback.
+   */
+  bulkConvertToDualLanguageMCQs: async <T extends {
+    question_number?: number;
+    question_text: string;
+    question_hi?: string | null;
+    option_a: string;
+    option_b: string;
+    option_c: string;
+    option_d: string;
+    correct_answer: string;
+    explanation?: string | null;
+    subject?: string;
+    chapter?: string;
+    topic?: string;
+  }>(
+    questions: T[],
+    onProgress?: (done: number, total: number, logMsg: string) => void
+  ): Promise<Array<T & { question_hi: string }>> => {
+    const total = questions.length;
+    if (total === 0) return [];
+
+    const CHUNK_SIZE = 5; // 5 MCQs per chunk for fast, high-quality translation
+    const results: Array<T & { question_hi: string }> = [];
+    let processedCount = 0;
+
+    onProgress?.(0, total, `🌐 Starting Dual Language conversion for ${total} MCQs...`);
+
+    for (let i = 0; i < total; i += CHUNK_SIZE) {
+      const chunk = questions.slice(i, i + CHUNK_SIZE);
+      const startIdx = i + 1;
+      const endIdx = Math.min(i + CHUNK_SIZE, total);
+
+      onProgress?.(
+        processedCount,
+        total,
+        `🌐 Translating MCQs ${startIdx} to ${endIdx} of ${total} into Dual Language (English + Hindi)...`
+      );
+
+      try {
+        const chunkResults = await aiService.executeWithKeyRotation<
+          Array<{
+            index: number;
+            question_text: string;
+            question_hi: string;
+            option_a: string;
+            option_b: string;
+            option_c: string;
+            option_d: string;
+            correct_answer: string;
+            explanation: string;
+          }>
+        >(
+          `Dual Language Translation (${startIdx}-${endIdx})`,
+          (msg) => onProgress?.(processedCount, total, msg),
+          async (ai) => {
+            const promptText = `
+You are a Lead Bilingual Exam Board Translator & Academic Question Specialist.
+Convert the following ${chunk.length} Multiple Choice Questions into standard DUAL LANGUAGE (Bilingual: English + Hindi / Devanagari) format.
+
+CONVERSION GUIDELINES:
+1. Question Text: Must contain both English and accurate Hindi translation separated by newline ('\\n').
+2. question_hi: Pure standalone Hindi question.
+3. Options: Both English and Hindi ("English Term / हिन्दी शब्द" or "English\\nहिन्दी").
+4. Correct Answer: STRICTLY preserve original answer key (A/B/C/D).
+5. Explanation: Comprehensive bilingual explanation (English + Hindi व्याख्या).
+
+QUESTIONS TO CONVERT:
+${chunk
+  .map(
+    (q, idx) => `
+[QUESTION #${idx}]
+Number: ${q.question_number || startIdx + idx}
+Question Text: "${q.question_text}"
+${q.question_hi ? `Existing Hindi: "${q.question_hi}"` : ''}
+A) ${q.option_a}
+B) ${q.option_b}
+C) ${q.option_c}
+D) ${q.option_d}
+Correct Answer: ${q.correct_answer || 'A'}
+Explanation: ${q.explanation || 'None'}
+Subject: ${q.subject || 'General'} | Chapter: ${q.chapter || 'General'}
+`
+  )
+  .join('\n---\n')}
+
+Return JSON array with converted objects matching schema.
+`.trim();
+
+            const response = await aiService.generateWithModelFallback(
+              ai,
+              {
+                contents: promptText,
+                config: {
+                  responseMimeType: 'application/json',
+                  responseSchema: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        index: { type: Type.INTEGER },
+                        question_text: { type: Type.STRING },
+                        question_hi: { type: Type.STRING },
+                        option_a: { type: Type.STRING },
+                        option_b: { type: Type.STRING },
+                        option_c: { type: Type.STRING },
+                        option_d: { type: Type.STRING },
+                        correct_answer: { type: Type.STRING },
+                        explanation: { type: Type.STRING },
+                      },
+                      required: [
+                        'index',
+                        'question_text',
+                        'question_hi',
+                        'option_a',
+                        'option_b',
+                        'option_c',
+                        'option_d',
+                        'correct_answer',
+                        'explanation',
+                      ],
+                    },
+                  },
+                },
+              },
+              (msg) => onProgress?.(processedCount, total, msg),
+              `Bulk Dual Language (${startIdx}-${endIdx})`
+            );
+
+            const rawText = response.text || '';
+            let parsed: any;
+            try {
+              parsed = JSON.parse(rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, ''));
+            } catch {
+              const match = rawText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+              if (match) parsed = JSON.parse(match[0]);
+              else throw new Error('Failed to parse bulk dual language JSON.');
+            }
+            if (!Array.isArray(parsed)) parsed = [parsed];
+            return parsed;
+          }
+        );
+
+        // Map converted items back to chunk
+        chunk.forEach((origQ, cIdx) => {
+          const converted = chunkResults.find((r) => r.index === cIdx) || chunkResults[cIdx];
+          if (converted) {
+            const validKey = normalizeAnswerKey(converted.correct_answer, normalizeAnswerKey(origQ.correct_answer, 'A'));
+            results.push({
+              ...origQ,
+              question_text: converted.question_text || origQ.question_text,
+              question_hi: converted.question_hi || converted.question_text || origQ.question_hi || '',
+              option_a: converted.option_a || origQ.option_a,
+              option_b: converted.option_b || origQ.option_b,
+              option_c: converted.option_c || origQ.option_c,
+              option_d: converted.option_d || origQ.option_d,
+              correct_answer: validKey,
+              explanation: converted.explanation || origQ.explanation || `Option ${validKey} is the correct answer.`,
+            });
+          } else {
+            results.push({
+              ...origQ,
+              question_hi: origQ.question_hi || '',
+            });
+          }
+        });
+      } catch (err: any) {
+        console.error(`Error during dual language translation for chunk ${startIdx}-${endIdx}:`, err);
+        // Fallback: keep original questions
+        chunk.forEach((origQ) => {
+          results.push({
+            ...origQ,
+            question_hi: origQ.question_hi || '',
+          });
+        });
+      }
+
+      processedCount += chunk.length;
+      onProgress?.(
+        processedCount,
+        total,
+        `✅ Converted ${processedCount} of ${total} MCQs to Dual Language (${Math.round((processedCount / total) * 100)}%)...`
+      );
+    }
+
+    onProgress?.(total, total, `🎉 All ${total} MCQs successfully converted to Dual Language!`);
+    return results;
+  },
+
+  /**
    * Helper to shuffle options and balance answer keys
    */
   shuffleAndBalanceQuestions,
