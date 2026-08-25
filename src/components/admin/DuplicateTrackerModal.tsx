@@ -93,10 +93,11 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
       const retainedMap = new Map<string, Question>();
 
       for (const q of toDelete) {
-        await dataService.deleteQuestionFromBank(q.id);
         deletedIds.push(q.id);
         retainedMap.set(q.id, keptQuestion);
       }
+
+      await dataService.deleteQuestionsFromBankBatch(deletedIds, retainedMap);
 
       let healMsg = '';
       if (autoHealLinkedMockTests && deletedIds.length > 0) {
@@ -158,12 +159,13 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
         const toDelete = group.questions.filter((q: Question) => q.id !== keepId);
 
         for (const q of toDelete) {
-          await dataService.deleteQuestionFromBank(q.id);
           deletedIds.push(q.id);
           retainedMap.set(q.id, keptQ);
           removedTotal++;
         }
       }
+
+      await dataService.deleteQuestionsFromBankBatch(deletedIds, retainedMap);
 
       let healMsg = '';
       if (autoHealLinkedMockTests && deletedIds.length > 0) {

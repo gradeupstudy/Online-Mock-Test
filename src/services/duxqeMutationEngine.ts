@@ -394,9 +394,10 @@ ${existingStemsSummary ? existingStemsSummary : '(No previous questions register
         question_number: idx + 1,
       }));
 
-      // Save updated test questions
+      // Save updated test questions to local storage and Supabase
       questionsMap[test.id] = finalizedQuestions;
       localStorage.setItem('gradeup_questions', JSON.stringify(questionsMap));
+      await dataService.saveQuestions(test.id, finalizedQuestions);
 
       // Sync test total questions count
       if (test.total_questions !== finalizedQuestions.length) {

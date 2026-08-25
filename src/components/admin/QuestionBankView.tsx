@@ -245,14 +245,16 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
         const toDelete = group.questions.filter((q) => q.id !== keepId);
 
         for (const q of toDelete) {
-          await dataService.deleteQuestionFromBank(q.id);
           deletedIds.push(q.id);
           retainedMap.set(q.id, keptQ);
           removedCount++;
         }
       }
 
-      // Trigger DU-XQE Auto-Heal
+      // 1. Batch delete locally & in cloud with persistent blacklist
+      await dataService.deleteQuestionsFromBankBatch(deletedIds, retainedMap);
+
+      // 2. Trigger DU-XQE Auto-Heal for linked mock tests
       let healMsg = '';
       if (deletedIds.length > 0) {
         const healResult = await duxqeMutationEngine.autoHealAndRefillMockTests(deletedIds, retainedMap);
@@ -261,7 +263,12 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
         }
       }
 
-      await loadBankData();
+      // 3. Immediately filter in-memory React state for instantaneous UI responsiveness
+      const deletedSet = new Set(deletedIds);
+      setQuestions(prev => prev.filter(q => !deletedSet.has(q.id)));
+
+      // 4. Refresh full state
+      await loadBankData(false);
       setShowOnlyDuplicates(false);
       onToast?.('success', `Successfully removed ${removedCount} duplicate question(s)! Best versions retained${healMsg}`);
     } catch (err: any) {

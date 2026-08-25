@@ -93,6 +93,7 @@ const STORAGE_KEYS = {
   TESTS: 'gradeup_tests',
   QUESTIONS: 'gradeup_questions',
   QUESTION_BANK: 'gradeup_question_bank_master',
+  DELETED_QUESTIONS: 'gradeup_deleted_questions_blacklist',
   ATTEMPTS: 'gradeup_attempts',
   ANSWERS: 'gradeup_answers',
   SOCIAL: 'gradeup_social_platforms',
@@ -105,6 +106,16 @@ const STORAGE_KEYS = {
 export const syncToQuestionBankMaster = (questionsToSync: Question[]): void => {
   if (!Array.isArray(questionsToSync) || questionsToSync.length === 0) return;
   try {
+    // Load deleted blacklist
+    let deletedSet = new Set<string>();
+    try {
+      const rawBlacklist = localStorage.getItem(STORAGE_KEYS.DELETED_QUESTIONS);
+      if (rawBlacklist) {
+        const parsed = JSON.parse(rawBlacklist);
+        if (Array.isArray(parsed)) deletedSet = new Set(parsed);
+      }
+    } catch {}
+
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
     let bankList: Question[] = [];
     try {
@@ -116,12 +127,13 @@ export const syncToQuestionBankMaster = (questionsToSync: Question[]): void => {
 
     const bankMap = new Map<string, Question>();
     bankList.forEach(q => {
-      if (q && q.id) bankMap.set(q.id, q);
+      if (q && q.id && !deletedSet.has(q.id)) bankMap.set(q.id, q);
     });
 
     questionsToSync.forEach(q => {
       if (!q || !q.question_text) return;
       const qId = q.id || generateUUID();
+      if (deletedSet.has(qId)) return; // Skip if deleted from bank
       const existing = bankMap.get(qId);
       const cleanQ: Question = {
         ...existing,
@@ -1591,6 +1603,16 @@ export const dataService = {
   // QUESTION BANK MASTER SYSTEM
   // ------------------------------------
   getAllQuestionBank: async (): Promise<Question[]> => {
+    // 0. Load deleted questions blacklist
+    let deletedSet = new Set<string>();
+    try {
+      const rawBlacklist = localStorage.getItem(STORAGE_KEYS.DELETED_QUESTIONS);
+      if (rawBlacklist) {
+        const parsed = JSON.parse(rawBlacklist);
+        if (Array.isArray(parsed)) deletedSet = new Set(parsed);
+      }
+    } catch {}
+
     // 1. Load Question Bank Master pool from cache immediately
     const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
     let masterBank: Question[] = [];
@@ -1603,10 +1625,12 @@ export const dataService = {
 
     const bankMap = new Map<string, Question>();
     masterBank.forEach(q => {
-      if (q && q.id) bankMap.set(q.id, { ...q, test_id: q.test_id || 'bank' });
+      if (q && q.id && !deletedSet.has(q.id)) {
+        bankMap.set(q.id, { ...q, test_id: q.test_id || 'bank' });
+      }
     });
 
-    // 2. Also merge questions from all existing mock tests
+    // 2. Also merge questions from all existing mock tests (excluding deleted ones)
     const rawQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
     let questionsMap: Record<string, Question[]> = {};
     try {
@@ -1616,7 +1640,7 @@ export const dataService = {
     Object.entries(questionsMap).forEach(([_, qList]) => {
       if (Array.isArray(qList)) {
         qList.forEach(q => {
-          if (q && q.id) {
+          if (q && q.id && !deletedSet.has(q.id)) {
             const existing = bankMap.get(q.id);
             bankMap.set(q.id, {
               ...q,
@@ -1634,7 +1658,7 @@ export const dataService = {
       Object.values(DEMO_QUESTIONS).forEach(qList => {
         if (Array.isArray(qList)) {
           qList.forEach(q => {
-            if (q && q.id && !bankMap.has(q.id)) {
+            if (q && q.id && !deletedSet.has(q.id) && !bankMap.has(q.id)) {
               bankMap.set(q.id, { ...q, test_id: 'bank' });
             }
           });
@@ -1682,7 +1706,7 @@ export const dataService = {
         const remoteData = await Promise.race([fetchPromise, timeoutPromise]);
         if (Array.isArray(remoteData) && remoteData.length > 0) {
           remoteData.forEach((q: any) => {
-            if (q && q.id) {
+            if (q && q.id && !deletedSet.has(q.id)) {
               const existing = bankMap.get(q.id);
               bankMap.set(q.id, {
                 ...existing,
@@ -1719,6 +1743,16 @@ export const dataService = {
       const local = await dataService.getAllQuestionBank();
       return { success: true, totalCount: local.length, pulledFromCloud: 0 };
     }
+
+    // Load deleted blacklist
+    let deletedSet = new Set<string>();
+    try {
+      const rawBlacklist = localStorage.getItem(STORAGE_KEYS.DELETED_QUESTIONS);
+      if (rawBlacklist) {
+        const parsed = JSON.parse(rawBlacklist);
+        if (Array.isArray(parsed)) deletedSet = new Set(parsed);
+      }
+    } catch {}
 
     try {
       const fetchPromise = (async () => {
@@ -1773,7 +1807,7 @@ export const dataService = {
 
       const bankMap = new Map<string, Question>();
       masterBank.forEach(q => {
-        if (q && q.id) bankMap.set(q.id, q);
+        if (q && q.id && !deletedSet.has(q.id)) bankMap.set(q.id, q);
       });
 
       // Also merge test questions
@@ -1785,7 +1819,7 @@ export const dataService = {
       Object.values(questionsMap).forEach(qList => {
         if (Array.isArray(qList)) {
           qList.forEach(q => {
-            if (q && q.id && !bankMap.has(q.id)) {
+            if (q && q.id && !deletedSet.has(q.id) && !bankMap.has(q.id)) {
               bankMap.set(q.id, q);
             }
           });
@@ -1796,7 +1830,7 @@ export const dataService = {
       let pulledCount = 0;
       if (Array.isArray(remoteQuestions)) {
         remoteQuestions.forEach((q: any) => {
-          if (q && q.id) {
+          if (q && q.id && !deletedSet.has(q.id)) {
             const existing = bankMap.get(q.id);
             const cleanQ: Question = {
               ...existing,
@@ -1850,6 +1884,19 @@ export const dataService = {
       quality_score: question.quality_score !== undefined ? Number(question.quality_score) : 90,
       created_at: question.created_at || new Date().toISOString()
     };
+
+    // Remove from blacklist if previously deleted
+    try {
+      const rawBlacklist = localStorage.getItem(STORAGE_KEYS.DELETED_QUESTIONS);
+      if (rawBlacklist) {
+        const parsed = JSON.parse(rawBlacklist);
+        if (Array.isArray(parsed)) {
+          const updated = parsed.filter(id => id !== validQId && id !== question.id);
+          localStorage.setItem(STORAGE_KEYS.DELETED_QUESTIONS, JSON.stringify(updated));
+        }
+      }
+    } catch {}
+
     syncToQuestionBankMaster([cleanQ]);
 
     // Persist immediately to Supabase
@@ -1884,29 +1931,113 @@ export const dataService = {
     return cleanQ;
   },
 
-  // Deletes question permanently from Question Bank Master.
-  // Only called when admin deletes from Question Bank tab.
-  deleteQuestionFromBank: async (questionId: string): Promise<void> => {
-    // 1. Remove from local Question Bank Master storage
-    const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
-    let masterBank: Question[] = [];
+  // Batch delete questions from Question Bank Master, all Mock Tests, and Supabase Cloud
+  deleteQuestionsFromBankBatch: async (
+    questionIds: string[],
+    retainedQuestionMap?: Map<string, Question>
+  ): Promise<{ success: boolean; count: number }> => {
+    if (!questionIds || questionIds.length === 0) return { success: true, count: 0 };
+    const idsToDeleteSet = new Set(questionIds);
+
+    // 1. Maintain persistent blacklist so deleted IDs are never re-imported or resurrected
     try {
-      masterBank = rawBank ? JSON.parse(rawBank) : [];
-      if (!Array.isArray(masterBank)) masterBank = [];
-    } catch {}
+      const rawBlacklist = localStorage.getItem(STORAGE_KEYS.DELETED_QUESTIONS);
+      let blacklist: string[] = rawBlacklist ? JSON.parse(rawBlacklist) : [];
+      if (!Array.isArray(blacklist)) blacklist = [];
+      const updatedBlacklist = Array.from(new Set([...blacklist, ...questionIds]));
+      localStorage.setItem(STORAGE_KEYS.DELETED_QUESTIONS, JSON.stringify(updatedBlacklist.slice(-50000)));
+    } catch (e) {
+      console.warn('Failed to update deleted questions blacklist:', e);
+    }
 
-    const filtered = masterBank.filter(q => q.id !== questionId);
-    localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(filtered));
+    // 2. Remove from local Question Bank Master storage (STORAGE_KEYS.QUESTION_BANK)
+    try {
+      const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+      let masterBank: Question[] = rawBank ? JSON.parse(rawBank) : [];
+      if (Array.isArray(masterBank)) {
+        const filteredBank = masterBank.filter(q => !idsToDeleteSet.has(q.id));
+        localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(filteredBank));
+      }
+    } catch (e) {
+      console.warn('Failed to update question bank master:', e);
+    }
 
-    // 2. Remove from Supabase if stored
+    // 3. Remove / Relink from all Mock Tests in local cache (STORAGE_KEYS.QUESTIONS)
+    try {
+      const rawQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+      let questionsMap: Record<string, Question[]> = rawQuestions ? JSON.parse(rawQuestions) : {};
+      let changed = false;
+
+      Object.entries(questionsMap).forEach(([testId, qList]) => {
+        if (Array.isArray(qList)) {
+          const hasAny = qList.some(q => idsToDeleteSet.has(q.id));
+          if (hasAny) {
+            changed = true;
+            const updatedList: Question[] = [];
+            const seenIdsInTest = new Set<string>();
+
+            qList.forEach(q => {
+              if (!idsToDeleteSet.has(q.id)) {
+                updatedList.push(q);
+                seenIdsInTest.add(q.id);
+              } else if (retainedQuestionMap && retainedQuestionMap.has(q.id)) {
+                const retainedBest = retainedQuestionMap.get(q.id)!;
+                if (retainedBest && retainedBest.id && !seenIdsInTest.has(retainedBest.id)) {
+                  updatedList.push({
+                    ...retainedBest,
+                    test_id: testId,
+                    marks: q.marks || retainedBest.marks || 1,
+                    negative_marks: q.negative_marks !== undefined ? q.negative_marks : retainedBest.negative_marks || 0,
+                  });
+                  seenIdsInTest.add(retainedBest.id);
+                }
+              }
+            });
+
+            const finalized = updatedList.map((q, idx) => ({ ...q, question_number: idx + 1 }));
+            questionsMap[testId] = finalized;
+          }
+        }
+      });
+
+      if (changed) {
+        localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+      }
+    } catch (e) {
+      console.warn('Failed to clean mock test questions map:', e);
+    }
+
+    // 4. Delete permanently from Supabase Cloud
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase && isValidUUID(questionId)) {
+    if (isSupabaseConfigured() && supabase) {
       try {
-        await supabase.from('questions').delete().eq('id', questionId);
+        const validUUIDs = questionIds.filter(id => isValidUUID(id));
+        if (validUUIDs.length > 0) {
+          for (let i = 0; i < validUUIDs.length; i += 500) {
+            const batch = validUUIDs.slice(i, i + 500);
+            await supabase.from('questions').delete().in('id', batch);
+          }
+        }
+        const nonUUIDs = questionIds.filter(id => !isValidUUID(id));
+        if (nonUUIDs.length > 0) {
+          try {
+            for (let i = 0; i < nonUUIDs.length; i += 500) {
+              const batch = nonUUIDs.slice(i, i + 500);
+              await supabase.from('questions').delete().in('id', batch);
+            }
+          } catch {}
+        }
       } catch (e) {
-        console.error('Supabase deleteQuestionFromBank error:', e);
+        console.warn('Supabase batch delete error:', e);
       }
     }
+
+    return { success: true, count: questionIds.length };
+  },
+
+  // Deletes question permanently from Question Bank Master.
+  deleteQuestionFromBank: async (questionId: string): Promise<void> => {
+    await dataService.deleteQuestionsFromBankBatch([questionId]);
   },
 
   createTestFromQuestions: async (
