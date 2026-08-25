@@ -31,7 +31,14 @@ import {
   Languages,
   Tag,
   FolderKanban,
-  Cpu
+  Cpu,
+  Plus,
+  ExternalLink,
+  Share2,
+  Copy,
+  CheckCircle,
+  Rocket,
+  Award
 } from 'lucide-react';
 import {
   pdfOcrEngine,
@@ -47,7 +54,7 @@ import {
   getAllCanonicalSubjectNames,
   getCanonicalChaptersForSubject
 } from '../../utils/taxonomyCanonicalizer';
-import { dataService, parseSafeNumber } from '../../services/dataService';
+import { dataService, parseSafeNumber, generateUUID, syncToQuestionBankMaster } from '../../services/dataService';
 import { aiService } from '../../services/aiService';
 import { Test, Question } from '../../types';
 
@@ -95,8 +102,19 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
   const [languageMode, setLanguageMode] = useState<'auto' | 'bilingual' | 'english' | 'hindi'>('auto');
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState<string>('all');
 
-  // Destination Target
+  // Destination Target & Tests List
   const [targetDestination, setTargetDestination] = useState<string>(testId || 'bank');
+  const [testList, setTestList] = useState<Test[]>(availableTests);
+
+  useEffect(() => {
+    if (availableTests && availableTests.length > 0) {
+      setTestList(availableTests);
+    } else {
+      dataService.getTests(true).then((res) => {
+        if (Array.isArray(res)) setTestList(res);
+      });
+    }
+  }, [availableTests, isOpen]);
 
   // Step 2: Processing State
   const [isProcessing, setIsProcessing] = useState(false);
@@ -118,6 +136,28 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
   const [dualLangProgress, setDualLangProgress] = useState<{ current: number; total: number; message: string } | null>(null);
   const [convertingSingleIdx, setConvertingSingleIdx] = useState<number | null>(null);
   const [isConvertingDraft, setIsConvertingDraft] = useState(false);
+
+  // Create Mock Test Modal State
+  const [isCreateTestModalOpen, setIsCreateTestModalOpen] = useState(false);
+  const [isCreatingTest, setIsCreatingTest] = useState(false);
+  const [newTestForm, setNewTestForm] = useState({
+    title: '',
+    category: 'Police Exam',
+    subject: 'General Studies',
+    duration_minutes: 60,
+    marks_per_question: 1,
+    negative_marking: 0.25,
+    passing_marks: 24,
+    is_published: true,
+    sync_to_bank: true,
+    scope: 'all' as 'all' | 'selected',
+  });
+  const [createdTestResult, setCreatedTestResult] = useState<{
+    test: Test;
+    questionCount: number;
+    shareUrl: string;
+  } | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   // Available Canonical lists
   const canonicalSubjects = getAllCanonicalSubjectNames();
@@ -569,6 +609,154 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
   const uniqueDetectedSubjects = Object.keys(subjectDistributionMap);
 
   const selectedCount = extractedQuestions.filter((q) => q.selected).length;
+
+  // Open Create Mock Test Dialog with intelligent defaults
+  const handleOpenCreateTestModal = () => {
+    const cleanTitle = pdfFile?.name
+      ? pdfFile.name.replace(/\.pdf$/i, '').replace(/[_\-\.]+/g, ' ').trim()
+      : 'New Mock Test Paper';
+
+    const formattedTitle = cleanTitle.charAt(0).toUpperCase() + cleanTitle.slice(1);
+    const topSubject = uniqueDetectedSubjects[0] || defaultSubject || 'General Studies';
+    const count = selectedCount > 0 ? selectedCount : extractedQuestions.length;
+    const dur = Math.max(15, Math.min(180, count > 0 ? count : 60));
+    const marks = 1;
+    const pass = Math.round(count * marks * 0.4);
+
+    setNewTestForm({
+      title: formattedTitle || 'New Exam Mock Test',
+      category: formattedTitle.toLowerCase().includes('police')
+        ? 'Police Exam'
+        : formattedTitle.toLowerCase().includes('ssc')
+        ? 'SSC'
+        : formattedTitle.toLowerCase().includes('teaching')
+        ? 'Teaching Exam'
+        : 'Competitive Exam',
+      subject: topSubject,
+      duration_minutes: dur,
+      marks_per_question: marks,
+      negative_marking: 0.25,
+      passing_marks: pass,
+      is_published: true,
+      sync_to_bank: true,
+      scope: selectedCount > 0 && selectedCount < extractedQuestions.length ? 'selected' : 'all',
+    });
+    setIsCreateTestModalOpen(true);
+  };
+
+  // Submit and Create New Mock Test from Extracted MCQs
+  const handleCreateMockTestSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newTestForm.title.trim()) {
+      notify('error', 'Please enter a Mock Test Title.');
+      return;
+    }
+
+    const targetList =
+      newTestForm.scope === 'selected'
+        ? extractedQuestions.filter((q) => q.selected)
+        : extractedQuestions;
+
+    if (targetList.length === 0) {
+      notify('error', 'No questions available to add to the new mock test.');
+      return;
+    }
+
+    setIsCreatingTest(true);
+    try {
+      const totalQ = targetList.length;
+      const marksPerQ = parseSafeNumber(newTestForm.marks_per_question, 1);
+      const totalMarks = totalQ * marksPerQ;
+      const passMarks = parseSafeNumber(newTestForm.passing_marks, Math.round(totalMarks * 0.4));
+      const negMarks = parseSafeNumber(newTestForm.negative_marking, 0.25);
+      const durMins = parseSafeNumber(newTestForm.duration_minutes, 60);
+
+      const newTestId = generateUUID();
+      const cleanSlug = (newTestForm.title || `mock-test-${Date.now()}`)
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/(^-|-$)+/g, '');
+      const cleanCode = `TEST-${Math.floor(1000 + Math.random() * 9000)}`;
+
+      const newTestObj: Test = {
+        id: newTestId,
+        title: newTestForm.title.trim(),
+        slug: cleanSlug,
+        test_code: cleanCode,
+        category: newTestForm.category || 'Competitive Exam',
+        subject: newTestForm.subject || 'General Studies',
+        description: `Directly created from PDF extraction: ${pdfFile?.name || 'Document OCR'} (${totalQ} MCQs)`,
+        duration_minutes: durMins,
+        total_questions: totalQ,
+        marks_per_question: marksPerQ,
+        total_marks: totalMarks,
+        passing_marks: passMarks,
+        negative_marking: negMarks,
+        instructions: '1. All questions are mandatory.\n2. Read options carefully before submitting.\n3. Timer will automatically submit test upon completion.',
+        status: newTestForm.is_published ? 'published' : 'draft',
+        is_published: newTestForm.is_published,
+        social_gate_enabled: true,
+        anti_cheating_enabled: true,
+        randomize_questions: false,
+        randomize_options: false,
+        max_attempts_per_student: 0,
+        enable_leaderboard: true,
+        show_result_immediately: true,
+        show_explanation: true,
+        show_correct_answers: true,
+        allow_back_navigation: true,
+        allow_mark_for_review: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      // 1. Save Test in dataService
+      const savedTest = await dataService.saveTest(newTestObj);
+
+      // 2. Convert questions to GradeUp format with the test's marks & negative marking
+      const convertedQuestions = pdfOcrEngine.convertToGradeUpQuestions(
+        targetList,
+        savedTest.id,
+        marksPerQ,
+        negMarks,
+        1,
+        standardizeTaxonomy
+      );
+
+      // 3. Save questions to the new test
+      await dataService.saveQuestions(savedTest.id, convertedQuestions);
+
+      // 4. If sync_to_bank enabled, sync to master question bank as well
+      if (newTestForm.sync_to_bank) {
+        syncToQuestionBankMaster(convertedQuestions);
+      }
+
+      // Refresh test list
+      const updatedTests = await dataService.getTests(true);
+      setTestList(updatedTests);
+      setTargetDestination(savedTest.id);
+
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      const shareUrl = `${origin}/?t=${encodeURIComponent(savedTest.slug || savedTest.test_code)}`;
+
+      notify('success', `🎉 Mock Test "${savedTest.title}" created with ${convertedQuestions.length} MCQs!`);
+
+      setCreatedTestResult({
+        test: savedTest,
+        questionCount: convertedQuestions.length,
+        shareUrl,
+      });
+
+      setIsCreateTestModalOpen(false);
+      onSuccessImport(convertedQuestions.length);
+    } catch (err: any) {
+      console.error('Failed to create mock test:', err);
+      notify('error', 'Mock Test creation failed: ' + (err?.message || err));
+    } finally {
+      setIsCreatingTest(false);
+    }
+  };
 
   return (
     <Modal
@@ -1151,6 +1339,103 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
 
             </div>
 
+            {/* SUCCESS BANNER WHEN MOCK TEST CREATED */}
+            {createdTestResult && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border-2 border-emerald-500/30 dark:border-emerald-500/20 text-xs animate-fadeIn">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-md shrink-0">
+                      <Rocket className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-sm text-emerald-800 dark:text-emerald-300">
+                          🎉 Mock Test Created Successfully!
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-black text-[10px]">
+                          {createdTestResult.questionCount} MCQs Attached
+                        </span>
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-400 mt-0.5">
+                        Test: <strong className="text-slate-900 dark:text-white font-bold">{createdTestResult.test.title}</strong> • Code: <code className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-indigo-600 font-mono text-[11px]">{createdTestResult.test.test_code}</code>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(createdTestResult.shareUrl);
+                        setCopiedLink(true);
+                        setTimeout(() => setCopiedLink(false), 2500);
+                        notify('info', 'Mock Test direct URL copied to clipboard!');
+                      }}
+                      className="px-3 py-1.5 rounded-xl border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 text-emerald-700 dark:text-emerald-300 font-bold flex items-center gap-1.5 shadow-xs cursor-pointer hover:bg-emerald-50"
+                    >
+                      {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedLink ? 'Link Copied!' : 'Copy Direct Link'}</span>
+                    </button>
+
+                    <a
+                      href={`/?t=${encodeURIComponent(createdTestResult.test.slug || createdTestResult.test.test_code)}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black flex items-center gap-1.5 shadow-xs cursor-pointer transition-transform hover:scale-[1.02]"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Take / Preview Test</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* DESTINATION SELECTION & DIRECT MOCK TEST CREATOR BAR */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/80 to-purple-50/80 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border border-indigo-100 dark:border-indigo-900/50 shadow-xs">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                  <BookOpen className="w-4 h-4" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-xs text-slate-800 dark:text-slate-200">
+                      Import Destination:
+                    </span>
+                    <span className="text-[11px] font-medium text-slate-500 truncate">
+                      {targetDestination === 'bank'
+                        ? '📚 Master Question Bank'
+                        : `📝 Test: ${testList.find((t) => t.id === targetDestination)?.title || targetDestination}`}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 mt-1">
+                    <select
+                      value={targetDestination}
+                      onChange={(e) => setTargetDestination(e.target.value)}
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-semibold text-slate-800 dark:text-slate-200"
+                    >
+                      <option value="bank">📚 Master Question Bank (All Tests)</option>
+                      {testList.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          📝 Existing Test: {t.title} ({t.category})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* DIRECT CREATE MOCK TEST BUTTON */}
+              <button
+                type="button"
+                onClick={handleOpenCreateTestModal}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:to-purple-700 text-white text-xs font-black shadow-md cursor-pointer transition-all hover:scale-[1.02] shrink-0"
+              >
+                <Plus className="w-4 h-4" />
+                <span>✨ Create Mock Test (सीधे नया टेस्ट बनाएं)</span>
+              </button>
+            </div>
+
             {/* ACTION TOOLBAR & FILTER TABS */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-800/60 p-3 rounded-2xl border border-slate-200 dark:border-slate-700">
               
@@ -1218,6 +1503,15 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
 
               {/* Search & Export & Batch Tools */}
               <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleOpenCreateTestModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-950/60 dark:to-purple-950/60 hover:from-indigo-100 hover:to-purple-100 text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-xs cursor-pointer transition-all"
+                  title="Create a new Mock Test directly with extracted MCQs"
+                >
+                  <Plus className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Create Mock Test</span>
+                </button>
+
                 <button
                   onClick={() => handleBatchConvertToDualLanguage('all')}
                   disabled={isConvertingDualLang || extractedQuestions.length === 0}
@@ -1665,32 +1959,46 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                 onClick={() => {
                   setExtractedQuestions([]);
                   setSummary(null);
+                  setCreatedTestResult(null);
                 }}
                 className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
               >
                 ← Extract Another PDF
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                 >
                   Close
                 </button>
 
+                {/* Create Mock Test CTA */}
+                <button
+                  type="button"
+                  onClick={handleOpenCreateTestModal}
+                  disabled={selectedCount === 0 || isSaving || isCreatingTest}
+                  className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 cursor-pointer hover:scale-[1.02]"
+                  title="Directly create a new Mock Test with extracted MCQs"
+                >
+                  <Rocket className="w-4 h-4" />
+                  <span>✨ Create Mock Test ({selectedCount} MCQs)</span>
+                </button>
+
+                {/* Import into Selected Destination */}
                 <button
                   type="button"
                   onClick={handleConfirmImport}
-                  disabled={selectedCount === 0 || isSaving}
-                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+                  disabled={selectedCount === 0 || isSaving || isCreatingTest}
+                  className="px-5 py-2.5 bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 cursor-pointer"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>
                     {isSaving
                       ? 'Saving into Database...'
-                      : `Confirm & Import ${selectedCount} MCQs into ${targetDestination === 'bank' ? 'Question Bank' : 'Mock Test'}`}
+                      : `Import into ${targetDestination === 'bank' ? 'Question Bank' : 'Selected Test'}`}
                   </span>
                 </button>
               </div>
@@ -1700,30 +2008,280 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
         )}
 
       </div>
+
+      {/* CREATE MOCK TEST SUB-MODAL */}
+      <Modal
+        isOpen={isCreateTestModalOpen}
+        onClose={() => !isCreatingTest && setIsCreateTestModalOpen(false)}
+        title="Create New Mock Test from Extracted MCQs (सीधे नया टेस्ट बनाएं)"
+        maxWidth="2xl"
+      >
+        <form onSubmit={handleCreateMockTestSubmit} className="space-y-4 text-xs">
+          {/* Banner Info */}
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-pink-50 dark:from-indigo-950/40 dark:via-purple-950/40 dark:to-pink-950/40 border border-indigo-200 dark:border-indigo-800/60 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-md">
+              <Rocket className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="font-black text-slate-900 dark:text-white text-sm">
+                Instant Mock Test Generator
+              </div>
+              <p className="text-slate-600 dark:text-slate-400 text-[11px]">
+                Extracted PDF questions will be directly converted into a fully playable test with auto-grading, anti-cheating, timer, and leaderboard.
+              </p>
+            </div>
+          </div>
+
+          {/* Test Title */}
+          <div className="space-y-1">
+            <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
+              <span>Test Title / Name</span>
+              <span className="text-rose-500">*</span>
+            </label>
+            <input
+              type="text"
+              value={newTestForm.title}
+              onChange={(e) => setNewTestForm((prev) => ({ ...prev, title: e.target.value }))}
+              placeholder="e.g. HP Police Constable Full Mock Test 2026"
+              className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold text-xs focus:ring-2 focus:ring-indigo-500"
+              required
+            />
+          </div>
+
+          {/* Category & Subject */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 dark:text-slate-300">Exam Category</label>
+              <select
+                value={newTestForm.category}
+                onChange={(e) => setNewTestForm((prev) => ({ ...prev, category: e.target.value }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+              >
+                <option value="Police Exam">👮 Police Exam (HP/UP/Delhi/SSC GD)</option>
+                <option value="Himachal Exams">🏔️ Himachal Pradesh Exams (HPPSC / HPSSB)</option>
+                <option value="SSC">🏛️ SSC (CGL / CHSL / MTS / GD)</option>
+                <option value="State PSC">🎖️ State PSC / Civil Services</option>
+                <option value="Teaching Exam">📚 Teaching / TET / CTET / JBT</option>
+                <option value="Defence / Army">🪖 Defence / CDS / NDA / Army</option>
+                <option value="Banking & Insurance">🏦 Banking & Insurance (IBPS / SBI / RBI)</option>
+                <option value="Railways RRB">🚆 Railways (RRB NTPC / Group D)</option>
+                <option value="General Knowledge / GS">🌐 General Knowledge & GS</option>
+                <option value="Competitive Exam">🎯 Other Competitive Exam</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 dark:text-slate-300">Primary Subject</label>
+              <select
+                value={newTestForm.subject}
+                onChange={(e) => setNewTestForm((prev) => ({ ...prev, subject: e.target.value }))}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+              >
+                {canonicalSubjects.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Timing & Scoring Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-2xl border border-slate-200 dark:border-slate-700/60">
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-indigo-500" />
+                <span>Duration (Min)</span>
+              </label>
+              <input
+                type="number"
+                min="1"
+                max="360"
+                value={newTestForm.duration_minutes}
+                onChange={(e) => setNewTestForm((prev) => ({ ...prev, duration_minutes: Number(e.target.value) }))}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-semibold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                <Award className="w-3 h-3 text-emerald-500" />
+                <span>Marks / Q</span>
+              </label>
+              <input
+                type="number"
+                step="0.25"
+                min="0.25"
+                value={newTestForm.marks_per_question}
+                onChange={(e) => {
+                  const marks = Number(e.target.value);
+                  const count = newTestForm.scope === 'selected' ? selectedCount : extractedQuestions.length;
+                  setNewTestForm((prev) => ({
+                    ...prev,
+                    marks_per_question: marks,
+                    passing_marks: Math.round(count * marks * 0.4),
+                  }));
+                }}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-semibold"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                <AlertTriangle className="w-3 h-3 text-rose-500" />
+                <span>Negative Mark</span>
+              </label>
+              <select
+                value={newTestForm.negative_marking}
+                onChange={(e) => setNewTestForm((prev) => ({ ...prev, negative_marking: Number(e.target.value) }))}
+                className="w-full px-2 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-semibold"
+              >
+                <option value="0">0 (None)</option>
+                <option value="0.25">-0.25 (1/4)</option>
+                <option value="0.33">-0.33 (1/3)</option>
+                <option value="0.5">-0.50 (1/2)</option>
+                <option value="1">-1.00</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1">
+                <CheckCircle className="w-3 h-3 text-blue-500" />
+                <span>Pass Marks</span>
+              </label>
+              <input
+                type="number"
+                value={newTestForm.passing_marks}
+                onChange={(e) => setNewTestForm((prev) => ({ ...prev, passing_marks: Number(e.target.value) }))}
+                className="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-white text-xs font-semibold"
+              />
+            </div>
+          </div>
+
+          {/* Questions Scope Selection */}
+          <div className="space-y-1.5">
+            <label className="font-bold text-slate-700 dark:text-slate-300">Questions to Include</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const count = extractedQuestions.length;
+                  setNewTestForm((prev) => ({
+                    ...prev,
+                    scope: 'all',
+                    passing_marks: Math.round(count * prev.marks_per_question * 0.4),
+                  }));
+                }}
+                className={`p-2.5 rounded-xl border text-left flex items-center justify-between cursor-pointer transition-all ${
+                  newTestForm.scope === 'all'
+                    ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 ring-1 ring-indigo-500'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                }`}
+              >
+                <div>
+                  <div className="font-bold">All Extracted MCQs</div>
+                  <div className="text-[11px] text-slate-500">Include all questions</div>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 font-black text-xs">
+                  {extractedQuestions.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const count = selectedCount > 0 ? selectedCount : extractedQuestions.length;
+                  setNewTestForm((prev) => ({
+                    ...prev,
+                    scope: 'selected',
+                    passing_marks: Math.round(count * prev.marks_per_question * 0.4),
+                  }));
+                }}
+                className={`p-2.5 rounded-xl border text-left flex items-center justify-between cursor-pointer transition-all ${
+                  newTestForm.scope === 'selected'
+                    ? 'border-indigo-600 bg-indigo-50/70 dark:bg-indigo-950/40 text-indigo-900 dark:text-indigo-200 ring-1 ring-indigo-500'
+                    : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                }`}
+              >
+                <div>
+                  <div className="font-bold">Selected Only</div>
+                  <div className="text-[11px] text-slate-500">Only selected checkboxes</div>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 font-black text-xs">
+                  {selectedCount}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Options: Publish & Sync to Bank */}
+          <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 space-y-2">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={newTestForm.sync_to_bank}
+                onChange={(e) => setNewTestForm((prev) => ({ ...prev, sync_to_bank: e.target.checked }))}
+                className="rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer"
+              />
+              <div>
+                <span className="font-bold text-slate-800 dark:text-slate-200">
+                  Also copy questions into Master Question Bank
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Recommended: Makes these MCQs reusable for other tests and practice sets.
+                </p>
+              </div>
+            </label>
+
+            <label className="flex items-center gap-2 cursor-pointer pt-1.5 border-t border-slate-200 dark:border-slate-700/50">
+              <input
+                type="checkbox"
+                checked={newTestForm.is_published}
+                onChange={(e) => setNewTestForm((prev) => ({ ...prev, is_published: e.target.checked }))}
+                className="rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
+              />
+              <div>
+                <span className="font-bold text-slate-800 dark:text-slate-200">
+                  Publish immediately (Live for Students)
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                  If unchecked, the test will be saved as Draft in Admin.
+                </p>
+              </div>
+            </label>
+          </div>
+
+          {/* Modal Action Buttons */}
+          <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+            <button
+              type="button"
+              onClick={() => setIsCreateTestModalOpen(false)}
+              disabled={isCreatingTest}
+              className="px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              disabled={isCreatingTest || !newTestForm.title.trim()}
+              className="px-5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:to-purple-700 text-white font-black text-xs shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-all hover:scale-[1.02]"
+            >
+              {isCreatingTest ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Creating Mock Test...</span>
+                </>
+              ) : (
+                <>
+                  <Rocket className="w-3.5 h-3.5" />
+                  <span>Create & Launch Mock Test ({newTestForm.scope === 'selected' ? selectedCount : extractedQuestions.length} MCQs)</span>
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </Modal>
   );
 };
-
-function LanguagesIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <path d="m5 8 6 6" />
-      <path d="m4 14 6-6 2-3" />
-      <path d="M2 5h12" />
-      <path d="M7 2h1" />
-      <path d="m22 22-5-10-5 10" />
-      <path d="M14 18h6" />
-    </svg>
-  );
-}

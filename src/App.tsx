@@ -11,7 +11,6 @@ import { SocialGate } from './components/student/SocialGate';
 import { StudentRegistration, StudentRegistrationData } from './components/student/StudentRegistration';
 import { TestInterface } from './components/student/TestInterface';
 import { TestResult } from './components/student/TestResult';
-import { WelcomeModal } from './components/common/WelcomeModal';
 import { Test, Attempt } from './types';
 import { dataService } from './services/dataService';
 
@@ -37,7 +36,6 @@ export default function App() {
 
   // Modals & Toasts
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
-  const [isWelcomeModalOpen, setIsWelcomeModalOpen] = useState(true);
   const [toast, setToast] = useState<{ type: ToastType; message: string } | null>(null);
 
   useEffect(() => {
@@ -265,7 +263,6 @@ export default function App() {
           <StudentHome
             onSelectTest={handleSelectTest}
             onOpenAdmin={handleAdminNavClick}
-            onOpenWelcome={() => setIsWelcomeModalOpen(true)}
           />
         )}
 
@@ -342,12 +339,6 @@ export default function App() {
         isOpen={isSupabaseModalOpen}
         onClose={() => setIsSupabaseModalOpen(false)}
         onToast={showToast}
-      />
-
-      {/* WELCOME NOTE MODAL */}
-      <WelcomeModal
-        isOpen={isWelcomeModalOpen}
-        onClose={() => setIsWelcomeModalOpen(false)}
       />
 
       {/* TOAST POPUP NOTIFICATION */}
