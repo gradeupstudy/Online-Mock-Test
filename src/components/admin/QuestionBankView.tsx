@@ -37,6 +37,9 @@ import { BulkAIExplanationModal } from './BulkAIExplanationModal';
 import { DuplicateTrackerModal } from './DuplicateTrackerModal';
 import { CompletePDFImportModal } from './CompletePDFImportModal';
 import { detectDuplicateQuestions, DuplicateGroup } from '../../utils/duplicateDetector';
+import { detectSemanticVectorDuplicates, runSemanticVectorDeduplication, SemanticDuplicateGroup } from '../../utils/semanticVectorDeduplication';
+import { duxqeMutationEngine } from '../../services/duxqeMutationEngine';
+import { DUXQEMutateModal } from './DUXQEMutateModal';
 
 interface QuestionBankViewProps {
   onNavigateToTest?: (testId: string) => void;
@@ -75,6 +78,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [focusedDuplicateGroupId, setFocusedDuplicateGroupId] = useState<string | null>(null);
   const [inspectingQuestion, setInspectingQuestion] = useState<Question | null>(null);
+  const [mutatingQuestion, setMutatingQuestion] = useState<Question | null>(null);
   const [editingQuestion, setEditingQuestion] = useState<Partial<Question> | null>(null);
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [isCreateTestModalOpen, setIsCreateTestModalOpen] = useState(false);
@@ -125,10 +129,10 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
     )
   );
 
-  // ACCURATE MCQ DUPLICATE DETECTION ENGINE
-  // Analyzes Question Text, Option Signatures, and Permutations to prevent false positives
+  // SEMANTIC VECTOR DEDUPLICATION ENGINE
+  // Analyzes Question Text, TF-IDF / N-Gram Vector Cosine Signatures, and Option Permutations
   const duplicateAnalysis = React.useMemo(() => {
-    return detectDuplicateQuestions(questions);
+    return detectSemanticVectorDuplicates(questions);
   }, [questions]);
 
   const {
@@ -139,6 +143,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
     exactCount: exactDuplicateCount,
     shuffledCount: shuffledDuplicateCount,
     nearIdenticalCount: nearIdenticalDuplicateCount,
+    semanticCount: semanticDuplicateCount,
   } = duplicateAnalysis;
 
   // Filtered Questions List
@@ -168,6 +173,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   });
 
   // Auto-Deduplicate Bank: Keeps the highest quality version of each duplicate and removes redundant copies
+  // Plus DU-XQE Auto-Healing to preserve linked mock tests question counts!
   const handleAutoDeduplicateBank = async () => {
     if (duplicateGroups.length === 0) {
       onToast?.('info', 'No duplicate questions found in Question Bank!');
@@ -176,25 +182,41 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
 
     const redundantCount = duplicateGroups.reduce((acc, g) => acc + (g.questions.length - 1), 0);
     const confirmed = window.confirm(
-      `Clean Question Bank?\nFound ${totalDuplicateQuestionsCount} duplicate questions across ${duplicateGroups.length} groups.\n\nAuto-deduplicate will keep the BEST VERSION (highest QA score, detailed explanation & complete options) and remove ${redundantCount} redundant duplicate(s).\n\nDo you want to proceed?`
+      `Clean Question Bank with DU-XQE Auto-Healing?\n\nFound ${totalDuplicateQuestionsCount} duplicate questions across ${duplicateGroups.length} semantic groups.\n\nAuto-deduplicate will keep the BEST VERSION (highest QA score, detailed explanation & complete options) and remove ${redundantCount} redundant duplicate(s).\n\n✓ DU-XQE will automatically heal and refill all linked mock tests to maintain required question counts.\n\nDo you want to proceed?`
     );
     if (!confirmed) return;
 
     setIsDeduplicating(true);
     let removedCount = 0;
+    const deletedIds: string[] = [];
+    const retainedMap = new Map<string, Question>();
+
     try {
       for (const group of duplicateGroups) {
         const keepId = group.bestQuestionId;
+        const keptQ = group.questions.find((q) => q.id === keepId) || group.questions[0];
         const toDelete = group.questions.filter((q) => q.id !== keepId);
+
         for (const q of toDelete) {
           await dataService.deleteQuestionFromBank(q.id);
+          deletedIds.push(q.id);
+          retainedMap.set(q.id, keptQ);
           removedCount++;
+        }
+      }
+
+      // Trigger DU-XQE Auto-Heal
+      let healMsg = '';
+      if (deletedIds.length > 0) {
+        const healResult = await duxqeMutationEngine.autoHealAndRefillMockTests(deletedIds, retainedMap);
+        if (healResult.totalTestsAffected > 0) {
+          healMsg = ` (🧬 DU-XQE Auto-Healed ${healResult.totalTestsAffected} linked Mock Tests to keep full question counts).`;
         }
       }
 
       await loadBankData();
       setShowOnlyDuplicates(false);
-      onToast?.('success', `Successfully removed ${removedCount} duplicate question(s)! Best versions retained.`);
+      onToast?.('success', `Successfully removed ${removedCount} duplicate question(s)! Best versions retained${healMsg}`);
     } catch (err: any) {
       console.error('Auto deduplicate error:', err);
       onToast?.('error', 'Failed to auto deduplicate questions.');
@@ -1032,14 +1054,24 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                       <span>360° Inspect</span>
                     </button>
 
+                    {/* DU-XQE Mutate Button */}
+                    <button
+                      onClick={() => setMutatingQuestion(q)}
+                      className="px-2.5 py-1.5 bg-purple-100 dark:bg-purple-900/60 hover:bg-purple-200 dark:hover:bg-purple-800/60 text-purple-900 dark:text-purple-200 font-bold text-xs rounded-xl border border-purple-300 dark:border-purple-700 flex items-center gap-1 cursor-pointer transition-all shadow-xs"
+                      title="Mutate with DU-XQE: Generate a high-yield conceptual variant (Inverted negative framing, scenario-based, angle shift)"
+                    >
+                      <Zap className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
+                      <span>Mutate</span>
+                    </button>
+
                     {/* 1-Click AI Regenerate Question */}
                     <button
                       onClick={() => handleRegenerateBankQuestion(q)}
                       disabled={isRegeneratingQuestionId === q.id}
-                      className="px-2.5 py-1.5 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-xs rounded-xl border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer disabled:opacity-50 transition-all shadow-xs"
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs rounded-xl border border-slate-200 dark:border-slate-700 flex items-center gap-1 cursor-pointer disabled:opacity-50 transition-all shadow-xs"
                       title="Regenerate: Replace this MCQ with a fresh new AI question for this topic"
                     >
-                      <RefreshCw className={`w-3.5 h-3.5 text-purple-600 dark:text-purple-400 ${isRegeneratingQuestionId === q.id ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`w-3.5 h-3.5 text-slate-600 dark:text-slate-400 ${isRegeneratingQuestionId === q.id ? 'animate-spin' : ''}`} />
                       <span>{isRegeneratingQuestionId === q.id ? 'Regenerating...' : 'Regenerate'}</span>
                     </button>
 
@@ -1544,6 +1576,21 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
           setIsManualModalOpen(true);
         }}
       />
+
+      {/* DU-XQE MUTATE MODAL */}
+      {mutatingQuestion && (
+        <DUXQEMutateModal
+          isOpen={!!mutatingQuestion}
+          sourceQuestion={mutatingQuestion}
+          onClose={() => setMutatingQuestion(null)}
+          onSuccess={async (mutated) => {
+            await dataService.saveQuestionToBank(mutated);
+            onToast?.('success', `✨ Saved DU-XQE mutated variant into Question Bank!`);
+            await loadBankData();
+          }}
+          onToast={onToast}
+        />
+      )}
 
     </div>
   );

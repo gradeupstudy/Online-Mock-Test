@@ -179,7 +179,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Indian Polity",
-      chapter: "Constitutional Framework"
+      chapter: "Constitutional Framework",
+      topic: "Drafting Committee & Preamble",
+      difficulty: "Easy"
     },
     {
       id: "q-demo-2",
@@ -195,7 +197,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "HP General Knowledge",
-      chapter: "Geography of HP"
+      chapter: "Geography of HP",
+      topic: "Valleys & Landscapes",
+      difficulty: "Easy"
     },
     {
       id: "q-demo-3",
@@ -211,7 +215,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Reasoning",
-      chapter: "Number Series & Odd One Out"
+      chapter: "Number Series & Classification",
+      topic: "Cubes & Squares Classification",
+      difficulty: "Moderate"
     },
     {
       id: "q-demo-4",
@@ -227,7 +233,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Quantitative Aptitude",
-      chapter: "Averages"
+      chapter: "Arithmetic Foundations",
+      topic: "Averages & Inclusions",
+      difficulty: "Moderate"
     },
     {
       id: "q-demo-5",
@@ -243,7 +251,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "English Language",
-      chapter: "Vocabulary & Synonyms"
+      chapter: "Vocabulary",
+      topic: "Synonyms & Usage",
+      difficulty: "Easy"
     }
   ],
   "test-hppc-01": [
@@ -261,7 +271,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Indian Polity",
-      chapter: "Constitutional Framework"
+      chapter: "Constitutional Framework",
+      topic: "Drafting Committee & Preamble",
+      difficulty: "Easy"
     },
     {
       id: "q-hppc-2",
@@ -277,7 +289,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "HP General Knowledge",
-      chapter: "Geography of HP"
+      chapter: "Geography of HP",
+      topic: "Valleys & Landscapes",
+      difficulty: "Easy"
     },
     {
       id: "q-hppc-3",
@@ -293,7 +307,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Reasoning",
-      chapter: "Number Series & Odd One Out"
+      chapter: "Number Series & Classification",
+      topic: "Cubes & Squares Classification",
+      difficulty: "Moderate"
     },
     {
       id: "q-hppc-4",
@@ -309,7 +325,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Quantitative Aptitude",
-      chapter: "Averages"
+      chapter: "Arithmetic Foundations",
+      topic: "Averages & Inclusions",
+      difficulty: "Moderate"
     },
     {
       id: "q-hppc-5",
@@ -325,7 +343,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "English Language",
-      chapter: "Vocabulary & Synonyms"
+      chapter: "Vocabulary",
+      topic: "Synonyms & Usage",
+      difficulty: "Easy"
     },
     {
       id: "q-hppc-6",
@@ -340,8 +360,10 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       explanation: "हिमाचल प्रदेश का राज्य पशु हिम तेंदुआ (Snow Leopard) है।",
       marks: 1,
       negative_marks: 0.25,
-      subject: "Hindi / HP GK",
-      chapter: "State Symbols"
+      subject: "HP General Knowledge",
+      chapter: "State Symbols & Culture",
+      topic: "State Emblems",
+      difficulty: "Easy"
     },
     {
       id: "q-hppc-7",
@@ -357,7 +379,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Indian Polity",
-      chapter: "Fundamental Rights"
+      chapter: "Constitutional Framework",
+      topic: "Fundamental Rights & Article 32",
+      difficulty: "Hard"
     },
     {
       id: "q-hppc-8",
@@ -373,7 +397,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "HP General Knowledge",
-      chapter: "HP Administration"
+      chapter: "Geography of HP",
+      topic: "HP Administrative Divisions",
+      difficulty: "Easy"
     },
     {
       id: "q-hppc-9",
@@ -389,7 +415,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "Quantitative Aptitude",
-      chapter: "Time and Work"
+      chapter: "Arithmetic Foundations",
+      topic: "Time and Work Efficiency",
+      difficulty: "Moderate"
     },
     {
       id: "q-hppc-10",
@@ -405,7 +433,9 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       marks: 1,
       negative_marks: 0.25,
       subject: "English Language",
-      chapter: "Antonyms"
+      chapter: "Vocabulary",
+      topic: "Antonyms & Opposites",
+      difficulty: "Easy"
     }
   ],
   "test-hppat-02": [
@@ -422,8 +452,10 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       explanation: "Dr. Yashwant Singh Parmar served as the first Chief Minister of Himachal Pradesh from 1952 to 1956.",
       marks: 1,
       negative_marks: 0.25,
-      subject: "HP GK",
-      chapter: "Political History"
+      subject: "HP General Knowledge",
+      chapter: "Political History",
+      topic: "First in Himachal",
+      difficulty: "Easy"
     },
     {
       id: "q-hppat-2",
@@ -438,8 +470,10 @@ export const DEMO_QUESTIONS: Record<string, Question[]> = {
       explanation: "The Ravi river was known as Iravati in Sanskrit and Purushni in Vedic literature.",
       marks: 1,
       negative_marks: 0.25,
-      subject: "HP GK",
-      chapter: "Rivers of HP"
+      subject: "HP General Knowledge",
+      chapter: "Rivers & Lakes",
+      topic: "Vedic & Sanskrit Names of Rivers",
+      difficulty: "Moderate"
     }
   ]
 };

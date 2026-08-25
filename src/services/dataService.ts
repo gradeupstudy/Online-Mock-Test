@@ -92,12 +92,52 @@ export const normalizePlatformId = (id: string | null | undefined, name?: string
 const STORAGE_KEYS = {
   TESTS: 'gradeup_tests',
   QUESTIONS: 'gradeup_questions',
+  QUESTION_BANK: 'gradeup_question_bank_master',
   ATTEMPTS: 'gradeup_attempts',
   ANSWERS: 'gradeup_answers',
   SOCIAL: 'gradeup_social_platforms',
   SETTINGS: 'gradeup_admin_settings',
   ACTIVE_ATTEMPT: 'gradeup_active_attempt_',
   REPORTS: 'gradeup_question_reports'
+};
+
+// Helper: Ensure questions are permanently registered in Question Bank Master
+export const syncToQuestionBankMaster = (questionsToSync: Question[]): void => {
+  if (!Array.isArray(questionsToSync) || questionsToSync.length === 0) return;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+    let bankList: Question[] = [];
+    try {
+      bankList = raw ? JSON.parse(raw) : [];
+      if (!Array.isArray(bankList)) bankList = [];
+    } catch {
+      bankList = [];
+    }
+
+    const bankMap = new Map<string, Question>();
+    bankList.forEach(q => {
+      if (q && q.id) bankMap.set(q.id, q);
+    });
+
+    questionsToSync.forEach(q => {
+      if (!q || !q.question_text) return;
+      const qId = q.id || generateUUID();
+      const existing = bankMap.get(qId);
+      const cleanQ: Question = {
+        ...existing,
+        ...q,
+        id: qId,
+        test_id: 'bank',
+        inspection_status: q.inspection_status || existing?.inspection_status || 'verified',
+        quality_score: q.quality_score !== undefined ? Number(q.quality_score) : (existing?.quality_score ?? 90),
+      };
+      bankMap.set(qId, cleanQ);
+    });
+
+    localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(Array.from(bankMap.values())));
+  } catch (e) {
+    console.warn('Failed to sync to Question Bank Master:', e);
+  }
 };
 
 // Initialize local storage with default structure
@@ -108,6 +148,21 @@ const initLocalStorage = () => {
   }
   if (!localStorage.getItem(STORAGE_KEYS.QUESTIONS)) {
     localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(isRemoteActive ? {} : DEMO_QUESTIONS));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.QUESTION_BANK)) {
+    const initialBank: Question[] = [];
+    const seen = new Set<string>();
+    Object.values(DEMO_QUESTIONS).forEach(qList => {
+      if (Array.isArray(qList)) {
+        qList.forEach(q => {
+          if (q && q.id && !seen.has(q.id)) {
+            seen.add(q.id);
+            initialBank.push({ ...q, test_id: 'bank' });
+          }
+        });
+      }
+    });
+    localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(initialBank));
   }
   if (!localStorage.getItem(STORAGE_KEYS.ATTEMPTS)) {
     localStorage.setItem(STORAGE_KEYS.ATTEMPTS, JSON.stringify(isRemoteActive ? [] : DEMO_ATTEMPTS));
@@ -1431,7 +1486,7 @@ export const dataService = {
       try {
         await supabase.from('questions').delete().eq('test_id', targetTestId);
         if (sanitizedQuestions.length > 0) {
-          // Prepare DB safe questions to avoid schema mismatch errors if optional columns are absent in older schemas
+          // Prepare DB safe questions to include topic, difficulty, section
           const dbRows = sanitizedQuestions.map(q => ({
             id: q.id,
             test_id: q.test_id,
@@ -1448,11 +1503,34 @@ export const dataService = {
             negative_marks: q.negative_marks,
             subject: q.subject,
             chapter: q.chapter,
+            topic: q.topic || 'General Topic',
+            difficulty: q.difficulty || 'Medium',
+            section: q.section || 'General',
             created_at: q.created_at
           }));
           const { error } = await supabase.from('questions').insert(dbRows);
           if (error) {
-            console.error('Supabase save questions error:', error);
+            console.warn('Supabase save questions with topic/difficulty error, falling back to core columns:', error);
+            // Fallback for legacy Supabase tables without topic/difficulty columns
+            const legacyRows = sanitizedQuestions.map(q => ({
+              id: q.id,
+              test_id: q.test_id,
+              question_number: q.question_number,
+              question_text: q.question_text,
+              question_image: q.question_image,
+              option_a: q.option_a,
+              option_b: q.option_b,
+              option_c: q.option_c,
+              option_d: q.option_d,
+              correct_answer: q.correct_answer,
+              explanation: q.explanation,
+              marks: q.marks,
+              negative_marks: q.negative_marks,
+              subject: q.subject,
+              chapter: q.chapter,
+              created_at: q.created_at
+            }));
+            await supabase.from('questions').insert(legacyRows);
           }
         }
       } catch (e) {
@@ -1468,6 +1546,11 @@ export const dataService = {
     } catch {}
     questionsMap[targetTestId] = sanitizedQuestions;
     localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+
+    // 4. Automatically sync and safeguard all questions in Question Bank Master
+    if (sanitizedQuestions.length > 0) {
+      syncToQuestionBankMaster(sanitizedQuestions);
+    }
   },
 
   saveQuestion: async (testId: string, question: Question): Promise<Question> => {
@@ -1487,6 +1570,7 @@ export const dataService = {
     }
     questions.sort((a, b) => a.question_number - b.question_number);
     await dataService.saveQuestions(testId, questions);
+    syncToQuestionBankMaster([cleanQuestion]);
     return cleanQuestion;
   },
 
@@ -1494,16 +1578,9 @@ export const dataService = {
     return dataService.saveQuestion(question.test_id, question);
   },
 
+  // Unlink/Delete question from a specific Mock Test ONLY.
+  // The question remains 100% SAFE and intact in the Question Bank Master.
   deleteQuestion: async (testId: string, questionId: string): Promise<void> => {
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase && isValidUUID(questionId)) {
-      try {
-        await supabase.from('questions').delete().eq('id', questionId);
-      } catch (e) {
-        console.error('Supabase deleteQuestion error:', e);
-      }
-    }
-
     const questions = await dataService.getQuestions(testId, true);
     const filtered = questions.filter(q => q.id !== questionId);
     const reindexed = filtered.map((q, idx) => ({ ...q, question_number: idx + 1 }));
@@ -1514,6 +1591,58 @@ export const dataService = {
   // QUESTION BANK MASTER SYSTEM
   // ------------------------------------
   getAllQuestionBank: async (): Promise<Question[]> => {
+    // 1. Load Question Bank Master pool
+    const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+    let masterBank: Question[] = [];
+    try {
+      masterBank = rawBank ? JSON.parse(rawBank) : [];
+      if (!Array.isArray(masterBank)) masterBank = [];
+    } catch {
+      masterBank = [];
+    }
+
+    const bankMap = new Map<string, Question>();
+    masterBank.forEach(q => {
+      if (q && q.id) bankMap.set(q.id, { ...q, test_id: q.test_id || 'bank' });
+    });
+
+    // 2. Also merge questions from all existing mock tests
+    const rawQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+    let questionsMap: Record<string, Question[]> = {};
+    try {
+      questionsMap = rawQuestions ? JSON.parse(rawQuestions) : {};
+    } catch {}
+
+    Object.entries(questionsMap).forEach(([_, qList]) => {
+      if (Array.isArray(qList)) {
+        qList.forEach(q => {
+          if (q && q.id) {
+            const existing = bankMap.get(q.id);
+            bankMap.set(q.id, {
+              ...q,
+              ...existing,
+              id: q.id,
+              test_id: 'bank',
+            });
+          }
+        });
+      }
+    });
+
+    // 3. Fallback: Seed demo questions if bank is empty
+    if (bankMap.size === 0) {
+      Object.values(DEMO_QUESTIONS).forEach(qList => {
+        if (Array.isArray(qList)) {
+          qList.forEach(q => {
+            if (q && q.id && !bankMap.has(q.id)) {
+              bankMap.set(q.id, { ...q, test_id: 'bank' });
+            }
+          });
+        }
+      });
+    }
+
+    // 4. Supabase sync if connected
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
@@ -1521,42 +1650,52 @@ export const dataService = {
           .from('questions')
           .select('*')
           .order('created_at', { ascending: false });
-        if (!error && Array.isArray(data)) return data as Question[];
+        if (!error && Array.isArray(data)) {
+          data.forEach((q: any) => {
+            if (q && q.id && !bankMap.has(q.id)) {
+              bankMap.set(q.id, { ...q, test_id: 'bank' } as Question);
+            }
+          });
+        }
       } catch (e) {
         console.warn('Supabase all questions fetch error', e);
       }
     }
 
-    const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    let questionsMap: Record<string, Question[]> = {};
-    try {
-      questionsMap = raw ? JSON.parse(raw) : {};
-    } catch {}
-    
-    const allList: Question[] = [];
-    const seenIds = new Set<string>();
-
-    Object.entries(questionsMap).forEach(([_, qList]) => {
-      if (Array.isArray(qList)) {
-        qList.forEach(q => {
-          if (q && q.id && !seenIds.has(q.id)) {
-            seenIds.add(q.id);
-            allList.push(q);
-          }
-        });
-      }
-    });
-
-    return allList;
+    const unifiedList = Array.from(bankMap.values());
+    localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(unifiedList));
+    return unifiedList;
   },
 
   saveQuestionToBank: async (question: Question): Promise<Question> => {
-    const testId = question.test_id || 'bank';
-    const saved = await dataService.saveQuestion(testId, question);
-    return saved;
+    const validQId = isValidUUID(question.id) ? question.id : generateUUID();
+    const cleanQ: Question = {
+      ...question,
+      id: validQId,
+      test_id: 'bank',
+      inspection_status: question.inspection_status || 'verified',
+      quality_score: question.quality_score !== undefined ? Number(question.quality_score) : 90,
+      created_at: question.created_at || new Date().toISOString()
+    };
+    syncToQuestionBankMaster([cleanQ]);
+    return cleanQ;
   },
 
+  // Deletes question permanently from Question Bank Master.
+  // Only called when admin deletes from Question Bank tab.
   deleteQuestionFromBank: async (questionId: string): Promise<void> => {
+    // 1. Remove from local Question Bank Master storage
+    const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+    let masterBank: Question[] = [];
+    try {
+      masterBank = rawBank ? JSON.parse(rawBank) : [];
+      if (!Array.isArray(masterBank)) masterBank = [];
+    } catch {}
+
+    const filtered = masterBank.filter(q => q.id !== questionId);
+    localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(filtered));
+
+    // 2. Remove from Supabase if stored
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase && isValidUUID(questionId)) {
       try {
@@ -1565,21 +1704,6 @@ export const dataService = {
         console.error('Supabase deleteQuestionFromBank error:', e);
       }
     }
-
-    const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    let questionsMap: Record<string, Question[]> = {};
-    try {
-      questionsMap = raw ? JSON.parse(raw) : {};
-    } catch {}
-
-    let targetTestId = 'bank';
-    Object.entries(questionsMap).forEach(([tId, list]) => {
-      if (Array.isArray(list) && list.some(q => q.id === questionId)) {
-        targetTestId = tId;
-      }
-    });
-
-    await dataService.deleteQuestion(targetTestId, questionId);
   },
 
   createTestFromQuestions: async (

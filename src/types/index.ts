@@ -241,3 +241,164 @@ export interface QuestionReport {
   resolved_at?: string | null;
   created_at: string;
 }
+
+// ----------------------------------------------------
+// STUDENT PERSONALIZED PERFORMANCE ANALYTICS TYPES
+// ----------------------------------------------------
+
+export type PerformanceStatusCategory = 'strong' | 'average' | 'needs_improvement' | 'weak' | 'insufficient_data';
+
+export interface PerformanceStatusInfo {
+  status: PerformanceStatusCategory;
+  label: string; // 'Strong 🟢', 'Average 🟡', 'Needs Improvement 🟠', 'Weak 🔴', 'Insufficient Data'
+  badgeEmoji: string; // '🟢', '🟡', '🟠', '🔴', '⚪'
+  color: string; // hex / tailwind color identifier
+  badgeClass: string;
+  bgClass: string;
+  borderClass: string;
+  description: string;
+}
+
+export interface TopicPerformance {
+  subject: string;
+  chapter: string;
+  topic: string;
+  total_questions: number;
+  attempted: number;
+  correct: number;
+  incorrect: number;
+  skipped: number;
+  accuracy: number; // Percentage 0-100 based on attempted
+  has_sufficient_data: boolean; // True if attempted >= 3
+  status: PerformanceStatusInfo;
+}
+
+export interface ChapterPerformance {
+  subject: string;
+  chapter: string;
+  total_questions: number;
+  attempted: number;
+  correct: number;
+  incorrect: number;
+  skipped: number;
+  accuracy: number;
+  status: PerformanceStatusInfo;
+  topics: TopicPerformance[];
+}
+
+export interface SubjectPerformance {
+  subject: string;
+  total_questions: number;
+  attempted: number;
+  correct: number;
+  incorrect: number;
+  skipped: number;
+  accuracy: number;
+  score: number;
+  max_marks: number;
+  status: PerformanceStatusInfo;
+  avg_time_per_question?: number;
+  chapters: ChapterPerformance[];
+}
+
+export interface DifficultyPerformance {
+  difficulty: 'Easy' | 'Moderate' | 'Hard';
+  total_questions: number;
+  attempted: number;
+  correct: number;
+  incorrect: number;
+  skipped: number;
+  accuracy: number;
+  status: PerformanceStatusInfo;
+  recommendation: string;
+}
+
+export interface WeakAreaItem {
+  id: string;
+  subject: string;
+  chapter: string;
+  topic: string;
+  accuracy: number;
+  attempted: number;
+  incorrect: number;
+  total_questions: number;
+  status: PerformanceStatusInfo;
+  level: 'topic' | 'chapter';
+}
+
+export interface StrongAreaItem {
+  id: string;
+  subject: string;
+  chapter: string;
+  topic: string;
+  accuracy: number;
+  attempted: number;
+  correct: number;
+  total_questions: number;
+  status: PerformanceStatusInfo;
+  level: 'topic' | 'chapter';
+}
+
+export interface SpeedAnalysisSubjectItem {
+  subject: string;
+  avg_time_seconds: number;
+  accuracy: number;
+  insight: string;
+  pace: 'fast' | 'moderate' | 'slow';
+}
+
+export interface SpeedAnalysis {
+  total_time_seconds: number;
+  avg_time_per_question_seconds: number;
+  ideal_time_per_question_seconds: number;
+  pace_status: 'optimal' | 'fast' | 'slow';
+  subject_times: SpeedAnalysisSubjectItem[];
+  insights: string[];
+}
+
+export interface RecentAttemptHistoryItem {
+  id: string;
+  test_id: string;
+  test_title: string;
+  date: string;
+  score: number;
+  total_marks: number;
+  percentage: number;
+  accuracy: number;
+  time_taken_seconds: number;
+  status: PerformanceStatusInfo;
+}
+
+export interface CrossTestProgress {
+  has_history: boolean;
+  total_completed_tests: number;
+  previous_avg_accuracy: number;
+  current_accuracy: number;
+  improvement_delta: number; // e.g. +8.2 or -3.1
+  is_improved: boolean;
+  message: string;
+  recent_attempts: RecentAttemptHistoryItem[];
+}
+
+export interface PersonalizedStudentAnalytics {
+  attempt_id: string;
+  test_id: string;
+  student_name: string;
+  overall_score: number;
+  total_marks: number;
+  percentage: number;
+  overall_accuracy: number;
+  correct_answers: number;
+  wrong_answers: number;
+  skipped_questions: number;
+  total_questions: number;
+  attempted_questions: number;
+  time_taken_seconds: number;
+  overall_status: PerformanceStatusInfo;
+  subjects: SubjectPerformance[];
+  weakest_areas: WeakAreaItem[];
+  strongest_areas: StrongAreaItem[];
+  difficulty_breakdown: DifficultyPerformance[];
+  speed_analysis: SpeedAnalysis;
+  progress: CrossTestProgress;
+}

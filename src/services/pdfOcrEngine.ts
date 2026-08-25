@@ -3,6 +3,14 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { aiService } from './aiService';
 import { Question } from '../types';
 import { generateUUID } from './dataService';
+import {
+  canonicalizeSubject,
+  canonicalizeChapter,
+  normalizeQuestionTaxonomy,
+  getAllCanonicalSubjectNames,
+  getCanonicalChaptersForSubject,
+  MASTER_CANONICAL_TAXONOMY,
+} from '../utils/taxonomyCanonicalizer';
 
 // Configure pdfjs worker
 try {
@@ -70,6 +78,7 @@ export interface PDFProcessOptions {
   defaultSubject?: string;
   defaultChapter?: string;
   defaultTopic?: string;
+  standardizeTaxonomy?: boolean; // When true, normalizes subjects and chapters to master canonical taxonomy
   languageMode?: 'auto' | 'bilingual' | 'english' | 'hindi';
   ocrPrecision?: 'multimodal_vision' | 'fast_text' | 'auto';
   testId?: string;
@@ -279,6 +288,7 @@ export const pdfOcrEngine = {
       defaultSubject = 'General Studies',
       defaultChapter = 'General',
       defaultTopic = 'General Topic',
+      standardizeTaxonomy = true,
       languageMode = 'auto',
       onProgress,
       onLog,
@@ -350,6 +360,7 @@ export const pdfOcrEngine = {
           defaultSubject,
           defaultChapter,
           defaultTopic,
+          standardizeTaxonomy,
           languageMode,
           onLog,
         });
@@ -367,15 +378,16 @@ export const pdfOcrEngine = {
       totalPages: totalDocPages,
       questionsFound: allExtractedQuestions.length,
       phase: 'reconciling_answers',
-      statusMessage: 'Reconciling answer keys, sorting question sequence, and running AI validation audit...',
+      statusMessage: 'Reconciling answer keys, standardizing taxonomy, and running AI validation audit...',
       percentage: 93,
     });
 
-    onLog?.(`🧩 Reconciling extracted questions with document answer keys and running quality audit...`);
+    onLog?.(`🧩 Reconciling extracted questions with document answer keys, deduplicating & standardizing subjects/chapters...`);
 
     const finalQuestions = pdfOcrEngine.reconcileAndValidateQuestions(
       allExtractedQuestions,
       globalAnswerKeyMap,
+      standardizeTaxonomy,
       onLog
     );
 
@@ -436,10 +448,11 @@ export const pdfOcrEngine = {
     defaultSubject: string;
     defaultChapter: string;
     defaultTopic: string;
+    standardizeTaxonomy?: boolean;
     languageMode: 'auto' | 'bilingual' | 'english' | 'hindi';
     onLog?: (msg: string) => void;
   }): Promise<ExtractedPDFMCQ[]> => {
-    const { pages, globalAnswerKeyMap, defaultSubject, defaultChapter, defaultTopic, onLog } = params;
+    const { pages, globalAnswerKeyMap, defaultSubject, defaultChapter, defaultTopic, standardizeTaxonomy = true, onLog } = params;
 
     // Combine page texts with clear page boundary markers
     let combinedText = '';
@@ -465,6 +478,8 @@ export const pdfOcrEngine = {
     const answerKeyContext = relevantKeysList.length > 0
       ? `KNOWN GLOBAL ANSWER KEY MAPPINGS FROM DOCUMENT (for cross-checking):\n${relevantKeysList.slice(0, 50).join(', ')}`
       : 'No separate answer key table found yet; extract inline answers from the questions.';
+
+    const canonicalSubjectsList = getAllCanonicalSubjectNames().join(', ');
 
     const systemPrompt = `
 You are the world's most accurate Exam PDF Question Extraction & OCR Engine.
@@ -511,11 +526,14 @@ CRITICAL EXTRACTION RULES:
        - Set answer_status = "needs_review"
        - Add to validation_issues: "No answer found in document; requires admin review"
 
-4. METADATA & TAXONOMY:
+4. CRITICAL SUBJECT & CHAPTER TAXONOMY RULES (PREVENT DUPLICATE VARIATIONS):
+   - DO NOT create disparate/fragmented variations for subjects or chapters (e.g., use "History", NEVER "Indian History", "General History", or "History GK").
+   - DO NOT create disparate variations for chapters (e.g., use "Mauryan Empire", NEVER "MAuryan Dynesty", "The Mauryas", or "Maurya Dynasty").
+   - Choose Subject from the Standard Master Subjects: [${canonicalSubjectsList}] or use default: "${defaultSubject}".
+   - Default Subject: "${defaultSubject}"
+   - Default Chapter: "${defaultChapter}"
+   - Default Topic: "${defaultTopic}"
    - explanation: Extract the explanation if given in the text/solution, else null or concise rationale.
-   - subject: Classify subject (e.g., "${defaultSubject}", History, Geography, Polity, Science, Hindi, Mathematics, Reasoning, HP GK, English).
-   - chapter: Specific topic or chapter (e.g., "${defaultChapter}", Rivers, Articles of Constitution, Thermodynamics).
-   - topic: Specific micro-topic (e.g., "${defaultTopic}").
    - difficulty: "Easy" | "Medium" | "Hard" | "Moderate".
    - source_page: Integer page number where question starts (${pages[0].pageNumber}).
    - validation_status: "valid" (if complete with all 4 options & verified answer) | "needs_review" | "invalid".
@@ -663,6 +681,15 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
             valStatus = valStatus === 'invalid' ? 'invalid' : 'needs_review';
           }
 
+          // Apply Taxonomy Canonicalization
+          const rawSubj = item.subject || defaultSubject;
+          const rawChap = item.chapter || defaultChapter;
+          const rawTop = item.topic || defaultTopic;
+
+          const taxonomy = standardizeTaxonomy
+            ? normalizeQuestionTaxonomy({ subject: rawSubj, chapter: rawChap, topic: rawTop })
+            : { subject: rawSubj, chapter: rawChap, topic: rawTop };
+
           return {
             question_number: qNum,
             question_text: String(item.question_text || '').trim(),
@@ -675,9 +702,9 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
             answer_source: ansSource as any,
             answer_status: ansStatus as any,
             explanation: item.explanation ? String(item.explanation).trim() : null,
-            subject: item.subject || defaultSubject,
-            chapter: item.chapter || defaultChapter,
-            topic: item.topic || defaultTopic,
+            subject: taxonomy.subject,
+            chapter: taxonomy.chapter,
+            topic: taxonomy.topic,
             difficulty: item.difficulty || 'Moderate',
             source_page: srcPage,
             validation_status: valStatus as any,
@@ -697,6 +724,7 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
   reconcileAndValidateQuestions: (
     questions: ExtractedPDFMCQ[],
     globalAnswerKeyMap: Map<number, string>,
+    standardizeTaxonomy: boolean = true,
     onLog?: (msg: string) => void
   ): ExtractedPDFMCQ[] => {
     // 1. Sort by question_number, then by source_page
@@ -714,6 +742,18 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
     const deduplicated: ExtractedPDFMCQ[] = [];
 
     sorted.forEach((q) => {
+      // Standardize subject, chapter, topic if enabled
+      if (standardizeTaxonomy) {
+        const norm = normalizeQuestionTaxonomy({
+          subject: q.subject,
+          chapter: q.chapter,
+          topic: q.topic,
+        });
+        q.subject = norm.subject;
+        q.chapter = norm.chapter;
+        q.topic = norm.topic;
+      }
+
       // Normalize text for duplicate detection
       const normText = q.question_text.toLowerCase().replace(/[^a-z0-9\u0900-\u097F]/g, '');
       const key = `${q.question_number}_${normText.substring(0, 30)}`;
@@ -754,7 +794,7 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
       deduplicated.push(q);
     });
 
-    onLog?.(`✨ Reconciled questions: ${deduplicated.length} final MCQs after document deduplication.`);
+    onLog?.(`✨ Reconciled questions: ${deduplicated.length} final MCQs after document deduplication & taxonomy standardization.`);
     return deduplicated;
   },
 
@@ -766,7 +806,8 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
     targetTestId: string,
     marksPerQuestion: number = 1,
     negativeMarks: number = 0,
-    startQuestionNumber: number = 1
+    startQuestionNumber: number = 1,
+    standardizeTaxonomy: boolean = true
   ): Question[] => {
     let currentNum = startQuestionNumber;
 
@@ -776,6 +817,10 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
       if (eq.question_hi && eq.question_hi !== eq.question_text) {
         fullQText = `${eq.question_text}\n\n${eq.question_hi}`;
       }
+
+      const taxonomy = standardizeTaxonomy
+        ? normalizeQuestionTaxonomy({ subject: eq.subject, chapter: eq.chapter, topic: eq.topic })
+        : { subject: eq.subject || 'General Studies', chapter: eq.chapter || 'General', topic: eq.topic || 'General Topic' };
 
       const q: Question = {
         id: generateUUID(),
@@ -790,9 +835,9 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
         explanation: eq.explanation || '',
         marks: marksPerQuestion,
         negative_marks: negativeMarks,
-        subject: eq.subject || 'General Studies',
-        chapter: eq.chapter || 'General',
-        topic: eq.topic || 'General Topic',
+        subject: taxonomy.subject,
+        chapter: taxonomy.chapter,
+        topic: taxonomy.topic,
         difficulty: eq.difficulty || 'Medium',
         inspection_status: eq.validation_status === 'valid' ? 'verified' : 'needs_review',
         inspection_notes: eq.validation_issues.length > 0 ? eq.validation_issues.join(' | ') : undefined,

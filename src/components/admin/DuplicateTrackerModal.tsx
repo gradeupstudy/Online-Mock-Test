@@ -16,16 +16,21 @@ import {
   Search,
   BookOpen,
   Split,
-  FileText
+  FileText,
+  Bookmark,
+  Layers
 } from 'lucide-react';
 import { Question } from '../../types';
-import { DuplicateGroup, DuplicateMatchType, scoreQuestionQuality } from '../../utils/duplicateDetector';
+import { scoreQuestionQuality } from '../../utils/duplicateDetector';
+import { SemanticDuplicateGroup, SemanticMatchType } from '../../utils/semanticVectorDeduplication';
 import { dataService } from '../../services/dataService';
+import { duxqeMutationEngine } from '../../services/duxqeMutationEngine';
+import { DUXQEMutateModal } from './DUXQEMutateModal';
 
 interface DuplicateTrackerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  groups: DuplicateGroup[];
+  groups: (SemanticDuplicateGroup | any)[];
   totalDuplicateCount: number;
   onRefreshData: () => Promise<void>;
   onToast?: (type: 'success' | 'error' | 'info', msg: string) => void;
@@ -43,11 +48,15 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
   onEditQuestion,
   initialFocusedGroupId,
 }) => {
-  const [filterType, setFilterType] = useState<'all' | DuplicateMatchType>('all');
+  const [filterType, setFilterType] = useState<'all' | SemanticMatchType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [autoHealLinkedMockTests, setAutoHealLinkedMockTests] = useState(true);
   const [dismissedGroupIds, setDismissedGroupIds] = useState<Set<string>>(new Set());
   const [activeGroupId, setActiveGroupId] = useState<string | null>(initialFocusedGroupId || null);
+  
+  // DU-XQE Mutation State
+  const [mutatingQuestion, setMutatingQuestion] = useState<Question | null>(null);
 
   if (!isOpen) return null;
 
@@ -58,7 +67,7 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const hasMatch = g.questions.some(
-        (item) =>
+        (item: Question) =>
           item.question_text?.toLowerCase().includes(q) ||
           item.subject?.toLowerCase().includes(q) ||
           item.option_a?.toLowerCase().includes(q)
@@ -71,16 +80,39 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
   const exactCount = groups.filter((g) => g.matchType === 'exact_copy' && !dismissedGroupIds.has(g.groupId)).length;
   const shuffledCount = groups.filter((g) => g.matchType === 'shuffled_options' && !dismissedGroupIds.has(g.groupId)).length;
   const nearCount = groups.filter((g) => g.matchType === 'near_identical' && !dismissedGroupIds.has(g.groupId)).length;
+  const semanticCount = groups.filter((g) => g.matchType === 'semantic_concept_duplicate' && !dismissedGroupIds.has(g.groupId)).length;
 
   // Resolve single group: Keep specific question and delete the others
-  const handleResolveGroup = async (group: DuplicateGroup, keepQuestionId: string) => {
+  const handleResolveGroup = async (group: SemanticDuplicateGroup, keepQuestionId: string) => {
     try {
       setIsProcessing(true);
       const toDelete = group.questions.filter((q) => q.id !== keepQuestionId);
+      const keptQuestion = group.questions.find((q) => q.id === keepQuestionId) || group.questions[0];
+
+      const deletedIds: string[] = [];
+      const retainedMap = new Map<string, Question>();
+
       for (const q of toDelete) {
         await dataService.deleteQuestionFromBank(q.id);
+        deletedIds.push(q.id);
+        retainedMap.set(q.id, keptQuestion);
       }
-      onToast?.('success', `Retained selected MCQ and removed ${toDelete.length} duplicate copy!`);
+
+      let healMsg = '';
+      if (autoHealLinkedMockTests && deletedIds.length > 0) {
+        const healResult = await duxqeMutationEngine.autoHealAndRefillMockTests(
+          deletedIds,
+          retainedMap
+        );
+        if (healResult.totalTestsAffected > 0) {
+          healMsg = ` 🧬 Auto-Healed ${healResult.totalTestsAffected} linked Mock Test(s) (Replaced: ${healResult.totalQuestionsReplaced}, DU-XQE Refilled: ${healResult.totalQuestionsRegenerated}).`;
+        }
+      }
+
+      onToast?.(
+        'success',
+        `Retained selected MCQ and removed ${toDelete.length} duplicate copy!${healMsg}`
+      );
       setDismissedGroupIds((prev) => new Set([...prev, group.groupId]));
       await onRefreshData();
     } catch (err: any) {
@@ -106,22 +138,48 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
 
     const redundantCount = visibleGroups.reduce((acc, g) => acc + (g.questions.length - 1), 0);
     const confirmed = window.confirm(
-      `Auto-Clean All Duplicates?\n\nThis will keep the HIGHEST QUALITY version (highest QA score, complete explanation & verified status) for each of the ${visibleGroups.length} duplicate groups and remove ${redundantCount} redundant copies.\n\nDo you want to proceed?`
+      `Auto-Clean All Semantic Duplicates?\n\nThis will keep the HIGHEST QUALITY version (highest QA score, complete explanation & verified status) for each of the ${visibleGroups.length} duplicate groups and remove ${redundantCount} redundant copies.\n\n${
+        autoHealLinkedMockTests
+          ? '✓ DU-XQE Auto-Healing will ensure all linked Mock Tests maintain their exact question counts!'
+          : ''
+      }\n\nDo you want to proceed?`
     );
     if (!confirmed) return;
 
     try {
       setIsProcessing(true);
       let removedTotal = 0;
+      const deletedIds: string[] = [];
+      const retainedMap = new Map<string, Question>();
+
       for (const group of visibleGroups) {
         const keepId = group.bestQuestionId;
-        const toDelete = group.questions.filter((q) => q.id !== keepId);
+        const keptQ = group.questions.find((q: Question) => q.id === keepId) || group.questions[0];
+        const toDelete = group.questions.filter((q: Question) => q.id !== keepId);
+
         for (const q of toDelete) {
           await dataService.deleteQuestionFromBank(q.id);
+          deletedIds.push(q.id);
+          retainedMap.set(q.id, keptQ);
           removedTotal++;
         }
       }
-      onToast?.('success', `Successfully auto-cleaned ${removedTotal} duplicate questions across ${visibleGroups.length} groups!`);
+
+      let healMsg = '';
+      if (autoHealLinkedMockTests && deletedIds.length > 0) {
+        const healResult = await duxqeMutationEngine.autoHealAndRefillMockTests(
+          deletedIds,
+          retainedMap
+        );
+        if (healResult.totalTestsAffected > 0) {
+          healMsg = ` 🧬 DU-XQE Auto-Healed ${healResult.totalTestsAffected} linked Mock Tests to maintain full target question counts!`;
+        }
+      }
+
+      onToast?.(
+        'success',
+        `Successfully auto-cleaned ${removedTotal} duplicate questions across ${visibleGroups.length} groups!${healMsg}`
+      );
       await onRefreshData();
       onClose();
     } catch (err: any) {
@@ -136,20 +194,23 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
   const handleExportReport = () => {
     const reportData = {
       generatedAt: new Date().toISOString(),
+      engine: 'Semantic Vector Deduplication & DU-XQE Mutation Engine',
       summary: {
         totalDuplicateGroups: groups.length,
         totalQuestionsInvolved: totalDuplicateCount,
         exactMatchGroups: exactCount,
         shuffledOptionsGroups: shuffledCount,
         nearIdenticalGroups: nearCount,
+        semanticConceptGroups: semanticCount,
       },
       duplicateGroups: groups.map((g, idx) => ({
         groupNumber: idx + 1,
         matchType: g.matchType,
         confidence: `${g.confidence}%`,
         reason: g.reason,
+        vectorSimilarity: g.vectorSimilarity,
         recommendedBestQuestionId: g.bestQuestionId,
-        questions: g.questions.map((q) => ({
+        questions: g.questions.map((q: Question) => ({
           id: q.id,
           question_text: q.question_text,
           subject: q.subject,
@@ -166,10 +227,10 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Duplicate_MCQ_Audit_Report_${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `Semantic_Vector_MCQ_Audit_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    onToast?.('success', 'Duplicate report exported successfully!');
+    onToast?.('success', 'Semantic duplicate report exported successfully!');
   };
 
   return (
@@ -177,22 +238,22 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
       <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 w-full max-w-6xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
         
         {/* MODAL HEADER */}
-        <div className="p-5 sm:p-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 shrink-0">
+        <div className="p-5 sm:p-6 bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-900 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center font-black shrink-0">
+            <div className="w-12 h-12 rounded-2xl bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center font-black shrink-0 shadow-xs">
               <AlertCircle className="w-6 h-6 text-rose-400" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="text-lg sm:text-xl font-black tracking-tight text-white">
-                  Duplicate MCQ Audit & Comparison Engine
+                  Semantic Vector Deduplication & DU-XQE Engine
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-rose-500 text-white shadow-xs">
                   {visibleGroups.length} Groups ({visibleGroups.reduce((acc, g) => acc + g.questions.length, 0)} MCQs)
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5">
-                Deep Question Text & Option signature analysis. Compare duplicate pairs side-by-side and keep the highest quality version.
+                Cosine N-Gram vector comparison with DU-XQE Mock Test auto-healing. Never lose required test question counts.
               </p>
             </div>
           </div>
@@ -216,7 +277,7 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
               {isProcessing ? (
                 <RefreshCw className="w-4 h-4 animate-spin" />
               ) : (
-                <Zap className="w-4 h-4 text-amber-300" />
+                <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
               )}
               <span>Auto-Clean All Duplicates</span>
             </button>
@@ -228,6 +289,35 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
               <X className="w-5 h-5" />
             </button>
           </div>
+        </div>
+
+        {/* AUTO-HEAL TOGGLE & METRICS BAR */}
+        <div className="px-4 py-3 bg-purple-50/70 dark:bg-purple-950/30 border-b border-purple-200 dark:border-purple-900/50 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs shrink-0">
+          <div className="flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-purple-600 text-white flex items-center justify-center font-black shrink-0 shadow-2xs">
+              <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+            </div>
+            <div>
+              <span className="font-black text-purple-950 dark:text-purple-200">
+                DU-XQE Auto-Heal & Maintain Mock Test MCQ Counts
+              </span>
+              <p className="text-[11px] text-purple-800/80 dark:text-purple-300/80">
+                When duplicates are removed from Question Bank, linked mock tests are automatically relinked or refilled with fresh unique MCQs.
+              </p>
+            </div>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer select-none bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-purple-200 dark:border-purple-800 shrink-0">
+            <input
+              type="checkbox"
+              checked={autoHealLinkedMockTests}
+              onChange={(e) => setAutoHealLinkedMockTests(e.target.checked)}
+              className="w-4 h-4 text-purple-600 rounded cursor-pointer"
+            />
+            <span className="font-bold text-xs text-purple-900 dark:text-purple-200">
+              Auto-Heal Linked Tests
+            </span>
+          </label>
         </div>
 
         {/* METRICS & FILTER BAR */}
@@ -282,6 +372,18 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
               <span>Near-Identical</span>
               <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20">{nearCount}</span>
             </button>
+
+            <button
+              onClick={() => setFilterType('semantic_concept_duplicate')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                filterType === 'semantic_concept_duplicate'
+                  ? 'bg-cyan-600 text-white shadow-xs'
+                  : 'bg-white dark:bg-slate-900 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-900/60'
+              }`}
+            >
+              <span>Semantic Concept</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-black/20">{semanticCount}</span>
+            </button>
           </div>
 
           {/* SEARCH INPUT */}
@@ -308,14 +410,13 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
                 No Duplicate MCQs Detected!
               </h4>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                All questions in the Question Bank have distinct question stems and unique options sets. No redundant entries found.
+                All questions in the Question Bank have distinct semantic vector signatures and unique option sets.
               </p>
             </div>
           ) : (
             visibleGroups.map((group, gIdx) => {
               const qA = group.questions[0];
-              const qB = group.questions[1];
-              const bestQ = group.questions.find((q) => q.id === group.bestQuestionId) || qA;
+              const bestQ = group.questions.find((q: Question) => q.id === group.bestQuestionId) || qA;
 
               return (
                 <div
@@ -336,6 +437,8 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
                             ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-900'
                             : group.matchType === 'shuffled_options'
                             ? 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-900'
+                            : group.matchType === 'semantic_concept_duplicate'
+                            ? 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-900'
                             : 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-900'
                         }`}
                       >
@@ -343,6 +446,8 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
                           ? '100% Exact Copy'
                           : group.matchType === 'shuffled_options'
                           ? 'Shuffled Options Match'
+                          : group.matchType === 'semantic_concept_duplicate'
+                          ? 'Semantic Concept Duplicate'
                           : 'Near-Identical MCQ'}
                       </span>
 
@@ -358,10 +463,10 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
 
                   {/* SIDE BY SIDE DUAL COMPARISON GRID */}
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                    {group.questions.map((q, qIndex) => {
+                    {group.questions.map((q: Question, qIndex: number) => {
                       const isBest = q.id === bestQ.id;
-                      const otherQ = group.questions.find((item) => item.id !== q.id);
                       const qScore = scoreQuestionQuality(q);
+                      const linkedTests = group.linkedMockTests ? group.linkedMockTests[q.id] : undefined;
 
                       return (
                         <div
@@ -395,6 +500,26 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
                                 </span>
                               )}
                             </div>
+
+                            {/* LINKED MOCK TESTS BADGES */}
+                            {linkedTests && linkedTests.length > 0 && (
+                              <div className="p-2 rounded-xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 text-[11px] space-y-1">
+                                <div className="flex items-center gap-1 font-bold text-blue-700 dark:text-blue-300">
+                                  <Bookmark className="w-3 h-3 text-blue-500" />
+                                  <span>Linked in {linkedTests.length} Mock Test(s):</span>
+                                </div>
+                                <div className="flex flex-wrap gap-1">
+                                  {linkedTests.map((lt, ltIdx) => (
+                                    <span
+                                      key={ltIdx}
+                                      className="px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-blue-200 dark:border-blue-700 text-[10px] font-semibold text-blue-800 dark:text-blue-200"
+                                    >
+                                      📌 {lt.testTitle} (Q#{lt.questionIndex})
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
 
                             {/* Question Text */}
                             <div className="space-y-1">
@@ -455,19 +580,32 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
                           </div>
 
                           {/* ACTION BUTTONS FOR THIS VERSION */}
-                          <div className="pt-3 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between gap-2">
-                            {onEditQuestion && (
+                          <div className="pt-3 border-t border-slate-200/60 dark:border-slate-700/60 flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2">
+                              {onEditQuestion && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    onClose();
+                                    onEditQuestion(q);
+                                  }}
+                                  className="text-[11px] font-bold text-slate-600 dark:text-slate-400 hover:text-indigo-600 underline cursor-pointer"
+                                >
+                                  Edit
+                                </button>
+                              )}
+
+                              {/* DU-XQE MUTATE BUTTON */}
                               <button
                                 type="button"
-                                onClick={() => {
-                                  onClose();
-                                  onEditQuestion(q);
-                                }}
-                                className="text-[11px] font-bold text-slate-600 dark:text-slate-400 hover:text-indigo-600 underline cursor-pointer"
+                                onClick={() => setMutatingQuestion(q)}
+                                className="px-2.5 py-1 bg-purple-100 hover:bg-purple-200 dark:bg-purple-950 dark:hover:bg-purple-900 text-purple-900 dark:text-purple-200 rounded-lg text-xs font-bold transition-all flex items-center gap-1 cursor-pointer border border-purple-200 dark:border-purple-800"
+                                title="Mutate this question with DU-XQE into a brand new cognitive angle"
                               >
-                                Edit Question
+                                <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                                <span>Mutate (DU-XQE)</span>
                               </button>
-                            )}
+                            </div>
 
                             <button
                               type="button"
@@ -480,7 +618,7 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
                               }`}
                             >
                               <Check className="w-3.5 h-3.5" />
-                              <span>Keep This (Delete Duplicate)</span>
+                              <span>Keep This (Clean Duplicates)</span>
                             </button>
                           </div>
                         </div>
@@ -512,7 +650,7 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-indigo-500" />
             <span>
-              Question Bank deduplication protects against duplicate questions in newly created Mock Tests.
+              Semantic Vector Deduplication & DU-XQE protects test validity and question bank integrity.
             </span>
           </div>
 
@@ -525,6 +663,21 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
           </button>
         </div>
       </div>
+
+      {/* DU-XQE MUTATE MODAL */}
+      {mutatingQuestion && (
+        <DUXQEMutateModal
+          isOpen={!!mutatingQuestion}
+          sourceQuestion={mutatingQuestion}
+          onClose={() => setMutatingQuestion(null)}
+          onSuccess={async (mutated) => {
+            await dataService.saveQuestionToBank(mutated);
+            onToast?.('success', `✨ Saved DU-XQE mutated variant into Question Bank!`);
+            await onRefreshData();
+          }}
+          onToast={onToast}
+        />
+      )}
     </div>
   );
 };

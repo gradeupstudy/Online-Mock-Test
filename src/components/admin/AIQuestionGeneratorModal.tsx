@@ -16,13 +16,16 @@ import {
   ShieldCheck,
   Check,
   Zap,
-  Shuffle
+  Shuffle,
+  Dna
 } from 'lucide-react';
 import { aiService, AIGenerateParams, shuffleAndBalanceQuestions, shuffleQuestionOptions } from '../../services/aiService';
 import { Question } from '../../types';
 import { dataService } from '../../services/dataService';
 import { MCQInspectionModal } from './MCQInspectionModal';
 import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
+import { duxqeMutationEngine } from '../../services/duxqeMutationEngine';
+import { DUXQEMutateModal } from './DUXQEMutateModal';
 
 interface AIQuestionGeneratorModalProps {
   isOpen: boolean;
@@ -77,8 +80,11 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
   const [savedKeys, setSavedKeys] = useState<string[]>([]);
 
   // Generation & Status States
+  const [useDUXQEGuard, setUseDUXQEGuard] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [regeneratingIndex, setRegeneratingIndex] = useState<number | null>(null);
+  const [mutatingQuestion, setMutatingQuestion] = useState<Question | null>(null);
+  const [mutatingIndex, setMutatingIndex] = useState<number | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [generatedQuestions, setGeneratedQuestions] = useState<Question[]>([]);
 
@@ -162,9 +168,20 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
     };
 
     try {
-      const result = await aiService.generateQuestions(params);
+      let result: Question[] = [];
+      if (useDUXQEGuard) {
+        setLogs((prev) => [...prev, '🧬 [DU-XQE] Loading Question Bank knowledge vectors for anti-repetition check...']);
+        const bankQuestions = await dataService.getAllQuestionBank();
+        const testQuestions = testId && testId !== 'bank' ? await dataService.getQuestions(testId) : [];
+        const existingPool = [...bankQuestions, ...testQuestions];
+
+        result = await duxqeMutationEngine.generateUniqueQuestionsDUXQE(params, existingPool);
+        onToast?.('success', `✨ Generated ${result.length} unique questions with DU-XQE Anti-Repetition Guard!`);
+      } else {
+        result = await aiService.generateQuestions(params);
+        onToast?.('success', `Successfully generated ${result.length} AI questions!`);
+      }
       setGeneratedQuestions(result);
-      onToast?.('success', `Successfully generated ${result.length} AI questions!`);
     } catch (err: any) {
       const errorMsg = err?.message || 'Failed to generate questions.';
       onToast?.('error', errorMsg);
@@ -431,6 +448,38 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
               </div>
             </div>
 
+            {/* DU-XQE ENGINE TOGGLE */}
+            <div className="p-3 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-900/60 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-black shrink-0 shadow-xs">
+                  <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-black text-purple-900 dark:text-purple-200">
+                      DU-XQE Anti-Repetition Guard
+                    </span>
+                    <span className="px-2 py-0.2 rounded-full text-[9px] font-black bg-purple-600 text-white uppercase tracking-wider">
+                      Active
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-purple-700/80 dark:text-purple-300/70">
+                    Cross-checks Question Bank knowledge vectors to prevent repetitive MCQs and force diverse conceptual angles.
+                  </p>
+                </div>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={useDUXQEGuard}
+                  onChange={(e) => setUseDUXQEGuard(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+              </label>
+            </div>
+
             <div>
               <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                 Custom AI Instructions / Exam Focus (Optional)
@@ -575,14 +624,28 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
                         <span>360° Inspect</span>
                       </button>
 
+                      {/* DU-XQE MUTATE BUTTON */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMutatingQuestion(q);
+                          setMutatingIndex(idx);
+                        }}
+                        className="px-2 py-1 bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/60 dark:hover:bg-purple-800/60 text-purple-900 dark:text-purple-200 font-bold text-[11px] rounded-lg border border-purple-300 dark:border-purple-700 flex items-center gap-1 cursor-pointer transition-all shadow-2xs"
+                        title="Mutate with DU-XQE: Cognitive perspective shift (Inverted framing, scenario, angle shift)"
+                      >
+                        <Zap className="w-3 h-3 text-amber-500 fill-amber-500" />
+                        <span>Mutate</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => handleRegenerateSinglePreview(idx)}
                         disabled={regeneratingIndex === idx}
-                        className="px-2 py-1 bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/60 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 font-bold text-[11px] rounded-lg border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                        className="px-2 py-1 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 flex items-center gap-1 cursor-pointer disabled:opacity-50"
                         title="Regenerate this specific question with AI"
                       >
-                        <RefreshCw className={`w-3 h-3 text-purple-600 dark:text-purple-400 ${regeneratingIndex === idx ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`w-3 h-3 text-slate-600 dark:text-slate-400 ${regeneratingIndex === idx ? 'animate-spin' : ''}`} />
                         <span>{regeneratingIndex === idx ? 'Regenerating...' : 'Regenerate'}</span>
                       </button>
 
@@ -653,6 +716,29 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
           questions={generatedQuestions}
           onClose={() => setIsBulkInspectOpen(false)}
           onApplyAllImprovements={handleApplyBulkInspection}
+          onToast={onToast}
+        />
+      )}
+
+      {/* DU-XQE MUTATE MODAL */}
+      {mutatingQuestion && (
+        <DUXQEMutateModal
+          isOpen={!!mutatingQuestion}
+          sourceQuestion={mutatingQuestion}
+          onClose={() => {
+            setMutatingQuestion(null);
+            setMutatingIndex(null);
+          }}
+          onSuccess={(mutated) => {
+            if (mutatingIndex !== null) {
+              setGeneratedQuestions((prev) =>
+                prev.map((item, idx) =>
+                  idx === mutatingIndex ? { ...mutated, question_number: idx + 1 } : item
+                )
+              );
+              onToast?.('success', `✨ Applied DU-XQE mutated variant to Q${mutatingIndex + 1}!`);
+            }
+          }}
           onToast={onToast}
         />
       )}

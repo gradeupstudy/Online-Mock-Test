@@ -27,7 +27,10 @@ import {
   HelpCircle,
   Clock,
   Eye,
-  Sliders
+  Sliders,
+  Languages,
+  Tag,
+  FolderKanban
 } from 'lucide-react';
 import {
   pdfOcrEngine,
@@ -36,6 +39,13 @@ import {
   PDFProcessProgress,
   normalizeOptionLetter
 } from '../../services/pdfOcrEngine';
+import {
+  canonicalizeSubject,
+  canonicalizeChapter,
+  normalizeQuestionTaxonomy,
+  getAllCanonicalSubjectNames,
+  getCanonicalChaptersForSubject
+} from '../../utils/taxonomyCanonicalizer';
 import { dataService, parseSafeNumber } from '../../services/dataService';
 import { aiService } from '../../services/aiService';
 import { Test, Question } from '../../types';
@@ -76,9 +86,10 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
   const [pageRangeMode, setPageRangeMode] = useState<'all' | 'custom'>('all');
   const [startPageInput, setStartPageInput] = useState<number>(1);
   const [endPageInput, setEndPageInput] = useState<number>(50);
-  const [defaultSubject, setDefaultSubject] = useState<string>('General Studies');
-  const [defaultChapter, setDefaultChapter] = useState<string>('General');
+  const [defaultSubject, setDefaultSubject] = useState<string>('History');
+  const [defaultChapter, setDefaultChapter] = useState<string>('Mauryan Empire');
   const [defaultTopic, setDefaultTopic] = useState<string>('General Topic');
+  const [standardizeTaxonomy, setStandardizeTaxonomy] = useState<boolean>(true);
   const [languageMode, setLanguageMode] = useState<'auto' | 'bilingual' | 'english' | 'hindi'>('auto');
 
   // Destination Target
@@ -98,6 +109,10 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingDraft, setEditingDraft] = useState<ExtractedPDFMCQ | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Available Canonical lists
+  const canonicalSubjects = getAllCanonicalSubjectNames();
+  const availableChapters = getCanonicalChaptersForSubject(defaultSubject);
 
   // When file is selected, pre-inspect page count
   const handleFileSelect = async (file: File) => {
@@ -135,14 +150,19 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
     const fromP = pageRangeMode === 'all' ? 1 : Math.max(1, startPageInput);
     const toP = pageRangeMode === 'all' ? undefined : Math.max(fromP, endPageInput);
 
+    // Canonicalize user-entered defaults if option enabled
+    const finalSubject = standardizeTaxonomy ? canonicalizeSubject(defaultSubject) : defaultSubject;
+    const finalChapter = standardizeTaxonomy ? canonicalizeChapter(finalSubject, defaultChapter) : defaultChapter;
+
     try {
       const result = await pdfOcrEngine.processCompletePDF({
         file: pdfFile,
         startPage: fromP,
         endPage: toP,
-        defaultSubject,
-        defaultChapter,
+        defaultSubject: finalSubject,
+        defaultChapter: finalChapter,
         defaultTopic,
+        standardizeTaxonomy,
         languageMode,
         testId: targetDestination,
         onProgress: (p) => setProgress(p),
@@ -162,6 +182,29 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Batch Normalize all current questions' subjects and chapters
+  const handleBatchStandardizeTaxonomy = () => {
+    let changedCount = 0;
+    const updated = extractedQuestions.map((q) => {
+      const norm = normalizeQuestionTaxonomy({
+        subject: q.subject,
+        chapter: q.chapter,
+        topic: q.topic,
+      });
+      if (norm.subject !== q.subject || norm.chapter !== q.chapter) {
+        changedCount++;
+      }
+      return {
+        ...q,
+        subject: norm.subject,
+        chapter: norm.chapter,
+        topic: norm.topic,
+      };
+    });
+    setExtractedQuestions(updated);
+    notify('success', `Standardized taxonomy! ${changedCount} subjects/chapters cleaned to master canonical form.`);
   };
 
   // Question Card Toggles & Edits
@@ -185,8 +228,27 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
 
   const handleSaveEdit = (idx: number) => {
     if (!editingDraft) return;
+
+    // Normalize subject & chapter on save
+    const norm = standardizeTaxonomy
+      ? normalizeQuestionTaxonomy({
+          subject: editingDraft.subject,
+          chapter: editingDraft.chapter,
+          topic: editingDraft.topic,
+        })
+      : { subject: editingDraft.subject, chapter: editingDraft.chapter, topic: editingDraft.topic };
+
+    const finalizedDraft: ExtractedPDFMCQ = {
+      ...editingDraft,
+      subject: norm.subject,
+      chapter: norm.chapter,
+      topic: norm.topic,
+      validation_status: 'valid',
+      validation_issues: [],
+    };
+
     setExtractedQuestions((prev) =>
-      prev.map((q, i) => (i === idx ? { ...editingDraft, validation_status: 'valid', validation_issues: [] } : q))
+      prev.map((q, i) => (i === idx ? finalizedDraft : q))
     );
     setEditingIndex(null);
     setEditingDraft(null);
@@ -322,7 +384,8 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
         targetDestination,
         targetMarks,
         targetNeg,
-        startNum
+        startNum,
+        standardizeTaxonomy
       );
 
       const combined = [...existing, ...convertedQuestions];
@@ -460,7 +523,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
             </div>
 
             {/* CONFIGURATION GRID */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
               
               {/* Destination Target */}
               <div className="space-y-1.5">
@@ -485,7 +548,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
               {/* Language / Script Mode */}
               <div className="space-y-1.5">
                 <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <LanguagesIcon className="w-3.5 h-3.5 text-purple-500" />
+                  <Languages className="w-3.5 h-3.5 text-purple-500" />
                   <span>Language / Script Mode</span>
                 </label>
                 <select
@@ -500,23 +563,93 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                 </select>
               </div>
 
-              {/* Default Subject Fallback */}
+              {/* Default Subject Fallback with Canonical Suggestions */}
               <div className="space-y-1.5">
-                <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-                  <Layers className="w-3.5 h-3.5 text-emerald-500" />
-                  <span>Default Subject</span>
+                <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>Master Subject</span>
+                  </span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">Standardized</span>
                 </label>
                 <input
                   type="text"
+                  list="canonical-subjects-list"
                   value={defaultSubject}
-                  onChange={(e) => setDefaultSubject(e.target.value)}
-                  placeholder="e.g. HP GK, History, Polity..."
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setDefaultSubject(val);
+                    const chaps = getCanonicalChaptersForSubject(val);
+                    if (chaps.length > 0 && !chaps.includes(defaultChapter)) {
+                      setDefaultChapter(chaps[0]);
+                    }
+                  }}
+                  placeholder="e.g. History, Geography, Polity..."
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
                 />
+                <datalist id="canonical-subjects-list">
+                  {canonicalSubjects.map((subj) => (
+                    <option key={subj} value={subj} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* Default Chapter Fallback with Canonical Suggestions */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <FolderKanban className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Master Chapter</span>
+                  </span>
+                  <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold">Single Unified Name</span>
+                </label>
+                <input
+                  type="text"
+                  list="canonical-chapters-list"
+                  value={defaultChapter}
+                  onChange={(e) => setDefaultChapter(e.target.value)}
+                  placeholder="e.g. Mauryan Empire, Rivers..."
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium"
+                />
+                <datalist id="canonical-chapters-list">
+                  {availableChapters.map((chap) => (
+                    <option key={chap} value={chap} />
+                  ))}
+                </datalist>
+              </div>
+
+              {/* TAXONOMY HARMONIZATION BANNER & TOGGLE */}
+              <div className="sm:col-span-2 lg:col-span-4 p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div className="flex items-start gap-2.5">
+                  <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="font-black text-slate-900 dark:text-white flex items-center gap-2">
+                      <span>Strict Subject & Chapter Normalization</span>
+                      <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 text-[10px] font-black uppercase tracking-wider">
+                        Anti-Fragmentation Engine
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400 mt-0.5 leading-relaxed">
+                      Merges fragmented variations into a single master name (e.g. <em>'Indian History' / 'General History'</em> ➔ <strong>'History'</strong>, <em>'MAuryan Dynesty' / 'The Mauryas'</em> ➔ <strong>'Mauryan Empire'</strong>).
+                    </p>
+                  </div>
+                </div>
+
+                <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800 dark:text-slate-200 shrink-0 bg-white dark:bg-slate-900 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 shadow-xs">
+                  <input
+                    type="checkbox"
+                    checked={standardizeTaxonomy}
+                    onChange={(e) => setStandardizeTaxonomy(e.target.checked)}
+                    className="w-4 h-4 rounded text-indigo-600 cursor-pointer"
+                  />
+                  <span>Active</span>
+                </label>
               </div>
 
               {/* Page Range Selector */}
-              <div className="sm:col-span-2 lg:col-span-3 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
+              <div className="sm:col-span-2 lg:col-span-4 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
                     <Sliders className="w-4 h-4 text-indigo-500" />
@@ -803,8 +936,17 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                 )}
               </div>
 
-              {/* Search & Export */}
-              <div className="flex items-center gap-2">
+              {/* Search & Export & Batch Tools */}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleBatchStandardizeTaxonomy}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 hover:bg-indigo-100 dark:hover:bg-indigo-900/80 text-xs font-bold text-indigo-700 dark:text-indigo-300 shadow-xs cursor-pointer transition-colors"
+                  title="Standardize all subjects & chapters to master unified names"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  <span>Standardize Taxonomy</span>
+                </button>
+
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                   <input
@@ -812,7 +954,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search extracted MCQs..."
-                    className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs w-44 sm:w-56"
+                    className="pl-8 pr-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs w-40 sm:w-52"
                   />
                 </div>
 
@@ -943,21 +1085,23 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
                             </select>
                           </div>
                           <div>
-                            <label className="text-[11px] font-bold text-slate-500">Subject</label>
+                            <label className="text-[11px] font-bold text-slate-500">Subject (Standardized)</label>
                             <input
                               type="text"
+                              list="canonical-subjects-list"
                               value={editingDraft.subject}
                               onChange={(e) => setEditingDraft({ ...editingDraft, subject: e.target.value })}
-                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-medium"
                             />
                           </div>
                           <div>
-                            <label className="text-[11px] font-bold text-slate-500">Chapter</label>
+                            <label className="text-[11px] font-bold text-slate-500">Chapter (Standardized)</label>
                             <input
                               type="text"
+                              list="canonical-chapters-list"
                               value={editingDraft.chapter}
                               onChange={(e) => setEditingDraft({ ...editingDraft, chapter: e.target.value })}
-                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800"
+                              className="w-full px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 font-medium"
                             />
                           </div>
                         </div>

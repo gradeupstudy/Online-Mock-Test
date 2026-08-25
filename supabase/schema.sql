@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS public.questions (
     negative_marks DECIMAL(5,2) DEFAULT 0.25,
     subject VARCHAR(100) DEFAULT 'General Studies',
     chapter VARCHAR(100) DEFAULT 'General',
+    topic VARCHAR(100) DEFAULT 'General Topic',
+    difficulty VARCHAR(50) DEFAULT 'Medium',
+    section VARCHAR(100) DEFAULT 'General',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     CONSTRAINT unique_test_question_number UNIQUE (test_id, question_number)
 );
@@ -174,8 +177,13 @@ CREATE INDEX IF NOT EXISTS idx_tests_slug ON public.tests(slug);
 CREATE INDEX IF NOT EXISTS idx_tests_test_code ON public.tests(test_code);
 CREATE INDEX IF NOT EXISTS idx_tests_is_published ON public.tests(is_published);
 CREATE INDEX IF NOT EXISTS idx_questions_test_id ON public.questions(test_id);
+CREATE INDEX IF NOT EXISTS idx_questions_subject ON public.questions(subject);
+CREATE INDEX IF NOT EXISTS idx_questions_chapter ON public.questions(chapter);
+CREATE INDEX IF NOT EXISTS idx_questions_topic ON public.questions(topic);
+CREATE INDEX IF NOT EXISTS idx_questions_difficulty ON public.questions(difficulty);
 CREATE INDEX IF NOT EXISTS idx_attempts_test_id ON public.attempts(test_id);
 CREATE INDEX IF NOT EXISTS idx_attempts_student_id ON public.attempts(student_id);
+CREATE INDEX IF NOT EXISTS idx_attempts_student_mobile ON public.attempts(student_mobile);
 CREATE INDEX IF NOT EXISTS idx_attempts_status ON public.attempts(status);
 CREATE INDEX IF NOT EXISTS idx_attempts_submitted_at ON public.attempts(submitted_at);
 CREATE INDEX IF NOT EXISTS idx_answers_attempt_id ON public.answers(attempt_id);
@@ -200,7 +208,10 @@ RETURNS TABLE (
     marks DECIMAL(5,2),
     negative_marks DECIMAL(5,2),
     subject VARCHAR(100),
-    chapter VARCHAR(100)
+    chapter VARCHAR(100),
+    topic VARCHAR(100),
+    difficulty VARCHAR(50),
+    section VARCHAR(100)
 )
 LANGUAGE sql
 SECURITY DEFINER
@@ -218,7 +229,10 @@ AS $$
         q.marks,
         q.negative_marks,
         q.subject,
-        q.chapter
+        q.chapter,
+        COALESCE(q.topic, 'General Topic'),
+        COALESCE(q.difficulty, 'Medium'),
+        COALESCE(q.section, 'General')
     FROM public.questions q
     INNER JOIN public.tests t ON t.id = q.test_id
     WHERE q.test_id = p_test_id AND t.is_published = true
@@ -523,4 +537,15 @@ ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS social_gate_enabled B
 ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS social_platforms JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS admin_email VARCHAR(255) DEFAULT 'admin@gradeupstudy.com';
 ALTER TABLE public.admin_settings ADD COLUMN IF NOT EXISTS admin_password VARCHAR(255) DEFAULT 'gradeup123';
+
+-- 4. Ensure Question Topic, Difficulty, Section & Performance Indexes
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS topic VARCHAR(100) DEFAULT 'General Topic';
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS difficulty VARCHAR(50) DEFAULT 'Medium';
+ALTER TABLE public.questions ADD COLUMN IF NOT EXISTS section VARCHAR(100) DEFAULT 'General';
+
+CREATE INDEX IF NOT EXISTS idx_questions_subject ON public.questions(subject);
+CREATE INDEX IF NOT EXISTS idx_questions_chapter ON public.questions(chapter);
+CREATE INDEX IF NOT EXISTS idx_questions_topic ON public.questions(topic);
+CREATE INDEX IF NOT EXISTS idx_questions_difficulty ON public.questions(difficulty);
+CREATE INDEX IF NOT EXISTS idx_attempts_student_mobile ON public.attempts(student_mobile);
 */

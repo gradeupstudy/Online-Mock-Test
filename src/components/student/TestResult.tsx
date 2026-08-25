@@ -19,13 +19,16 @@ import {
   Users,
   Target,
   BarChart3,
-  Flag
+  Flag,
+  Brain
 } from 'lucide-react';
-import { Attempt, Test, Question, PublicLeaderboardEntry } from '../../types';
+import { Attempt, Test, Question, PublicLeaderboardEntry, PersonalizedStudentAnalytics } from '../../types';
 import { dataService } from '../../services/dataService';
+import { analyticsService } from '../../services/analyticsService';
 import { printOfficialScorecard } from '../../utils/printScorecard';
 import { ReportMCQModal } from './ReportMCQModal';
 import { ShareScorecardModal } from './ShareScorecardModal';
+import { StudentPerformanceDashboard } from './analytics/StudentPerformanceDashboard';
 
 interface TestResultProps {
   attempt: Attempt;
@@ -39,7 +42,8 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   const [leaderboard, setLeaderboard] = useState<PublicLeaderboardEntry[]>([]);
   const [totalAspirants, setTotalAspirants] = useState<number>(1);
   const [myRank, setMyRank] = useState<number>(1);
-  const [activeTab, setActiveTab] = useState<'summary' | 'solutions' | 'leaderboard'>('summary');
+  const [analytics, setAnalytics] = useState<PersonalizedStudentAnalytics | null>(null);
+  const [activeTab, setActiveTab] = useState<'analytics' | 'summary' | 'solutions' | 'leaderboard'>('analytics');
   const [solutionFilter, setSolutionFilter] = useState<'all' | 'correct' | 'wrong' | 'unattempted'>('all');
   const [isRefreshingBoard, setIsRefreshingBoard] = useState(false);
   const [reportingQuestion, setReportingQuestion] = useState<Question | null>(null);
@@ -62,6 +66,14 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
     setLeaderboard(topBoard);
     setTotalAspirants(Math.max(1, allAttempts.length));
     setMyRank(rank || 1);
+
+    // Compute deterministic personalized student analytics
+    try {
+      const calculatedAnalytics = await analyticsService.getStudentAttemptAnalytics(attempt, t, qList);
+      setAnalytics(calculatedAnalytics);
+    } catch (e) {
+      console.warn('Analytics calculation error:', e);
+    }
   };
 
   const handleRefreshLeaderboard = async () => {
@@ -146,6 +158,12 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
                 <span className="px-2.5 py-0.5 bg-blue-500/20 text-blue-300 border border-blue-400/30 text-[10px] sm:text-[11px] font-bold rounded-md uppercase">
                   Official Exam Scorecard
                 </span>
+                {analytics && (
+                  <span className={`px-2.5 py-0.5 rounded-md text-[10px] sm:text-[11px] font-black border flex items-center gap-1 ${analytics.overall.status_info.badgeClass}`}>
+                    <span>{analytics.overall.status_info.badgeEmoji}</span>
+                    <span>Status: {analytics.overall.status_info.label}</span>
+                  </span>
+                )}
                 {test?.category && (
                   <span className="px-2.5 py-0.5 bg-slate-800 text-blue-200 border border-blue-700/50 text-[10px] sm:text-[11px] font-bold rounded-md">
                     {test.category}
@@ -231,6 +249,18 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
       {/* RESULT TABS NAVIGATION BAR */}
       <div className="flex items-center gap-2 border-b border-slate-200 dark:border-slate-800 pb-2 print:hidden overflow-x-auto scrollbar-none -mx-4 px-4 sm:mx-0 sm:px-0">
         <button
+          onClick={() => setActiveTab('analytics')}
+          className={`px-4 sm:px-5 py-2.5 text-xs font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'analytics'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
+        >
+          <Brain className="w-3.5 h-3.5" />
+          <span>Diagnostic Analytics & Topics</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('summary')}
           className={`px-4 sm:px-5 py-2.5 text-xs font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'summary'
@@ -239,7 +269,7 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
           }`}
         >
           <BarChart3 className="w-3.5 h-3.5" />
-          <span>Performance Summary</span>
+          <span>Scorecard Summary</span>
         </button>
 
         <button
@@ -266,6 +296,14 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
           <span>Real-Time Top 20 Leaderboard</span>
         </button>
       </div>
+
+      {/* TAB 0: PERSONALIZED DIAGNOSTIC ANALYTICS */}
+      {activeTab === 'analytics' && analytics && (
+        <StudentPerformanceDashboard 
+          analytics={analytics}
+          onExploreTopic={() => setActiveTab('solutions')}
+        />
+      )}
 
       {/* TAB 1: SUMMARY TAB */}
       {activeTab === 'summary' && (
