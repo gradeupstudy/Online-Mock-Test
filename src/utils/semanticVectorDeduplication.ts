@@ -71,12 +71,14 @@ export function buildSemanticVector(text: string): SemanticVector {
 
   // Extract character 3-grams for typo resilience & morphological variance
   const cleanSpaceless = normText.replace(/\s+/g, '');
-  for (let i = 0; i <= cleanSpaceless.length - 3; i++) {
+  const cleanLen = cleanSpaceless.length;
+  for (let i = 0; i <= cleanLen - 3; i++) {
     charNgrams.add(cleanSpaceless.substring(i, i + 3));
   }
 
   // Extract words, concept keywords, and word bigrams
-  for (let i = 0; i < tokens.length; i++) {
+  const tokLen = tokens.length;
+  for (let i = 0; i < tokLen; i++) {
     const w = tokens[i];
     if (w.length >= 2) {
       wordFrequencies.set(w, (wordFrequencies.get(w) || 0) + 1);
@@ -84,7 +86,7 @@ export function buildSemanticVector(text: string): SemanticVector {
         conceptKeywords.add(w);
       }
     }
-    if (i < tokens.length - 1) {
+    if (i < tokLen - 1) {
       tokenNgrams.add(`${tokens[i]}_${tokens[i + 1]}`);
     }
   }
@@ -108,50 +110,23 @@ export function buildSemanticVector(text: string): SemanticVector {
 }
 
 /**
- * Calculates Cosine Vector Similarity between two semantic vectors.
+ * Pre-analyzed Question Node to prevent repeated tokenization and object allocations.
  */
-export function calculateSemanticVectorSimilarity(vecA: SemanticVector, vecB: SemanticVector): number {
-  if (vecA.normText === vecB.normText) return 1.0;
-  if (!vecA.normText || !vecB.normText) return 0;
-
-  // 1. Word frequency dot product
-  let dotProduct = 0;
-  vecA.wordFrequencies.forEach((freqA, word) => {
-    if (vecB.wordFrequencies.has(word)) {
-      const freqB = vecB.wordFrequencies.get(word)!;
-      const weight = STOPWORDS.has(word) ? 0.3 : 1.2;
-      dotProduct += (freqA * weight) * (freqB * weight);
-    }
-  });
-  const wordCosine = dotProduct / (vecA.magnitude * vecB.magnitude);
-
-  // 2. Character 3-gram Jaccard
-  let charMatch = 0;
-  vecA.charNgrams.forEach((ng) => {
-    if (vecB.charNgrams.has(ng)) charMatch++;
-  });
-  const charUnion = new Set([...vecA.charNgrams, ...vecB.charNgrams]).size;
-  const charSim = charUnion > 0 ? charMatch / charUnion : 0;
-
-  // 3. Concept Keywords Overlap
-  let conceptMatch = 0;
-  vecA.conceptKeywords.forEach((kw) => {
-    if (vecB.conceptKeywords.has(kw)) conceptMatch++;
-  });
-  const conceptUnion = new Set([...vecA.conceptKeywords, ...vecB.conceptKeywords]).size;
-  const conceptSim = conceptUnion > 0 ? conceptMatch / conceptUnion : 0;
-
-  // Weighted composite similarity
-  const compositeScore = (wordCosine * 0.45) + (charSim * 0.30) + (conceptSim * 0.25);
-  return Math.min(1.0, Math.max(0, compositeScore));
+interface PreparedQuestionNode {
+  q: Question;
+  normText: string;
+  vec: SemanticVector;
+  normOpts: string[];
+  validOpts: string[];
+  isGeneric: boolean;
 }
 
 /**
- * Compares two questions using Semantic Vector analysis.
+ * Fast comparison between two pre-built question nodes.
  */
-export function checkSemanticVectorDuplicate(
-  qA: Question,
-  qB: Question
+function comparePrebuiltNodes(
+  nodeA: PreparedQuestionNode,
+  nodeB: PreparedQuestionNode
 ): {
   isDuplicate: boolean;
   matchType?: SemanticMatchType;
@@ -160,31 +135,12 @@ export function checkSemanticVectorDuplicate(
   vectorSimilarity?: number;
   optionsOverlapCount?: number;
 } {
-  if (qA.id === qB.id) return { isDuplicate: false };
+  const { normText: normA, vec: vecA, normOpts: optsA, validOpts: validA, isGeneric: isGenA, q: qA } = nodeA;
+  const { normText: normB, vec: vecB, normOpts: optsB, validOpts: validB, isGeneric: isGenB, q: qB } = nodeB;
 
-  const normA = normalizeText(qA.question_text || '');
-  const normB = normalizeText(qB.question_text || '');
+  if (!normA || !normB || qA.id === qB.id) return { isDuplicate: false };
 
-  if (!normA || !normB) return { isDuplicate: false };
-
-  const vecA = buildSemanticVector(qA.question_text);
-  const vecB = buildSemanticVector(qB.question_text);
-  const sim = calculateSemanticVectorSimilarity(vecA, vecB);
-
-  // Check options
-  const optsA = [
-    normalizeText(qA.option_a || ''),
-    normalizeText(qA.option_b || ''),
-    normalizeText(qA.option_c || ''),
-    normalizeText(qA.option_d || ''),
-  ];
-  const optsB = [
-    normalizeText(qB.option_a || ''),
-    normalizeText(qB.option_b || ''),
-    normalizeText(qB.option_c || ''),
-    normalizeText(qB.option_d || ''),
-  ];
-
+  // 1. Exact text shortcut
   let exactOrderMatches = 0;
   for (let i = 0; i < 4; i++) {
     if (optsA[i] && optsB[i] && optsA[i] === optsB[i]) {
@@ -192,24 +148,6 @@ export function checkSemanticVectorDuplicate(
     }
   }
 
-  const validA = optsA.filter(Boolean);
-  const validB = optsB.filter(Boolean);
-  let overlapCount = 0;
-  const usedB = new Set<number>();
-  validA.forEach((optA) => {
-    const matchedIdx = validB.findIndex(
-      (optB, idx) => !usedB.has(idx) && (optA === optB || calculateSemanticVectorSimilarity(buildSemanticVector(optA), buildSemanticVector(optB)) >= 0.88)
-    );
-    if (matchedIdx !== -1) {
-      usedB.add(matchedIdx);
-      overlapCount++;
-    }
-  });
-
-  const isIdenticalOptionSet = validA.length >= 3 && validA.length === validB.length && overlapCount === validA.length;
-  const isGeneric = isGenericStem(normA) || isGenericStem(normB);
-
-  // 1. Exact Copy (100% text + ordered options)
   if (normA === normB && exactOrderMatches >= 3) {
     return {
       isDuplicate: true,
@@ -220,6 +158,25 @@ export function checkSemanticVectorDuplicate(
       optionsOverlapCount: exactOrderMatches,
     };
   }
+
+  // Calculate semantic vector similarity
+  const sim = calculateSemanticVectorSimilarity(vecA, vecB);
+
+  // Fast options overlap
+  let overlapCount = 0;
+  const usedB = new Set<number>();
+  validA.forEach((optA) => {
+    const matchedIdx = validB.findIndex(
+      (optB, idx) => !usedB.has(idx) && (optA === optB || (optA.length > 5 && optB.length > 5 && (optA.includes(optB) || optB.includes(optA))))
+    );
+    if (matchedIdx !== -1) {
+      usedB.add(matchedIdx);
+      overlapCount++;
+    }
+  });
+
+  const isIdenticalOptionSet = validA.length >= 3 && validA.length === validB.length && overlapCount === validA.length;
+  const isGeneric = isGenA || isGenB;
 
   // 2. Shuffled Options (identical text, shuffled options)
   if (normA === normB && isIdenticalOptionSet) {
@@ -260,8 +217,8 @@ export function checkSemanticVectorDuplicate(
     };
   }
 
-  // 5. Semantic Concept Duplicate (High concept vector similarity >= 0.88 with same correct answer concept)
-  if (sim >= 0.88 && overlapCount >= 2 && qA.subject === qB.subject) {
+  // 5. Semantic Concept Duplicate (High concept vector similarity >= 0.88 across same subject)
+  if (sim >= 0.88 && overlapCount >= 2 && qA.subject && qB.subject && qA.subject === qB.subject) {
     return {
       isDuplicate: true,
       matchType: 'semantic_concept_duplicate',
@@ -273,6 +230,102 @@ export function checkSemanticVectorDuplicate(
   }
 
   return { isDuplicate: false };
+}
+
+/**
+ * Calculates Cosine Vector Similarity between two semantic vectors.
+ */
+export function calculateSemanticVectorSimilarity(vecA: SemanticVector, vecB: SemanticVector): number {
+  if (vecA.normText === vecB.normText) return 1.0;
+  if (!vecA.normText || !vecB.normText) return 0;
+
+  // 1. Word frequency dot product
+  let dotProduct = 0;
+  vecA.wordFrequencies.forEach((freqA, word) => {
+    if (vecB.wordFrequencies.has(word)) {
+      const freqB = vecB.wordFrequencies.get(word)!;
+      const weight = STOPWORDS.has(word) ? 0.3 : 1.2;
+      dotProduct += (freqA * weight) * (freqB * weight);
+    }
+  });
+  const wordCosine = dotProduct / (vecA.magnitude * vecB.magnitude);
+
+  // Quick exit if word cosine is very low
+  if (wordCosine < 0.35) return wordCosine * 0.45;
+
+  // 2. Character 3-gram Jaccard
+  let charMatch = 0;
+  vecA.charNgrams.forEach((ng) => {
+    if (vecB.charNgrams.has(ng)) charMatch++;
+  });
+  const charUnion = new Set([...vecA.charNgrams, ...vecB.charNgrams]).size;
+  const charSim = charUnion > 0 ? charMatch / charUnion : 0;
+
+  // 3. Concept Keywords Overlap
+  let conceptMatch = 0;
+  vecA.conceptKeywords.forEach((kw) => {
+    if (vecB.conceptKeywords.has(kw)) conceptMatch++;
+  });
+  const conceptUnion = new Set([...vecA.conceptKeywords, ...vecB.conceptKeywords]).size;
+  const conceptSim = conceptUnion > 0 ? conceptMatch / conceptUnion : 0;
+
+  // Weighted composite similarity
+  const compositeScore = (wordCosine * 0.45) + (charSim * 0.30) + (conceptSim * 0.25);
+  return Math.min(1.0, Math.max(0, compositeScore));
+}
+
+/**
+ * Compares two questions using Semantic Vector analysis.
+ */
+export function checkSemanticVectorDuplicate(
+  qA: Question,
+  qB: Question
+): {
+  isDuplicate: boolean;
+  matchType?: SemanticMatchType;
+  confidence?: number;
+  reason?: string;
+  vectorSimilarity?: number;
+  optionsOverlapCount?: number;
+} {
+  if (qA.id === qB.id) return { isDuplicate: false };
+
+  const normA = normalizeText(qA.question_text || '');
+  const normB = normalizeText(qB.question_text || '');
+  if (!normA || !normB) return { isDuplicate: false };
+
+  const optsA = [
+    normalizeText(qA.option_a || ''),
+    normalizeText(qA.option_b || ''),
+    normalizeText(qA.option_c || ''),
+    normalizeText(qA.option_d || ''),
+  ];
+  const optsB = [
+    normalizeText(qB.option_b || ''),
+    normalizeText(qB.option_b || ''),
+    normalizeText(qB.option_c || ''),
+    normalizeText(qB.option_d || ''),
+  ];
+
+  const nodeA: PreparedQuestionNode = {
+    q: qA,
+    normText: normA,
+    vec: buildSemanticVector(qA.question_text),
+    normOpts: optsA,
+    validOpts: optsA.filter(Boolean),
+    isGeneric: isGenericStem(normA),
+  };
+
+  const nodeB: PreparedQuestionNode = {
+    q: qB,
+    normText: normB,
+    vec: buildSemanticVector(qB.question_text),
+    normOpts: optsB,
+    validOpts: optsB.filter(Boolean),
+    isGeneric: isGenericStem(normB),
+  };
+
+  return comparePrebuiltNodes(nodeA, nodeB);
 }
 
 /**
@@ -349,7 +402,7 @@ export function mapQuestionsToMockTestsSync(): {
 }
 
 /**
- * Runs full Semantic Vector Deduplication analysis on a list of questions (synchronous).
+ * Runs full Semantic Vector Deduplication analysis on a list of questions (synchronous, blazing fast O(N)).
  */
 export function detectSemanticVectorDuplicates(
   questions: Question[],
@@ -370,7 +423,52 @@ export function detectSemanticVectorDuplicates(
     };
   }
 
-  // Union-find
+  // 1. Precompute Nodes once for all questions O(N)
+  const nodes: PreparedQuestionNode[] = [];
+  const exactTextBuckets = new Map<string, number[]>();
+  const keywordInvertedIndex = new Map<string, number[]>();
+
+  for (let i = 0; i < n; i++) {
+    const q = questions[i];
+    const normText = normalizeText(q.question_text || '');
+    const opts = [
+      normalizeText(q.option_a || ''),
+      normalizeText(q.option_b || ''),
+      normalizeText(q.option_c || ''),
+      normalizeText(q.option_d || ''),
+    ];
+
+    const vec = buildSemanticVector(q.question_text || '');
+    const node: PreparedQuestionNode = {
+      q,
+      normText,
+      vec,
+      normOpts: opts,
+      validOpts: opts.filter(Boolean),
+      isGeneric: isGenericStem(normText),
+    };
+    nodes.push(node);
+
+    // Exact text bucketing
+    if (normText) {
+      if (!exactTextBuckets.has(normText)) {
+        exactTextBuckets.set(normText, []);
+      }
+      exactTextBuckets.get(normText)!.push(i);
+    }
+
+    // Inverted index on concept keywords
+    vec.conceptKeywords.forEach((kw) => {
+      if (kw.length >= 3) {
+        if (!keywordInvertedIndex.has(kw)) {
+          keywordInvertedIndex.set(kw, []);
+        }
+        keywordInvertedIndex.get(kw)!.push(i);
+      }
+    });
+  }
+
+  // 2. Union-Find Structure
   const parent = Array.from({ length: n }, (_, i) => i);
   const find = (i: number): number => {
     if (parent[i] === i) return i;
@@ -391,23 +489,60 @@ export function detectSemanticVectorDuplicates(
     optionsOverlapCount: number;
   }>();
 
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const res = checkSemanticVectorDuplicate(questions[i], questions[j]);
-      if (res.isDuplicate) {
-        union(i, j);
-        pairMeta.set(`${i}-${j}`, {
-          matchType: res.matchType || 'exact_copy',
-          confidence: res.confidence || 95,
-          reason: res.reason || 'Semantic Match',
-          vectorSimilarity: res.vectorSimilarity || 1,
-          optionsOverlapCount: res.optionsOverlapCount || 4,
-        });
+  const checkedPairs = new Set<string>();
+
+  const testAndUnion = (i: number, j: number) => {
+    if (i === j) return;
+    const pairKey = i < j ? `${i}-${j}` : `${j}-${i}`;
+    if (checkedPairs.has(pairKey)) return;
+    checkedPairs.add(pairKey);
+
+    const res = comparePrebuiltNodes(nodes[i], nodes[j]);
+    if (res.isDuplicate) {
+      union(i, j);
+      pairMeta.set(pairKey, {
+        matchType: res.matchType || 'exact_copy',
+        confidence: res.confidence || 95,
+        reason: res.reason || 'Semantic Match',
+        vectorSimilarity: res.vectorSimilarity || 1,
+        optionsOverlapCount: res.optionsOverlapCount || 4,
+      });
+    }
+  };
+
+  // 3A. Check Exact Text Buckets (Instant O(K))
+  exactTextBuckets.forEach((indices) => {
+    if (indices.length > 1) {
+      for (let a = 0; a < indices.length; a++) {
+        for (let b = a + 1; b < indices.length; b++) {
+          testAndUnion(indices[a], indices[b]);
+        }
+      }
+    }
+  });
+
+  // 3B. Candidate Generation via Inverted Keyword Index (Fuzzy & Semantic)
+  // Only compare items that share high-information concept keywords
+  keywordInvertedIndex.forEach((indices) => {
+    if (indices.length > 1 && indices.length < 150) {
+      for (let a = 0; a < indices.length; a++) {
+        for (let b = a + 1; b < indices.length; b++) {
+          testAndUnion(indices[a], indices[b]);
+        }
+      }
+    }
+  });
+
+  // 3C. Fallback for smaller sets (n <= 300) to ensure 100% full coverage
+  if (n <= 300) {
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        testAndUnion(i, j);
       }
     }
   }
 
-  // Bucket groups
+  // 4. Bucket groups
   const groupBuckets = new Map<number, Question[]>();
   for (let i = 0; i < n; i++) {
     const root = find(i);

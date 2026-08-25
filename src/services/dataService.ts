@@ -1591,7 +1591,7 @@ export const dataService = {
   // QUESTION BANK MASTER SYSTEM
   // ------------------------------------
   getAllQuestionBank: async (): Promise<Question[]> => {
-    // 1. Load Question Bank Master pool
+    // 1. Load Question Bank Master pool from cache immediately
     const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
     let masterBank: Question[] = [];
     try {
@@ -1629,8 +1629,8 @@ export const dataService = {
       }
     });
 
-    // 3. Fallback: Seed demo questions if bank is empty
-    if (bankMap.size === 0) {
+    // 3. Fallback: Seed demo questions if bank is completely empty and offline
+    if (bankMap.size === 0 && !isSupabaseConfigured()) {
       Object.values(DEMO_QUESTIONS).forEach(qList => {
         if (Array.isArray(qList)) {
           qList.forEach(q => {
@@ -1642,29 +1642,202 @@ export const dataService = {
       });
     }
 
-    // 4. Supabase sync if connected
+    // 4. Fast Supabase sync with timeout race (6000ms max)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        const { data, error } = await supabase
-          .from('questions')
-          .select('*')
-          .order('created_at', { ascending: false });
-        if (!error && Array.isArray(data)) {
-          data.forEach((q: any) => {
-            if (q && q.id && !bankMap.has(q.id)) {
-              bankMap.set(q.id, { ...q, test_id: 'bank' } as Question);
+        const fetchPromise = (async () => {
+          let allRemoteRows: any[] = [];
+          let from = 0;
+          const batchSize = 1000;
+          let hasMore = true;
+
+          while (hasMore) {
+            const { data, error } = await supabase
+              .from('questions')
+              .select('*')
+              .range(from, from + batchSize - 1)
+              .order('created_at', { ascending: false });
+
+            if (error) break;
+            if (Array.isArray(data) && data.length > 0) {
+              allRemoteRows = allRemoteRows.concat(data);
+              if (data.length < batchSize) {
+                hasMore = false;
+              } else {
+                from += batchSize;
+              }
+            } else {
+              hasMore = false;
+            }
+            if (from > 10000) break;
+          }
+          return allRemoteRows;
+        })();
+
+        const timeoutPromise = new Promise<any[]>((_, reject) =>
+          setTimeout(() => reject(new Error('Supabase fetch timeout')), 6000)
+        );
+
+        const remoteData = await Promise.race([fetchPromise, timeoutPromise]);
+        if (Array.isArray(remoteData) && remoteData.length > 0) {
+          remoteData.forEach((q: any) => {
+            if (q && q.id) {
+              const existing = bankMap.get(q.id);
+              bankMap.set(q.id, {
+                ...existing,
+                ...q,
+                id: q.id,
+                test_id: q.test_id || existing?.test_id || 'bank',
+                inspection_status: q.inspection_status || existing?.inspection_status || 'verified',
+                quality_score: q.quality_score !== undefined ? Number(q.quality_score) : (existing?.quality_score ?? 90),
+              } as Question);
             }
           });
         }
       } catch (e) {
-        console.warn('Supabase all questions fetch error', e);
+        console.warn('Supabase questions fetch warning (continuing with cached bank):', e);
       }
     }
 
     const unifiedList = Array.from(bankMap.values());
-    localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(unifiedList));
+    try {
+      localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(unifiedList));
+    } catch {}
     return unifiedList;
+  },
+
+  syncQuestionBankWithSupabase: async (options?: { timeoutMs?: number }): Promise<{
+    success: boolean;
+    totalCount: number;
+    pulledFromCloud: number;
+    error?: string;
+  }> => {
+    const timeoutMs = options?.timeoutMs || 10000;
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase) {
+      const local = await dataService.getAllQuestionBank();
+      return { success: true, totalCount: local.length, pulledFromCloud: 0 };
+    }
+
+    try {
+      const fetchPromise = (async () => {
+        let allRemoteRows: any[] = [];
+        let from = 0;
+        const batchSize = 1000;
+        let hasMore = true;
+
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('questions')
+            .select('*')
+            .range(from, from + batchSize - 1)
+            .order('created_at', { ascending: false });
+
+          if (error) {
+            console.warn('Supabase range query error:', error);
+            break;
+          }
+
+          if (Array.isArray(data) && data.length > 0) {
+            allRemoteRows = allRemoteRows.concat(data);
+            if (data.length < batchSize) {
+              hasMore = false;
+            } else {
+              from += batchSize;
+            }
+          } else {
+            hasMore = false;
+          }
+
+          if (from > 25000) break;
+        }
+        return allRemoteRows;
+      })();
+
+      const timeoutPromise = new Promise<any[]>((_, reject) =>
+        setTimeout(() => reject(new Error('Supabase sync timed out')), timeoutMs)
+      );
+
+      const remoteQuestions = await Promise.race([fetchPromise, timeoutPromise]);
+
+      // Load local master bank
+      const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+      let masterBank: Question[] = [];
+      try {
+        masterBank = rawBank ? JSON.parse(rawBank) : [];
+        if (!Array.isArray(masterBank)) masterBank = [];
+      } catch {
+        masterBank = [];
+      }
+
+      const bankMap = new Map<string, Question>();
+      masterBank.forEach(q => {
+        if (q && q.id) bankMap.set(q.id, q);
+      });
+
+      // Also merge test questions
+      const rawQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+      let questionsMap: Record<string, Question[]> = {};
+      try {
+        questionsMap = rawQuestions ? JSON.parse(rawQuestions) : {};
+      } catch {}
+      Object.values(questionsMap).forEach(qList => {
+        if (Array.isArray(qList)) {
+          qList.forEach(q => {
+            if (q && q.id && !bankMap.has(q.id)) {
+              bankMap.set(q.id, q);
+            }
+          });
+        }
+      });
+
+      // Merge remote questions
+      let pulledCount = 0;
+      if (Array.isArray(remoteQuestions)) {
+        remoteQuestions.forEach((q: any) => {
+          if (q && q.id) {
+            const existing = bankMap.get(q.id);
+            const cleanQ: Question = {
+              ...existing,
+              ...q,
+              id: q.id,
+              test_id: q.test_id || existing?.test_id || 'bank',
+              inspection_status: q.inspection_status || existing?.inspection_status || 'verified',
+              quality_score: q.quality_score !== undefined ? Number(q.quality_score) : (existing?.quality_score ?? 90),
+              subject: q.subject || existing?.subject || 'General Studies',
+              chapter: q.chapter || existing?.chapter || 'General',
+              topic: q.topic || existing?.topic || 'General Topic',
+              difficulty: q.difficulty || existing?.difficulty || 'Medium',
+            };
+            bankMap.set(q.id, cleanQ);
+            pulledCount++;
+          }
+        });
+      }
+
+      const unifiedList = Array.from(bankMap.values());
+      try {
+        localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(unifiedList));
+      } catch (quotaErr) {
+        console.warn('LocalStorage quota limit reached:', quotaErr);
+      }
+
+      return {
+        success: true,
+        totalCount: unifiedList.length,
+        pulledFromCloud: pulledCount
+      };
+    } catch (e: any) {
+      console.warn('Supabase syncQuestionBank error:', e);
+      const local = await dataService.getAllQuestionBank();
+      return {
+        success: false,
+        totalCount: local.length,
+        pulledFromCloud: 0,
+        error: e.message || 'Sync failed'
+      };
+    }
   },
 
   saveQuestionToBank: async (question: Question): Promise<Question> => {
@@ -1678,6 +1851,36 @@ export const dataService = {
       created_at: question.created_at || new Date().toISOString()
     };
     syncToQuestionBankMaster([cleanQ]);
+
+    // Persist immediately to Supabase
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const dbPayload: any = {
+          id: validQId,
+          test_id: null,
+          question_text: cleanQ.question_text || '',
+          question_image: cleanQ.question_image || null,
+          option_a: cleanQ.option_a || '',
+          option_b: cleanQ.option_b || '',
+          option_c: cleanQ.option_c || '',
+          option_d: cleanQ.option_d || '',
+          correct_answer: (cleanQ.correct_answer || 'A').toString().toUpperCase().slice(0, 1),
+          explanation: cleanQ.explanation || null,
+          marks: parseSafeNumber(cleanQ.marks, 1),
+          negative_marks: parseSafeNumber(cleanQ.negative_marks, 0),
+          subject: cleanQ.subject || 'General Studies',
+          chapter: cleanQ.chapter || 'General',
+          topic: cleanQ.topic || 'General Topic',
+          difficulty: cleanQ.difficulty || 'Medium',
+          created_at: cleanQ.created_at
+        };
+        await supabase.from('questions').upsert(dbPayload, { onConflict: 'id' });
+      } catch (err) {
+        console.warn('Supabase saveQuestionToBank upsert error:', err);
+      }
+    }
+
     return cleanQ;
   },
 

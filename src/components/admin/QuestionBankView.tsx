@@ -23,7 +23,9 @@ import {
   Eye,
   Copy,
   ChevronDown,
-  Shuffle
+  Shuffle,
+  Cloud,
+  Database
 } from 'lucide-react';
 import { Question, Test } from '../../types';
 import { dataService, shuffleQuestionOptions, shuffleAndBalanceQuestions } from '../../services/dataService';
@@ -99,23 +101,68 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
 
   // Target Test for adding
   const [targetTestId, setTargetTestId] = useState('');
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
 
   useEffect(() => {
     loadBankData();
   }, []);
 
-  const loadBankData = async () => {
-    setLoading(true);
-    const [allQ, allTests] = await Promise.all([
-      dataService.getAllQuestionBank(),
-      dataService.getTests(true),
-    ]);
-    setQuestions(allQ);
-    setTests(allTests);
-    if (allTests.length > 0 && !targetTestId) {
-      setTargetTestId(allTests[0].id);
+  const loadBankData = async (forceCloudSync = false) => {
+    // 1. Instant Cache Render - Zero Delay
+    try {
+      const [allQ, allTests] = await Promise.all([
+        dataService.getAllQuestionBank(),
+        dataService.getTests(true),
+      ]);
+      setQuestions(allQ);
+      setTests(allTests);
+      if (allTests.length > 0 && !targetTestId) {
+        setTargetTestId(allTests[0].id);
+      }
+    } catch (e) {
+      console.warn('Local question bank load error:', e);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
+
+    // 2. Background Real-time Cloud Sync with Supabase
+    if (forceCloudSync || !lastSyncTime) {
+      setIsSyncingCloud(true);
+      try {
+        const syncRes = await dataService.syncQuestionBankWithSupabase({ timeoutMs: 8000 });
+        if (syncRes.success) {
+          const refreshedQ = await dataService.getAllQuestionBank();
+          setQuestions(refreshedQ);
+          setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        }
+      } catch (err) {
+        console.warn('Background Supabase Question Bank sync warning:', err);
+      } finally {
+        setIsSyncingCloud(false);
+      }
+    }
+  };
+
+  const handleManualCloudSync = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const res = await dataService.syncQuestionBankWithSupabase({ timeoutMs: 12000 });
+      if (res.success) {
+        const refreshedQ = await dataService.getAllQuestionBank();
+        const refreshedTests = await dataService.getTests(true);
+        setQuestions(refreshedQ);
+        setTests(refreshedTests);
+        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+        onToast?.('success', `✓ Supabase Sync Successful: ${refreshedQ.length} total MCQs ready in Bank (${res.pulledFromCloud} updated from cloud)!`);
+      } else {
+        onToast?.('error', res.error || 'Supabase sync failed. Please check network/credentials.');
+      }
+    } catch (err: any) {
+      onToast?.('error', err?.message || 'Failed to sync with Supabase.');
+    } finally {
+      setIsSyncingCloud(false);
+    }
   };
 
   // Distinct Filter options
@@ -492,6 +539,17 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
 
           {/* ACTION BUTTONS GROUP */}
           <div className="flex flex-wrap items-center gap-2.5">
+            {/* SUPABASE CLOUD SYNC BUTTON */}
+            <button
+              onClick={handleManualCloudSync}
+              disabled={isSyncingCloud}
+              className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 border border-teal-400/30"
+              title="Sync Question Bank directly with Supabase cloud database"
+            >
+              <Cloud className={`w-4 h-4 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+              <span>{isSyncingCloud ? 'Syncing Cloud...' : 'Sync Supabase'}</span>
+            </button>
+
             {/* BULK 360 INSPECT BUTTON */}
             <button
               onClick={() => setIsBulkInspectOpen(true)}
@@ -585,7 +643,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
         </div>
 
         {/* QUICK STATS PILLS */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-6 border-t border-white/10 mt-6">
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-6 border-t border-white/10 mt-6">
           <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
             <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Total Questions</span>
             <div className="text-xl font-black text-white">{questions.length}</div>
@@ -603,6 +661,15 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
           <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
             <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider">Connected Mock Tests</span>
             <div className="text-xl font-black text-amber-300">{tests.length}</div>
+          </div>
+          <div className="bg-white/5 rounded-2xl p-3 border border-white/5">
+            <span className="text-[10px] text-slate-400 uppercase font-bold tracking-wider flex items-center gap-1">
+              <Database className="w-3 h-3 text-cyan-400" /> Supabase Cloud
+            </span>
+            <div className="text-xs font-bold text-cyan-300 mt-1 flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${isSyncingCloud ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`}></span>
+              {isSyncingCloud ? 'Syncing...' : lastSyncTime ? `Live (${lastSyncTime})` : 'Connected'}
+            </div>
           </div>
         </div>
       </div>
