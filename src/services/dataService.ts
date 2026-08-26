@@ -102,7 +102,93 @@ const STORAGE_KEYS = {
   REPORTS: 'gradeup_question_reports'
 };
 
-// Helper: Ensure questions are permanently registered in Question Bank Master
+/**
+ * Normalize question string for exact content fingerprinting
+ */
+export const normalizeQuestionText = (text: string): string => {
+  if (!text) return '';
+  return text
+    .toLowerCase()
+    .replace(/[?.,!;:_'"“”‘’`~\-–—()[\]{}<>/*+=#@$%^&|\\]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+/**
+ * Computes deterministic content fingerprint for a Question.
+ * Questions with identical text & options (even if options are shuffled or IDs differ) produce the EXACT same fingerprint.
+ */
+export const getQuestionFingerprint = (q: Partial<Question>): string => {
+  if (!q || !q.question_text) return '';
+  const normText = normalizeQuestionText(q.question_text);
+  if (!normText) return '';
+  const opts = [
+    normalizeQuestionText(q.option_a || ''),
+    normalizeQuestionText(q.option_b || ''),
+    normalizeQuestionText(q.option_c || ''),
+    normalizeQuestionText(q.option_d || ''),
+  ].filter(Boolean).sort().join('|');
+
+  return `${normText}:::${opts}`;
+};
+
+/**
+ * Calculates completeness and quality rank of a question for master preservation
+ */
+export const getQuestionQualityRank = (q: Partial<Question>): number => {
+  if (!q) return 0;
+  let score = 0;
+  if (q.inspection_status === 'verified') score += 1000;
+  if (q.explanation && q.explanation.trim().length > 10) score += Math.min(q.explanation.length, 500);
+  if (q.quality_score !== undefined) score += Number(q.quality_score);
+  if (q.topic && q.topic !== 'General Topic') score += 50;
+  if (q.chapter && q.chapter !== 'General') score += 50;
+  if (q.subject && q.subject !== 'General Studies') score += 50;
+  if (q.difficulty) score += 20;
+  return score;
+};
+
+/**
+ * Safely merges duplicate questions keeping the highest quality data fields
+ */
+export const mergeMasterQuestion = (existing: Question | undefined, incoming: Question): Question => {
+  if (!existing) {
+    return {
+      ...incoming,
+      test_id: 'bank',
+      inspection_status: incoming.inspection_status || 'verified',
+      quality_score: incoming.quality_score !== undefined ? Number(incoming.quality_score) : 90,
+    };
+  }
+
+  const existingRank = getQuestionQualityRank(existing);
+  const incomingRank = getQuestionQualityRank(incoming);
+  const primary = incomingRank >= existingRank ? incoming : existing;
+  const secondary = incomingRank >= existingRank ? existing : incoming;
+
+  return {
+    ...secondary,
+    ...primary,
+    id: existing.id || primary.id, // Preserve existing stable master ID
+    test_id: 'bank',
+    question_text: primary.question_text || secondary.question_text,
+    option_a: primary.option_a || secondary.option_a,
+    option_b: primary.option_b || secondary.option_b,
+    option_c: primary.option_c || secondary.option_c,
+    option_d: primary.option_d || secondary.option_d,
+    correct_answer: primary.correct_answer || secondary.correct_answer || 'A',
+    explanation: (primary.explanation && primary.explanation.length > (secondary.explanation?.length || 0)) ? primary.explanation : (secondary.explanation || primary.explanation || ''),
+    subject: primary.subject && primary.subject !== 'General Studies' ? primary.subject : (secondary.subject || primary.subject || 'General Studies'),
+    chapter: primary.chapter && primary.chapter !== 'General' ? primary.chapter : (secondary.chapter || primary.chapter || 'General'),
+    topic: primary.topic && primary.topic !== 'General Topic' ? primary.topic : (secondary.topic || primary.topic || 'General Topic'),
+    difficulty: primary.difficulty || secondary.difficulty || 'Medium',
+    inspection_status: (primary.inspection_status === 'verified' || secondary.inspection_status === 'verified') ? 'verified' : (primary.inspection_status || 'pending'),
+    quality_score: Math.max(Number(primary.quality_score) || 90, Number(secondary.quality_score) || 90),
+    created_at: existing.created_at || primary.created_at || new Date().toISOString()
+  };
+};
+
+// Helper: Ensure questions are permanently registered in Question Bank Master without creating duplicates
 export const syncToQuestionBankMaster = (questionsToSync: Question[]): void => {
   if (!Array.isArray(questionsToSync) || questionsToSync.length === 0) return;
   try {
@@ -126,24 +212,38 @@ export const syncToQuestionBankMaster = (questionsToSync: Question[]): void => {
     }
 
     const bankMap = new Map<string, Question>();
+    const fingerprintMap = new Map<string, string>(); // fingerprint -> questionId
+
+    // Index existing bank questions by ID and fingerprint
     bankList.forEach(q => {
-      if (q && q.id && !deletedSet.has(q.id)) bankMap.set(q.id, q);
+      if (q && q.id && !deletedSet.has(q.id)) {
+        bankMap.set(q.id, q);
+        const fp = getQuestionFingerprint(q);
+        if (fp && !fingerprintMap.has(fp)) {
+          fingerprintMap.set(fp, q.id);
+        }
+      }
     });
 
     questionsToSync.forEach(q => {
       if (!q || !q.question_text) return;
-      const qId = q.id || generateUUID();
-      if (deletedSet.has(qId)) return; // Skip if deleted from bank
-      const existing = bankMap.get(qId);
-      const cleanQ: Question = {
-        ...existing,
+      if (deletedSet.has(q.id)) return; // Skip if deleted from bank
+
+      const fp = getQuestionFingerprint(q);
+      const existingIdByFp = fp ? fingerprintMap.get(fp) : undefined;
+      const targetId = existingIdByFp || (q.id && isValidUUID(q.id) ? q.id : generateUUID());
+
+      if (deletedSet.has(targetId)) return;
+
+      const existing = bankMap.get(targetId);
+      const cleanQ = mergeMasterQuestion(existing, {
         ...q,
-        id: qId,
-        test_id: 'bank',
-        inspection_status: q.inspection_status || existing?.inspection_status || 'verified',
-        quality_score: q.quality_score !== undefined ? Number(q.quality_score) : (existing?.quality_score ?? 90),
-      };
-      bankMap.set(qId, cleanQ);
+        id: targetId,
+        test_id: 'bank'
+      });
+
+      bankMap.set(targetId, cleanQ);
+      if (fp) fingerprintMap.set(fp, targetId);
     });
 
     localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(Array.from(bankMap.values())));
@@ -1716,49 +1816,43 @@ export const dataService = {
     }
 
     const bankMap = new Map<string, Question>();
-    masterBank.forEach(q => {
-      if (q && q.id && !deletedSet.has(q.id)) {
-        bankMap.set(q.id, { ...q, test_id: q.test_id || 'bank' });
-      }
-    });
+    const fingerprintMap = new Map<string, string>(); // fingerprint -> questionId
 
-    // 2. Also merge questions from all existing mock tests (excluding deleted ones)
-    const rawQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    let questionsMap: Record<string, Question[]> = {};
-    try {
-      questionsMap = rawQuestions ? JSON.parse(rawQuestions) : {};
-    } catch {}
+    // Helper to safely register a question in the master bank index without creating duplicates
+    const registerQuestion = (q: any) => {
+      if (!q || !q.question_text || !q.id) return;
+      if (deletedSet.has(q.id)) return;
 
-    Object.entries(questionsMap).forEach(([_, qList]) => {
-      if (Array.isArray(qList)) {
-        qList.forEach(q => {
-          if (q && q.id && !deletedSet.has(q.id)) {
-            const existing = bankMap.get(q.id);
-            bankMap.set(q.id, {
-              ...q,
-              ...existing,
-              id: q.id,
-              test_id: 'bank',
-            });
-          }
-        });
-      }
-    });
+      const fp = getQuestionFingerprint(q);
+      const existingIdByFp = fp ? fingerprintMap.get(fp) : undefined;
+      const targetId = existingIdByFp || q.id;
 
-    // 3. Fallback: Seed demo questions if bank is completely empty and offline
+      if (deletedSet.has(targetId)) return;
+
+      const existing = bankMap.get(targetId);
+      const cleanQ = mergeMasterQuestion(existing, {
+        ...q,
+        id: targetId,
+        test_id: 'bank'
+      });
+
+      bankMap.set(targetId, cleanQ);
+      if (fp) fingerprintMap.set(fp, targetId);
+    };
+
+    // 1a. Ingest cached master bank
+    masterBank.forEach(q => registerQuestion(q));
+
+    // 2. Fallback: Seed demo questions only if bank is completely empty and offline
     if (bankMap.size === 0 && !isSupabaseConfigured()) {
       Object.values(DEMO_QUESTIONS).forEach(qList => {
         if (Array.isArray(qList)) {
-          qList.forEach(q => {
-            if (q && q.id && !deletedSet.has(q.id) && !bankMap.has(q.id)) {
-              bankMap.set(q.id, { ...q, test_id: 'bank' });
-            }
-          });
+          qList.forEach(q => registerQuestion(q));
         }
       });
     }
 
-    // 4. Fast Supabase sync with timeout race (6000ms max)
+    // 3. Fast Supabase sync with timeout race (6000ms max)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
@@ -1797,19 +1891,7 @@ export const dataService = {
 
         const remoteData = await Promise.race([fetchPromise, timeoutPromise]);
         if (Array.isArray(remoteData) && remoteData.length > 0) {
-          remoteData.forEach((q: any) => {
-            if (q && q.id && !deletedSet.has(q.id)) {
-              const existing = bankMap.get(q.id);
-              bankMap.set(q.id, {
-                ...existing,
-                ...q,
-                id: q.id,
-                test_id: q.test_id || existing?.test_id || 'bank',
-                inspection_status: q.inspection_status || existing?.inspection_status || 'verified',
-                quality_score: q.quality_score !== undefined ? Number(q.quality_score) : (existing?.quality_score ?? 90),
-              } as Question);
-            }
-          });
+          remoteData.forEach((q: any) => registerQuestion(q));
         }
       } catch (e) {
         console.warn('Supabase questions fetch warning (continuing with cached bank):', e);
@@ -1898,47 +1980,37 @@ export const dataService = {
       }
 
       const bankMap = new Map<string, Question>();
-      masterBank.forEach(q => {
-        if (q && q.id && !deletedSet.has(q.id)) bankMap.set(q.id, q);
-      });
+      const fingerprintMap = new Map<string, string>(); // fingerprint -> questionId
 
-      // Also merge test questions
-      const rawQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-      let questionsMap: Record<string, Question[]> = {};
-      try {
-        questionsMap = rawQuestions ? JSON.parse(rawQuestions) : {};
-      } catch {}
-      Object.values(questionsMap).forEach(qList => {
-        if (Array.isArray(qList)) {
-          qList.forEach(q => {
-            if (q && q.id && !deletedSet.has(q.id) && !bankMap.has(q.id)) {
-              bankMap.set(q.id, q);
-            }
-          });
-        }
-      });
+      const registerQuestion = (q: any) => {
+        if (!q || !q.question_text || !q.id) return;
+        if (deletedSet.has(q.id)) return;
+
+        const fp = getQuestionFingerprint(q);
+        const existingIdByFp = fp ? fingerprintMap.get(fp) : undefined;
+        const targetId = existingIdByFp || q.id;
+
+        if (deletedSet.has(targetId)) return;
+
+        const existing = bankMap.get(targetId);
+        const cleanQ = mergeMasterQuestion(existing, {
+          ...q,
+          id: targetId,
+          test_id: 'bank'
+        });
+
+        bankMap.set(targetId, cleanQ);
+        if (fp) fingerprintMap.set(fp, targetId);
+      };
+
+      masterBank.forEach(q => registerQuestion(q));
 
       // Merge remote questions
       let pulledCount = 0;
       if (Array.isArray(remoteQuestions)) {
         remoteQuestions.forEach((q: any) => {
-          if (q && q.id && !deletedSet.has(q.id)) {
-            const existing = bankMap.get(q.id);
-            const cleanQ: Question = {
-              ...existing,
-              ...q,
-              id: q.id,
-              test_id: q.test_id || existing?.test_id || 'bank',
-              inspection_status: q.inspection_status || existing?.inspection_status || 'verified',
-              quality_score: q.quality_score !== undefined ? Number(q.quality_score) : (existing?.quality_score ?? 90),
-              subject: q.subject || existing?.subject || 'General Studies',
-              chapter: q.chapter || existing?.chapter || 'General',
-              topic: q.topic || existing?.topic || 'General Topic',
-              difficulty: q.difficulty || existing?.difficulty || 'Medium',
-            };
-            bankMap.set(q.id, cleanQ);
-            pulledCount++;
-          }
+          registerQuestion(q);
+          pulledCount++;
         });
       }
 
@@ -2023,7 +2095,7 @@ export const dataService = {
     return cleanQ;
   },
 
-  // High-Speed Atomic Batch Save for Question Bank (Saves 1000+ MCQs in <1 second)
+  // High-Speed Atomic Batch Save for Question Bank (Saves 1000+ MCQs with automatic deduplication)
   saveQuestionsToBankBatch: async (questionsList: Question[]): Promise<{ success: boolean; count: number }> => {
     if (!Array.isArray(questionsList) || questionsList.length === 0) return { success: true, count: 0 };
 
@@ -2057,22 +2129,38 @@ export const dataService = {
       }
     } catch {}
 
-    // 3. Single-Pass LocalStorage Master Bank Update (Zero Lag)
+    // 3. Single-Pass LocalStorage Master Bank Update with fingerprint deduplication
     try {
       const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
       let bankList: Question[] = rawBank ? JSON.parse(rawBank) : [];
       if (!Array.isArray(bankList)) bankList = [];
       const bankMap = new Map<string, Question>();
+      const fingerprintMap = new Map<string, string>();
+
       bankList.forEach(q => {
-        if (q && q.id) bankMap.set(q.id, q);
+        if (q && q.id) {
+          bankMap.set(q.id, q);
+          const fp = getQuestionFingerprint(q);
+          if (fp && !fingerprintMap.has(fp)) {
+            fingerprintMap.set(fp, q.id);
+          }
+        }
       });
 
       sanitizedList.forEach(cleanQ => {
-        const existing = bankMap.get(cleanQ.id);
-        bankMap.set(cleanQ.id, {
-          ...existing,
+        const fp = getQuestionFingerprint(cleanQ);
+        const existingIdByFp = fp ? fingerprintMap.get(fp) : undefined;
+        const targetId = existingIdByFp || cleanQ.id;
+
+        const existing = bankMap.get(targetId);
+        const merged = mergeMasterQuestion(existing, {
           ...cleanQ,
+          id: targetId,
+          test_id: 'bank'
         });
+
+        bankMap.set(targetId, merged);
+        if (fp) fingerprintMap.set(fp, targetId);
       });
 
       localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(Array.from(bankMap.values())));
