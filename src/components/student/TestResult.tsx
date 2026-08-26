@@ -824,7 +824,7 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
       <ShareScorecardModal
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
-        attempt={attempt}
+        attempt={currentAttempt}
         test={test}
         rank={myRank}
         totalCandidates={totalAspirants}

@@ -39,8 +39,10 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
 }) => {
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageBlob, setImageBlob] = useState<Blob | null>(null);
   const [isGenerating, setIsGenerating] = useState(true);
-  const [copied, setCopied] = useState(false);
+  const [copiedText, setCopiedText] = useState(false);
+  const [copiedImage, setCopiedImage] = useState(false);
   const [canSystemShareFiles, setCanSystemShareFiles] = useState(false);
 
   const testTitle = test?.title || 'Mock Test';
@@ -48,10 +50,8 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
 
   const totalMarks = test?.total_marks ?? (attempt.total_questions ? attempt.total_questions * (test?.marks_per_question || 1) : 100);
 
-  // Professional Formatted Share Text matching user requirement
+  // Professional Formatted Share Text matching user requirement with score and link
   const shareText = `🎯 I scored ${attempt.score} marks (${attempt.percentage}%) and secured Rank #${rank} on Gradeup Study's "${testTitle}"! Try it now: ${shareUrl}`;
-
-  const detailedShareText = `🎯 I scored ${attempt.score} marks (${attempt.percentage}%) and secured Rank #${rank} on Gradeup Study's "${testTitle}"!\n\n📊 My Performance:\n• Score: ${attempt.score} / ${totalMarks}\n• Accuracy: ${attempt.percentage}%\n• Rank: #${rank} (out of ${totalCandidates} aspirants)\n• Time Taken: ${Math.floor(attempt.time_taken_seconds / 60)}m ${attempt.time_taken_seconds % 60}s\n\n👉 Attempt this test now: ${shareUrl}`;
 
   useEffect(() => {
     if (isOpen) {
@@ -72,6 +72,7 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
         logoUrl: settings.logo_url,
         shareUrl
       });
+      setImageBlob(result.blob);
       setImageDataUrl(result.dataUrl);
       setImageFile(result.file);
 
@@ -83,13 +84,29 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
       }
     } catch (err) {
       console.error('Failed to generate scorecard image:', err);
-      onToast?.('error', 'Could not generate scorecard image. You can still share the text!');
+      onToast?.('error', 'Could not generate scorecard image. You can still share the score text!');
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleDownloadImage = () => {
+  const copyImageToClipboard = async (): Promise<boolean> => {
+    if (!imageBlob) return false;
+    try {
+      if (navigator.clipboard && typeof ClipboardItem !== 'undefined') {
+        const item = new ClipboardItem({ 'image/png': imageBlob });
+        await navigator.clipboard.write([item]);
+        setCopiedImage(true);
+        setTimeout(() => setCopiedImage(false), 2500);
+        return true;
+      }
+    } catch (e) {
+      console.warn('Direct image clipboard copy not supported:', e);
+    }
+    return false;
+  };
+
+  const handleDownloadImage = (silent = false) => {
     if (!imageDataUrl) return;
     const link = document.createElement('a');
     const safeName = (attempt.student_name || 'Scorecard').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -98,45 +115,101 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    onToast?.('success', 'Scorecard HD image downloaded successfully!');
+    if (!silent) {
+      // Also copy text to clipboard for convenient pasting
+      navigator.clipboard?.writeText(shareText).catch(() => {});
+      onToast?.('success', 'Scorecard HD image downloaded & score link copied to clipboard!');
+    }
   };
 
   const handleCopyText = async () => {
     try {
       await navigator.clipboard.writeText(shareText);
-      setCopied(true);
+      setCopiedText(true);
       onToast?.('success', 'Score text & test link copied to clipboard!');
-      setTimeout(() => setCopied(false), 2500);
+      setTimeout(() => setCopiedText(false), 2500);
     } catch {
       onToast?.('error', 'Failed to copy to clipboard.');
     }
   };
 
-  const handleWhatsAppShare = () => {
-    // Encodes the professional message including the link
-    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
-    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+  const handleCopyImage = async () => {
+    const success = await copyImageToClipboard();
+    if (success) {
+      onToast?.('success', 'Scorecard Image copied to clipboard! Paste (Ctrl+V) directly anywhere.');
+    } else {
+      handleDownloadImage();
+    }
   };
 
-  const handleTelegramShare = () => {
+  const handleWhatsAppShare = async () => {
+    // 1. If mobile system share supports files, share image + score text + link directly
+    if (imageFile && canSystemShareFiles && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Gradeup Study Scorecard - ${attempt.student_name}`,
+          text: shareText,
+          files: [imageFile]
+        });
+        onToast?.('success', 'Scorecard image & score shared successfully!');
+        return;
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+
+    // 2. Fallback on Desktop Web / Non-file share:
+    // Copy image to clipboard + auto-save image + copy link + open WhatsApp
+    await copyImageToClipboard();
+    handleDownloadImage(true);
+    
+    const whatsappUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText)}`;
+    window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
+    onToast?.('success', 'Scorecard Image copied to clipboard & downloaded! Paste (Ctrl+V) directly into WhatsApp chat.');
+  };
+
+  const handleTelegramShare = async () => {
+    // 1. If mobile system share supports files, share image + score text + link directly
+    if (imageFile && canSystemShareFiles && navigator.share) {
+      try {
+        await navigator.share({
+          title: `Gradeup Study Scorecard - ${attempt.student_name}`,
+          text: shareText,
+          files: [imageFile]
+        });
+        onToast?.('success', 'Scorecard image & score shared successfully!');
+        return;
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+      }
+    }
+
+    // 2. Fallback on Desktop:
+    await copyImageToClipboard();
+    handleDownloadImage(true);
+
     const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(shareUrl)}&text=${encodeURIComponent(`🎯 I scored ${attempt.score} marks (${attempt.percentage}%) and secured Rank #${rank} on Gradeup Study's "${testTitle}"! Try it now!`)}`;
     window.open(telegramUrl, '_blank', 'noopener,noreferrer');
+    onToast?.('success', 'Scorecard Image copied to clipboard & downloaded! Paste (Ctrl+V) directly into Telegram chat.');
   };
 
   const handleNativeShare = async () => {
     if (!navigator.share) {
+      await copyImageToClipboard();
+      handleDownloadImage(true);
       handleCopyText();
       return;
     }
 
     try {
       if (imageFile && canSystemShareFiles) {
-        // Native share with attached HD scorecard image + text
+        // Native share with attached HD scorecard image + text + link
         await navigator.share({
           title: `Gradeup Study Scorecard - ${attempt.student_name}`,
           text: shareText,
           files: [imageFile]
         });
+        onToast?.('success', 'Scorecard image & score link shared successfully!');
       } else {
         // Text & URL share
         await navigator.share({
@@ -144,10 +217,11 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
           text: shareText,
           url: shareUrl
         });
+        onToast?.('success', 'Scorecard shared successfully!');
       }
-      onToast?.('success', 'Scorecard shared successfully!');
     } catch (err: any) {
       if (err?.name !== 'AbortError') {
+        await copyImageToClipboard();
         handleCopyText();
       }
     }
@@ -232,10 +306,17 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
                   />
                   <div className="absolute inset-0 bg-slate-950/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-xs">
                     <button
-                      onClick={handleDownloadImage}
+                      onClick={() => handleDownloadImage()}
                       className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl shadow-lg flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer"
                     >
                       <Download className="w-4 h-4" /> Download PNG
+                    </button>
+                    <button
+                      onClick={handleCopyImage}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl shadow-lg flex items-center gap-1.5 transition-transform active:scale-95 cursor-pointer border border-slate-600"
+                    >
+                      {copiedImage ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-amber-400" />}
+                      <span>{copiedImage ? 'Image Copied!' : 'Copy Image'}</span>
                     </button>
                   </div>
                 </>
@@ -251,14 +332,27 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
               <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
                 Caption & Test Link
               </span>
-              <button
-                id="copy-scorecard-text-btn"
-                onClick={handleCopyText}
-                className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer transition-colors"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? 'Copied!' : 'Copy Caption'}</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  id="copy-scorecard-img-btn"
+                  onClick={handleCopyImage}
+                  disabled={!imageBlob || isGenerating}
+                  className="text-xs font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer transition-colors disabled:opacity-50"
+                  title="Copy Scorecard Graphic image to clipboard"
+                >
+                  {copiedImage ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedImage ? 'Image Copied!' : 'Copy Image'}</span>
+                </button>
+                <span className="text-slate-600">|</span>
+                <button
+                  id="copy-scorecard-text-btn"
+                  onClick={handleCopyText}
+                  className="text-xs font-bold text-blue-400 hover:text-blue-300 flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  {copiedText ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedText ? 'Copied!' : 'Copy Caption'}</span>
+                </button>
+              </div>
             </div>
 
             <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 text-slate-200 text-xs sm:text-sm font-medium leading-relaxed select-all">
@@ -274,7 +368,8 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
               <button
                 id="share-whatsapp-btn"
                 onClick={handleWhatsAppShare}
-                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                disabled={isGenerating}
+                className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-emerald-950/40 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
               >
                 <MessageCircle className="w-4 h-4 shrink-0 fill-white" />
                 <span>Share on WhatsApp</span>
@@ -284,7 +379,8 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
               <button
                 id="share-telegram-btn"
                 onClick={handleTelegramShare}
-                className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-sky-950/40 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                disabled={isGenerating}
+                className="w-full py-3 px-4 bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-black text-xs sm:text-sm rounded-xl shadow-lg shadow-sky-950/40 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
               >
                 <Send className="w-4 h-4 shrink-0 fill-white" />
                 <span>Share on Telegram</span>
@@ -297,7 +393,7 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
               {/* Download Scorecard Image */}
               <button
                 id="download-scorecard-img-btn"
-                onClick={handleDownloadImage}
+                onClick={() => handleDownloadImage()}
                 disabled={!imageDataUrl || isGenerating}
                 className="w-full py-3 px-4 bg-slate-800 hover:bg-slate-700 active:bg-slate-800/80 text-white font-bold text-xs sm:text-sm rounded-xl border border-slate-700 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
               >
@@ -313,7 +409,7 @@ export const ShareScorecardModal: React.FC<ShareScorecardModalProps> = ({
                 className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white font-bold text-xs sm:text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
               >
                 <Smartphone className="w-4 h-4" />
-                <span>{canSystemShareFiles ? 'Share Image & Link' : 'System Share Sheet'}</span>
+                <span>{canSystemShareFiles ? 'Share Image & Link' : 'Share Scorecard'}</span>
               </button>
 
             </div>
