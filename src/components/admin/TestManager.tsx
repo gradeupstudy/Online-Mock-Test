@@ -33,6 +33,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const [filterSubject, setFilterSubject] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterAttempts, setFilterAttempts] = useState('all');
+  const [filterContent, setFilterContent] = useState<'all' | 'has_questions' | 'blank'>('all');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTest, setEditingTest] = useState<Partial<Test> | null>(null);
   const [deletingTest, setDeletingTest] = useState<Test | null>(null);
@@ -435,6 +436,10 @@ export const TestManager: React.FC<TestManagerProps> = ({
     }
   };
 
+  // Counts breakdown for MCQs
+  const withQuestionsCount = tests.filter((t) => Number(t.total_questions || 0) > 0).length;
+  const blankCount = tests.filter((t) => Number(t.total_questions || 0) === 0).length;
+
   // Filtered tests
   const filteredTests = tests.filter((t) => {
     const title = (t.title || '').toLowerCase();
@@ -455,11 +460,22 @@ export const TestManager: React.FC<TestManagerProps> = ({
       (filterAttempts === 'single' && attempts === 1) ||
       (filterAttempts === 'multiple' && attempts > 1);
 
-    return matchesQuery && matchesCategory && matchesSubject && matchesStatus && matchesAttempts;
+    const qCount = Number(t.total_questions || 0);
+    const matchesContent = 
+      filterContent === 'all' ||
+      (filterContent === 'has_questions' && qCount > 0) ||
+      (filterContent === 'blank' && qCount === 0);
+
+    return matchesQuery && matchesCategory && matchesSubject && matchesStatus && matchesAttempts && matchesContent;
   });
 
   const isAllFilteredSelected = filteredTests.length > 0 && filteredTests.every((t) => selectedTestIds.has(t.id));
   const selectedTestsList = tests.filter((t) => selectedTestIds.has(t.id));
+
+  const handleSelectAllBlank = () => {
+    const blankIds = tests.filter((t) => Number(t.total_questions || 0) === 0).map((t) => t.id);
+    setSelectedTestIds(new Set(blankIds));
+  };
 
   return (
     <div className="space-y-6">
@@ -557,6 +573,23 @@ export const TestManager: React.FC<TestManagerProps> = ({
           ))}
         </select>
 
+        {/* Filter by Question Count / Content */}
+        <select
+          value={filterContent}
+          onChange={(e) => setFilterContent(e.target.value as any)}
+          className={`px-3 py-2 border rounded-xl text-sm outline-hidden font-bold transition-all ${
+            filterContent === 'blank'
+              ? 'bg-amber-50 dark:bg-amber-950/70 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300'
+              : filterContent === 'has_questions'
+              ? 'bg-emerald-50 dark:bg-emerald-950/70 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300'
+              : 'bg-slate-50 dark:bg-slate-800 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white'
+          }`}
+        >
+          <option value="all">All MCQs Status ({tests.length})</option>
+          <option value="has_questions">⚡ Has MCQs Uploaded ({withQuestionsCount})</option>
+          <option value="blank">⚠️ Blank Tests - 0 MCQs ({blankCount})</option>
+        </select>
+
         <select
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
@@ -567,23 +600,11 @@ export const TestManager: React.FC<TestManagerProps> = ({
           <option value="draft">Draft</option>
           <option value="unpublished">Unpublished</option>
         </select>
-
-        {/* Filter by Attempt Limit */}
-        <select
-          value={filterAttempts}
-          onChange={(e) => setFilterAttempts(e.target.value)}
-          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-medium text-slate-900 dark:text-white"
-        >
-          <option value="all">All Attempts Policy</option>
-          <option value="unlimited">∞ Unlimited Only</option>
-          <option value="single">🔒 1 Attempt Only</option>
-          <option value="multiple">⚡ 2+ Attempts</option>
-        </select>
       </div>
 
       {/* Bulk Selection Bar & Stats */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 bg-slate-100 dark:bg-slate-800/80 rounded-2xl border border-slate-200 dark:border-slate-700">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <button
             type="button"
             onClick={handleSelectAllFiltered}
@@ -605,9 +626,61 @@ export const TestManager: React.FC<TestManagerProps> = ({
             </span>
           </button>
 
+          {/* Quick Metrics & Blank Tests Filter Pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setFilterContent('all')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                filterContent === 'all'
+                  ? 'bg-blue-600 text-white shadow-2xs'
+                  : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 hover:border-blue-400'
+              }`}
+            >
+              Total: <strong>{tests.length}</strong>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFilterContent('has_questions')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                filterContent === 'has_questions'
+                  ? 'bg-emerald-600 text-white shadow-2xs'
+                  : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100'
+              }`}
+              title="Filter to tests with MCQs uploaded"
+            >
+              ⚡ With MCQs: <strong>{withQuestionsCount}</strong>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setFilterContent('blank')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                filterContent === 'blank'
+                  ? 'bg-amber-600 text-white shadow-2xs'
+                  : 'bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100'
+              }`}
+              title="Click to view only Blank Mock Tests (0 MCQs)"
+            >
+              ⚠️ Blank (0 MCQs): <strong>{blankCount}</strong>
+            </button>
+
+            {blankCount > 0 && (
+              <button
+                type="button"
+                onClick={handleSelectAllBlank}
+                className="px-2.5 py-1 bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 hover:bg-purple-100 border border-purple-200 dark:border-purple-800 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-2xs"
+                title="Select all blank tests to generate AI MCQs in bulk"
+              >
+                Select Blank Tests ({blankCount})
+              </button>
+            )}
+          </div>
+
           {selectedTestIds.size > 0 && (
             <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
-              <strong className="text-blue-600 dark:text-blue-400 font-extrabold">{selectedTestIds.size}</strong> of {tests.length} mock tests selected
+              <strong className="text-blue-600 dark:text-blue-400 font-extrabold">{selectedTestIds.size}</strong> selected
             </span>
           )}
         </div>
@@ -689,6 +762,8 @@ export const TestManager: React.FC<TestManagerProps> = ({
           const isSelected = selectedTestIds.has(test.id);
           const hasSubject = Boolean(test.subject && test.subject.trim());
           const hasSections = Boolean(test.is_multisection && test.sections && test.sections.length > 0);
+          const qCount = Number(test.total_questions || 0);
+          const isBlank = qCount === 0;
 
           return (
             <div
@@ -697,12 +772,14 @@ export const TestManager: React.FC<TestManagerProps> = ({
               className={`group bg-white dark:bg-slate-900 rounded-2xl border p-5 sm:p-6 flex flex-col justify-between shadow-md hover:shadow-xl transition-all duration-200 relative cursor-pointer ${
                 isSelected
                   ? 'border-blue-500 ring-2 ring-blue-500/20 bg-blue-50/20 dark:bg-blue-950/20'
+                  : isBlank
+                  ? 'border-slate-200/90 dark:border-slate-800 hover:border-amber-400 dark:hover:border-amber-500'
                   : 'border-slate-200/90 dark:border-slate-800 hover:border-blue-400 dark:hover:border-blue-500'
               }`}
             >
               <div className="space-y-3.5">
                 
-                {/* Header Row: Checkbox + Category Badge + Test Code + Published Status */}
+                {/* Header Row: Checkbox + Category Badge + Test Code + MCQs Badge + Published Status */}
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     {/* Multi-Select Checkbox */}
@@ -727,6 +804,17 @@ export const TestManager: React.FC<TestManagerProps> = ({
                     <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/90 dark:border-slate-700 font-mono text-[11px] font-bold rounded-md uppercase">
                       {test.exam_code || test.test_code}
                     </span>
+
+                    {/* Question Status Badge: Blank vs Populated */}
+                    {isBlank ? (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 dark:bg-amber-950/90 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 flex items-center gap-1 shadow-2xs">
+                        ⚠️ 0 MCQs (Blank)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 flex items-center gap-1 shadow-2xs">
+                        ✓ {qCount} MCQs
+                      </span>
+                    )}
                   </div>
 
                   <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border flex items-center gap-1.5 shadow-2xs shrink-0 ${
@@ -767,9 +855,13 @@ export const TestManager: React.FC<TestManagerProps> = ({
 
                 {/* Specs Badge Pill Grid - High Contrast */}
                 <div className="grid grid-cols-4 gap-1.5 bg-slate-50 dark:bg-slate-800/80 p-2.5 sm:p-3 rounded-xl border border-slate-200/90 dark:border-slate-700/80 text-center text-xs">
-                  <div>
-                    <p className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">{test.total_questions}</p>
-                    <p className="text-[9px] sm:text-[10px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider">Questions</p>
+                  <div className={isBlank ? 'bg-amber-50/80 dark:bg-amber-950/40 rounded-lg p-0.5 border border-amber-200/80 dark:border-amber-800/60' : ''}>
+                    <p className={`font-black text-xs sm:text-sm ${isBlank ? 'text-amber-700 dark:text-amber-400' : 'text-slate-900 dark:text-white'}`}>
+                      {qCount}
+                    </p>
+                    <p className={`text-[9px] sm:text-[10px] font-bold uppercase tracking-wider ${isBlank ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                      {isBlank ? '0 MCQs' : 'Questions'}
+                    </p>
                   </div>
                   <div>
                     <p className="font-black text-slate-900 dark:text-white text-xs sm:text-sm">{test.duration_minutes}m</p>
@@ -841,13 +933,24 @@ export const TestManager: React.FC<TestManagerProps> = ({
                 
                 {/* Primary Action Buttons */}
                 <div className="flex items-center justify-between gap-1.5">
-                  <button
-                    onClick={() => onSelectTestQuestions(test.id)}
-                    className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    <span>Questions ({test.total_questions})</span>
-                  </button>
+                  {isBlank ? (
+                    <button
+                      onClick={() => onSelectTestQuestions(test.id)}
+                      className="flex-1 py-2.5 px-3 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      title="No questions uploaded yet. Click to upload or add MCQs!"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Upload MCQs (0)</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => onSelectTestQuestions(test.id)}
+                      className="flex-1 py-2.5 px-3 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Questions ({qCount})</span>
+                    </button>
+                  )}
 
                   {onViewTestResults && (
                     <button

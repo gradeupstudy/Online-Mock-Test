@@ -347,12 +347,18 @@ export class AnalyticsEngine {
             topic: top.topic,
             total_questions: top.total,
             attempted: top.attempted,
+            attempted_questions: top.attempted,
             correct: top.correct,
+            correct_answers: top.correct,
             incorrect: top.incorrect,
+            wrong_answers: top.incorrect,
             skipped: top.skipped,
+            skipped_questions: top.skipped,
             accuracy: topAccuracy,
             has_sufficient_data: hasSufficientData,
-            status: topStatus
+            is_insufficient_data: !hasSufficientData,
+            status: topStatus,
+            status_info: topStatus
           };
           allTopicsList.push(topicPerf);
           return topicPerf;
@@ -363,11 +369,16 @@ export class AnalyticsEngine {
           chapter: chap.chapter,
           total_questions: chap.total,
           attempted: chap.attempted,
+          attempted_questions: chap.attempted,
           correct: chap.correct,
+          correct_answers: chap.correct,
           incorrect: chap.incorrect,
+          wrong_answers: chap.incorrect,
           skipped: chap.skipped,
+          skipped_questions: chap.skipped,
           accuracy: chapAccuracy,
           status: chapStatus,
+          status_info: chapStatus,
           topics
         };
         allChaptersList.push(chapPerf);
@@ -383,13 +394,19 @@ export class AnalyticsEngine {
         subject: sub.subject,
         total_questions: sub.total,
         attempted: sub.attempted,
+        attempted_questions: sub.attempted,
         correct: sub.correct,
+        correct_answers: sub.correct,
         incorrect: sub.incorrect,
+        wrong_answers: sub.incorrect,
         skipped: sub.skipped,
+        skipped_questions: sub.skipped,
         accuracy: subAccuracy,
         score: Number(sub.marksObtained.toFixed(2)),
+        score_obtained: Number(sub.marksObtained.toFixed(2)),
         max_marks: Number(sub.maxMarks.toFixed(2)),
         status: subStatus,
+        status_info: subStatus,
         avg_time_per_question: avgTimePerQ,
         chapters
       };
@@ -397,7 +414,6 @@ export class AnalyticsEngine {
 
     // 5. Weakest Areas (Top 5)
     // Priority: Low accuracy, high attempts, high incorrect count
-    // Topic-level if sufficient data (>= 3), or chapter-level (>= 2) if topics sparse
     const validTopicsWithData = allTopicsList.filter((t) => t.has_sufficient_data && t.attempted > 0);
     const candidateWeakAreas: WeakAreaItem[] = [];
 
@@ -411,9 +427,14 @@ export class AnalyticsEngine {
             topic: t.topic,
             accuracy: t.accuracy,
             attempted: t.attempted,
+            correct: t.correct,
             incorrect: t.incorrect,
             total_questions: t.total_questions,
             status: t.status,
+            status_info: t.status,
+            action_recommendation: t.accuracy < 40 
+              ? 'Revise fundamental concepts from basic NCERT notes and solve at least 15 foundational MCQs.'
+              : 'Revisit missed questions, review formula derivations and practice speed drills.',
             level: 'topic'
           });
         }
@@ -434,9 +455,14 @@ export class AnalyticsEngine {
               topic: c.chapter,
               accuracy: c.accuracy,
               attempted: c.attempted,
+              correct: c.correct,
               incorrect: c.incorrect,
               total_questions: c.total_questions,
               status: c.status,
+              status_info: c.status,
+              action_recommendation: c.accuracy < 40 
+                ? 'High error rate in this chapter. Go through theory summary and chapter-wise mock questions.'
+                : 'Practice timed chapter tests to convert borderline knowledge into 80%+ accuracy.',
               level: 'chapter'
             });
           }
@@ -453,7 +479,7 @@ export class AnalyticsEngine {
     const weakest_areas = candidateWeakAreas.slice(0, 5);
 
     // 6. Strongest Areas (Top 5)
-    // Priority: High accuracy (>= 70%), high attempts, high correct count
+    // Priority: High accuracy (>= 60%), high attempts, high correct count
     const candidateStrongAreas: StrongAreaItem[] = [];
     if (validTopicsWithData.length >= 3) {
       validTopicsWithData.forEach((t) => {
@@ -468,6 +494,8 @@ export class AnalyticsEngine {
             correct: t.correct,
             total_questions: t.total_questions,
             status: t.status,
+            status_info: t.status,
+            action_recommendation: 'Maintain mastery with weekly mixed revision sets and high-speed mocks.',
             level: 'topic'
           });
         }
@@ -489,6 +517,8 @@ export class AnalyticsEngine {
               correct: c.correct,
               total_questions: c.total_questions,
               status: c.status,
+              status_info: c.status,
+              action_recommendation: 'Solid chapter strength. Keep solving advanced questions to retain quick recall.',
               level: 'chapter'
             });
           }
@@ -528,11 +558,16 @@ export class AnalyticsEngine {
         difficulty: diff,
         total_questions: stat.total,
         attempted: stat.attempted,
+        attempted_questions: stat.attempted,
         correct: stat.correct,
+        correct_answers: stat.correct,
         incorrect: stat.incorrect,
+        wrong_answers: stat.incorrect,
         skipped: stat.skipped,
+        skipped_questions: stat.skipped,
         accuracy: acc,
         status: st,
+        status_info: st,
         recommendation
       };
     });
@@ -568,6 +603,7 @@ export class AnalyticsEngine {
       return {
         subject: s.subject,
         avg_time_seconds: avgSec,
+        estimated_seconds: avgSec,
         accuracy: s.accuracy,
         insight,
         pace
@@ -598,6 +634,16 @@ export class AnalyticsEngine {
       const prevAvgAcc = Math.round(prevAccuracies.reduce((sum, v) => sum + v, 0) / prevAccuracies.length);
       const delta = Number((overallAccuracy - prevAvgAcc).toFixed(1));
       const isImproved = delta >= 0;
+
+      // Most recent previous attempt
+      const recentPrev = completedHistory[completedHistory.length - 1];
+      const prevLastAttCount = recentPrev.attempted_questions || ((recentPrev.correct_answers || 0) + (recentPrev.wrong_answers || 0));
+      const lastScoreVal = recentPrev.score ?? 0;
+      const scoreChangeVal = Number((overallScore - lastScoreVal).toFixed(1));
+      const lastAccVal = prevLastAttCount > 0 ? Math.round(((recentPrev.correct_answers || 0) / prevLastAttCount) * 100) : (recentPrev.percentage || 0);
+      const accChangeVal = Number((overallAccuracy - lastAccVal).toFixed(1));
+      const lastTimePerQ = (recentPrev.time_taken_seconds && prevLastAttCount > 0) ? Math.round(recentPrev.time_taken_seconds / prevLastAttCount) : 0;
+      const speedChangeSec = lastTimePerQ > 0 ? (avgTimePerQSec - lastTimePerQ) : 0;
 
       let msg = '';
       if (delta > 0) {
@@ -647,6 +693,11 @@ export class AnalyticsEngine {
         improvement_delta: delta,
         is_improved: isImproved,
         message: msg,
+        last_score: lastScoreVal,
+        score_change: scoreChangeVal,
+        last_accuracy: lastAccVal,
+        accuracy_change: accChangeVal,
+        speed_change_seconds: speedChangeSec,
         recent_attempts: recentAttemptsList
       };
     } else {
@@ -658,6 +709,11 @@ export class AnalyticsEngine {
         improvement_delta: 0,
         is_improved: true,
         message: 'This is your benchmark test! Take more mock tests to track your learning curve and accuracy trends over time.',
+        last_score: overallScore,
+        score_change: 0,
+        last_accuracy: overallAccuracy,
+        accuracy_change: 0,
+        speed_change_seconds: 0,
         recent_attempts: [
           {
             id: attempt.id,
@@ -675,10 +731,26 @@ export class AnalyticsEngine {
       };
     }
 
+    const overallObj = {
+      status_info: overallStatus,
+      score: overallScore,
+      max_marks: overallMaxMarks,
+      percentage,
+      accuracy: overallAccuracy,
+      correct_answers: correctCount,
+      wrong_answers: wrongCount,
+      skipped_questions: skippedCount,
+      total_questions: totalQuestionsCount,
+      attempted_questions: attemptedCount,
+      time_taken_seconds: totalTimeSec,
+      average_time_per_question_seconds: avgTimePerQSec
+    };
+
     return {
       attempt_id: attempt.id,
       test_id: attempt.test_id,
       student_name: attempt.student_name || 'Student',
+      overall: overallObj,
       overall_score: overallScore,
       total_marks: overallMaxMarks,
       percentage,
@@ -691,12 +763,15 @@ export class AnalyticsEngine {
       time_taken_seconds: totalTimeSec,
       overall_status: overallStatus,
       subjects,
+      weak_areas: weakest_areas,
       weakest_areas,
+      strong_areas: strongest_areas,
       strongest_areas,
       difficulty_breakdown,
       speed_analysis: {
         total_time_seconds: totalTimeSec,
         avg_time_per_question_seconds: avgTimePerQSec,
+        average_time_per_question_seconds: avgTimePerQSec,
         ideal_time_per_question_seconds: idealTimePerQSec,
         pace_status: paceStatus,
         subject_times: subjectSpeedItems,
@@ -731,6 +806,30 @@ export const analyticsService = {
       targetQuestions = await dataService.getQuestions(attempt.test_id, true);
     }
 
+    // 2.5 Ensure attempt has responses loaded
+    let activeAttempt: Attempt = { ...attempt };
+    if (!activeAttempt.responses || activeAttempt.responses.length === 0) {
+      try {
+        const answers = await dataService.getAttemptAnswers(attempt.id);
+        if (answers && answers.length > 0 && targetQuestions && targetQuestions.length > 0) {
+          activeAttempt.responses = targetQuestions.map((q) => {
+            const a = answers.find((ans) => ans.question_id === q.id);
+            const userAns = a ? a.selected_answer : null;
+            const isCorrect = a ? a.is_correct : (userAns ? userAns.toUpperCase() === (q.correct_answer || '').toUpperCase() : false);
+            return {
+              question_id: q.id,
+              user_answer: userAns,
+              correct_answer: q.correct_answer || '',
+              status: !userAns ? ('unattempted' as const) : (isCorrect ? ('correct' as const) : ('wrong' as const)),
+              marks_awarded: a ? Number(a.marks_obtained) : 0
+            };
+          });
+        }
+      } catch (e) {
+        console.warn('Could not load attempt answers for analytics:', e);
+      }
+    }
+
     // 3. Fetch student previous attempts for progress tracking
     let previousAttempts: Attempt[] = [];
     try {
@@ -745,6 +844,6 @@ export const analyticsService = {
       console.warn('Could not load student attempt history:', e);
     }
 
-    return AnalyticsEngine.calculate(attempt, targetQuestions || [], targetTest, previousAttempts);
+    return AnalyticsEngine.calculate(activeAttempt, targetQuestions || [], targetTest, previousAttempts);
   }
 };

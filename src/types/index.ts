@@ -265,12 +265,18 @@ export interface TopicPerformance {
   topic: string;
   total_questions: number;
   attempted: number;
+  attempted_questions?: number;
   correct: number;
+  correct_answers?: number;
   incorrect: number;
+  wrong_answers?: number;
   skipped: number;
+  skipped_questions?: number;
   accuracy: number; // Percentage 0-100 based on attempted
   has_sufficient_data: boolean; // True if attempted >= 3
+  is_insufficient_data?: boolean;
   status: PerformanceStatusInfo;
+  status_info?: PerformanceStatusInfo;
 }
 
 export interface ChapterPerformance {
@@ -278,11 +284,16 @@ export interface ChapterPerformance {
   chapter: string;
   total_questions: number;
   attempted: number;
+  attempted_questions?: number;
   correct: number;
+  correct_answers?: number;
   incorrect: number;
+  wrong_answers?: number;
   skipped: number;
+  skipped_questions?: number;
   accuracy: number;
   status: PerformanceStatusInfo;
+  status_info?: PerformanceStatusInfo;
   topics: TopicPerformance[];
 }
 
@@ -290,13 +301,19 @@ export interface SubjectPerformance {
   subject: string;
   total_questions: number;
   attempted: number;
+  attempted_questions?: number;
   correct: number;
+  correct_answers?: number;
   incorrect: number;
+  wrong_answers?: number;
   skipped: number;
+  skipped_questions?: number;
   accuracy: number;
   score: number;
+  score_obtained?: number;
   max_marks: number;
   status: PerformanceStatusInfo;
+  status_info?: PerformanceStatusInfo;
   avg_time_per_question?: number;
   chapters: ChapterPerformance[];
 }
@@ -305,11 +322,16 @@ export interface DifficultyPerformance {
   difficulty: 'Easy' | 'Moderate' | 'Hard';
   total_questions: number;
   attempted: number;
+  attempted_questions?: number;
   correct: number;
+  correct_answers?: number;
   incorrect: number;
+  wrong_answers?: number;
   skipped: number;
+  skipped_questions?: number;
   accuracy: number;
   status: PerformanceStatusInfo;
+  status_info?: PerformanceStatusInfo;
   recommendation: string;
 }
 
@@ -320,9 +342,12 @@ export interface WeakAreaItem {
   topic: string;
   accuracy: number;
   attempted: number;
+  correct?: number;
   incorrect: number;
   total_questions: number;
   status: PerformanceStatusInfo;
+  status_info?: PerformanceStatusInfo;
+  action_recommendation?: string;
   level: 'topic' | 'chapter';
 }
 
@@ -336,12 +361,15 @@ export interface StrongAreaItem {
   correct: number;
   total_questions: number;
   status: PerformanceStatusInfo;
+  status_info?: PerformanceStatusInfo;
+  action_recommendation?: string;
   level: 'topic' | 'chapter';
 }
 
 export interface SpeedAnalysisSubjectItem {
   subject: string;
   avg_time_seconds: number;
+  estimated_seconds?: number;
   accuracy: number;
   insight: string;
   pace: 'fast' | 'moderate' | 'slow';
@@ -350,6 +378,7 @@ export interface SpeedAnalysisSubjectItem {
 export interface SpeedAnalysis {
   total_time_seconds: number;
   avg_time_per_question_seconds: number;
+  average_time_per_question_seconds?: number;
   ideal_time_per_question_seconds: number;
   pace_status: 'optimal' | 'fast' | 'slow';
   subject_times: SpeedAnalysisSubjectItem[];
@@ -377,13 +406,34 @@ export interface CrossTestProgress {
   improvement_delta: number; // e.g. +8.2 or -3.1
   is_improved: boolean;
   message: string;
+  last_score?: number;
+  score_change?: number;
+  last_accuracy?: number;
+  accuracy_change?: number;
+  speed_change_seconds?: number;
   recent_attempts: RecentAttemptHistoryItem[];
+}
+
+export interface OverallAnalyticsSummary {
+  status_info: PerformanceStatusInfo;
+  score: number;
+  max_marks: number;
+  percentage: number;
+  accuracy: number;
+  correct_answers: number;
+  wrong_answers: number;
+  skipped_questions: number;
+  total_questions: number;
+  attempted_questions: number;
+  time_taken_seconds: number;
+  average_time_per_question_seconds: number;
 }
 
 export interface PersonalizedStudentAnalytics {
   attempt_id: string;
   test_id: string;
   student_name: string;
+  overall: OverallAnalyticsSummary;
   overall_score: number;
   total_marks: number;
   percentage: number;
@@ -396,7 +446,9 @@ export interface PersonalizedStudentAnalytics {
   time_taken_seconds: number;
   overall_status: PerformanceStatusInfo;
   subjects: SubjectPerformance[];
+  weak_areas: WeakAreaItem[];
   weakest_areas: WeakAreaItem[];
+  strong_areas: StrongAreaItem[];
   strongest_areas: StrongAreaItem[];
   difficulty_breakdown: DifficultyPerformance[];
   speed_analysis: SpeedAnalysis;

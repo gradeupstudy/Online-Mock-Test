@@ -444,20 +444,16 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
 
   // Bulk Apply Improvements
   const handleApplyAllImprovements = async (improvedQuestions: Question[]) => {
-    for (const q of improvedQuestions) {
-      await dataService.saveQuestionToBank(q);
-    }
+    await dataService.saveQuestionsToBankBatch(improvedQuestions);
     onToast?.('success', `Applied 360° Quality Improvements to ${improvedQuestions.length} questions in Bank!`);
-    loadBankData();
+    await loadBankData();
   };
 
   // Bulk Apply Explanations
   const handleApplyBulkExplanations = async (updatedQuestions: Question[]) => {
-    for (const q of updatedQuestions) {
-      await dataService.saveQuestionToBank(q);
-    }
+    await dataService.saveQuestionsToBankBatch(updatedQuestions);
     onToast?.('success', `Saved AI Explanations to ${updatedQuestions.length} questions in Bank!`);
-    loadBankData();
+    await loadBankData();
   };
 
   // Single Question AI Explain

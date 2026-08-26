@@ -37,12 +37,14 @@ interface TestResultProps {
 }
 
 export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, onToast }) => {
+  const [currentAttempt, setCurrentAttempt] = useState<Attempt>(attempt);
   const [test, setTest] = useState<Test | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [leaderboard, setLeaderboard] = useState<PublicLeaderboardEntry[]>([]);
   const [totalAspirants, setTotalAspirants] = useState<number>(1);
   const [myRank, setMyRank] = useState<number>(1);
   const [analytics, setAnalytics] = useState<PersonalizedStudentAnalytics | null>(null);
+  const [isLoadingAnalytics, setIsLoadingAnalytics] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<'analytics' | 'summary' | 'solutions' | 'leaderboard'>('analytics');
   const [solutionFilter, setSolutionFilter] = useState<'all' | 'correct' | 'wrong' | 'unattempted'>('all');
   const [isRefreshingBoard, setIsRefreshingBoard] = useState(false);
@@ -51,16 +53,55 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
   useEffect(() => {
+    setCurrentAttempt(attempt);
     loadResultData();
   }, [attempt]);
 
   const loadResultData = async () => {
+    setIsLoadingAnalytics(true);
     const t = await dataService.getTestById(attempt.test_id);
     const qList = await dataService.getQuestions(attempt.test_id, true);
     const topBoard = await dataService.getLeaderboard(attempt.test_id, 20);
     const rank = await dataService.getStudentRank(attempt.test_id, attempt.id);
     const allAttempts = await dataService.getAttempts(attempt.test_id);
 
+    // Reconstruct attempt responses if missing
+    let activeAttempt: Attempt = { ...attempt };
+    if (!activeAttempt.responses || activeAttempt.responses.length === 0) {
+      try {
+        const answers = await dataService.getAttemptAnswers(attempt.id);
+        if (answers && answers.length > 0 && qList.length > 0) {
+          const reconstructedResponses = qList.map((q) => {
+            const a = answers.find((ans) => ans.question_id === q.id);
+            const userAns = a ? a.selected_answer : null;
+            const isCorrect = a ? a.is_correct : (userAns ? userAns.toUpperCase() === (q.correct_answer || '').toUpperCase() : false);
+            return {
+              question_id: q.id,
+              user_answer: userAns,
+              correct_answer: q.correct_answer || '',
+              status: !userAns ? ('unattempted' as const) : (isCorrect ? ('correct' as const) : ('wrong' as const)),
+              marks_awarded: a ? Number(a.marks_obtained) : 0
+            };
+          });
+          activeAttempt.responses = reconstructedResponses;
+        }
+      } catch (e) {
+        console.warn('Could not load attempt responses:', e);
+      }
+    }
+
+    // If still no responses array, generate default mapping from questions
+    if (!activeAttempt.responses || activeAttempt.responses.length === 0) {
+      activeAttempt.responses = qList.map((q) => ({
+        question_id: q.id,
+        user_answer: null,
+        correct_answer: q.correct_answer || '',
+        status: 'unattempted' as const,
+        marks_awarded: 0
+      }));
+    }
+
+    setCurrentAttempt(activeAttempt);
     setTest(t);
     setQuestions(qList);
     setLeaderboard(topBoard);
@@ -69,18 +110,20 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
 
     // Compute deterministic personalized student analytics
     try {
-      const calculatedAnalytics = await analyticsService.getStudentAttemptAnalytics(attempt, t, qList);
+      const calculatedAnalytics = await analyticsService.getStudentAttemptAnalytics(activeAttempt, t, qList);
       setAnalytics(calculatedAnalytics);
     } catch (e) {
       console.warn('Analytics calculation error:', e);
+    } finally {
+      setIsLoadingAnalytics(false);
     }
   };
 
   const handleRefreshLeaderboard = async () => {
     setIsRefreshingBoard(true);
-    const topBoard = await dataService.getLeaderboard(attempt.test_id, 20);
-    const rank = await dataService.getStudentRank(attempt.test_id, attempt.id);
-    const allAttempts = await dataService.getAttempts(attempt.test_id);
+    const topBoard = await dataService.getLeaderboard(currentAttempt.test_id, 20);
+    const rank = await dataService.getStudentRank(currentAttempt.test_id, currentAttempt.id);
+    const allAttempts = await dataService.getAttempts(currentAttempt.test_id);
 
     setLeaderboard(topBoard);
     setMyRank(rank || 1);
@@ -91,7 +134,7 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
 
   const handlePrint = () => {
     printOfficialScorecard({
-      attempt,
+      attempt: currentAttempt,
       test,
       rank: myRank,
       totalCandidates: totalAspirants
@@ -103,16 +146,26 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
   };
 
   // Filter solutions
-  const filteredResponses = (attempt.responses || []).filter((resp) => {
+  const allResponses = (currentAttempt.responses && currentAttempt.responses.length > 0)
+    ? currentAttempt.responses
+    : questions.map((q) => ({
+        question_id: q.id,
+        user_answer: null,
+        correct_answer: q.correct_answer || '',
+        status: 'unattempted' as const,
+        marks_awarded: 0
+      }));
+
+  const filteredResponses = allResponses.filter((resp) => {
     if (solutionFilter === 'correct') return resp.status === 'correct';
     if (solutionFilter === 'wrong') return resp.status === 'wrong';
     if (solutionFilter === 'unattempted') return resp.status === 'unattempted';
     return true;
   });
 
-  const unattemptedCount = attempt.unattempted_answers ?? 
-    attempt.skipped_questions ?? 
-    (attempt.total_questions ? Math.max(0, attempt.total_questions - (attempt.attempted_questions || 0)) : 0);
+  const unattemptedCount = currentAttempt.unattempted_answers ?? 
+    currentAttempt.skipped_questions ?? 
+    (currentAttempt.total_questions ? Math.max(0, currentAttempt.total_questions - (currentAttempt.attempted_questions || 0)) : 0);
 
   // Top 3 Podium Rankers from real-time leaderboard
   const top1 = leaderboard[0];
@@ -184,10 +237,10 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
             </div>
 
             <div className="sm:text-right bg-blue-950/60 p-2.5 sm:p-0 rounded-xl sm:bg-transparent border border-blue-800/30 sm:border-none">
-              <p className="text-sm text-white font-black">{attempt.student_name}</p>
+              <p className="text-sm text-white font-black">{currentAttempt.student_name}</p>
               <p className="text-xs text-slate-300 flex items-center sm:justify-end gap-1 mt-0.5">
                 <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
-                <span>{attempt.student_district || 'District'}, {attempt.student_state || 'HP'}</span>
+                <span>{currentAttempt.student_district || 'District'}, {currentAttempt.student_state || 'HP'}</span>
               </p>
             </div>
           </div>
@@ -198,14 +251,14 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
             <div className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15">
               <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold uppercase">Marks Obtained</p>
               <p className="text-2xl sm:text-3xl font-black text-emerald-400 mt-1">
-                {attempt.score} <span className="text-xs text-slate-300 font-normal">/ {test?.total_marks || 10}</span>
+                {currentAttempt.score} <span className="text-xs text-slate-300 font-normal">/ {test?.total_marks || 10}</span>
               </p>
             </div>
 
             <div className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15">
               <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold uppercase">Accuracy Percentage</p>
               <p className="text-2xl sm:text-3xl font-black text-blue-400 mt-1">
-                {attempt.percentage}%
+                {currentAttempt.percentage}%
               </p>
             </div>
 
@@ -220,7 +273,7 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
             <div className="p-3 sm:p-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/15">
               <p className="text-[10px] sm:text-[11px] text-slate-300 font-bold uppercase">Time Taken</p>
               <p className="text-xl sm:text-2xl font-black text-slate-100 mt-1">
-                {Math.floor(attempt.time_taken_seconds / 60)}m {attempt.time_taken_seconds % 60}s
+                {Math.floor(currentAttempt.time_taken_seconds / 60)}m {currentAttempt.time_taken_seconds % 60}s
               </p>
               <p className="text-[10px] text-slate-300 mt-0.5 font-medium">Duration: {test?.duration_minutes || 60}m</p>
             </div>
@@ -231,11 +284,11 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
           <div className="grid grid-cols-3 gap-2.5 p-3 bg-slate-950/80 rounded-2xl text-center text-xs font-bold border border-white/5">
             <div className="flex items-center justify-center gap-1.5 text-emerald-400 py-1">
               <CheckCircle className="w-4 h-4 shrink-0" />
-              <span>{attempt.correct_answers} Correct (+{(attempt.correct_answers * (test?.marks_per_question || 1)).toFixed(2)} pts)</span>
+              <span>{currentAttempt.correct_answers} Correct (+{(currentAttempt.correct_answers * (test?.marks_per_question || 1)).toFixed(2)} pts)</span>
             </div>
             <div className="flex items-center justify-center gap-1.5 text-rose-400 py-1 border-x border-slate-800">
               <XCircle className="w-4 h-4 shrink-0" />
-              <span>{attempt.wrong_answers} Wrong (-{(attempt.wrong_answers * (test?.negative_marking || 0)).toFixed(2)} pts)</span>
+              <span>{currentAttempt.wrong_answers} Wrong (-{(currentAttempt.wrong_answers * (test?.negative_marking || 0)).toFixed(2)} pts)</span>
             </div>
             <div className="flex items-center justify-center gap-1.5 text-slate-400 py-1">
               <HelpCircle className="w-4 h-4 shrink-0" />
@@ -298,11 +351,25 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
       </div>
 
       {/* TAB 0: PERSONALIZED DIAGNOSTIC ANALYTICS */}
-      {activeTab === 'analytics' && analytics && (
-        <StudentPerformanceDashboard 
-          analytics={analytics}
-          onExploreTopic={() => setActiveTab('solutions')}
-        />
+      {activeTab === 'analytics' && (
+        isLoadingAnalytics ? (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-12 text-center space-y-3">
+            <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+            <h3 className="font-black text-slate-800 dark:text-white text-base">Generating Personalized Diagnostic Report...</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">Evaluating your topic mastery, speed trends, weak areas, and score breakdown.</p>
+          </div>
+        ) : analytics ? (
+          <StudentPerformanceDashboard 
+            analytics={analytics}
+            onExploreTopic={() => setActiveTab('solutions')}
+          />
+        ) : (
+          <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 p-8 text-center space-y-2">
+            <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
+            <h3 className="font-black text-slate-800 dark:text-white text-base">Diagnostic Analytics Overview</h3>
+            <p className="text-xs text-slate-500">Check the Scorecard Summary or Full Solutions tabs for detailed question-by-question analysis.</p>
+          </div>
+        )
       )}
 
       {/* TAB 1: SUMMARY TAB */}

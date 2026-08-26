@@ -893,12 +893,20 @@ INSTRUCTIONS: ${item.test.instructions || 'Standard competitive examination ques
 
                         {/* Current Question Count */}
                         <td className="py-3 px-3 text-center">
-                          <span className="font-black text-slate-700 dark:text-slate-300">
-                            {item.existingCount}
-                          </span>
-                          <span className="text-slate-400 text-[11px]">
-                            {' '}/ {item.test.total_questions || 20}
-                          </span>
+                          {item.existingCount === 0 ? (
+                            <span className="px-2 py-0.5 rounded-md text-[10px] font-black bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700 inline-block">
+                              0 (Blank)
+                            </span>
+                          ) : (
+                            <>
+                              <span className="font-black text-slate-700 dark:text-slate-300">
+                                {item.existingCount}
+                              </span>
+                              <span className="text-slate-400 text-[11px]">
+                                {' '}/ {item.test.total_questions || 20}
+                              </span>
+                            </>
+                          )}
                         </td>
 
                         {/* AI Generate Count */}
