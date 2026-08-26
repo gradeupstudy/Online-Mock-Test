@@ -17,6 +17,9 @@ import {
   RefreshCw, 
   CheckCircle2, 
   AlertCircle,
+  AlertTriangle,
+  ShieldAlert,
+  Lock,
   Clock,
   Award,
   Zap,
@@ -28,7 +31,13 @@ import {
   Database
 } from 'lucide-react';
 import { Question, Test } from '../../types';
-import { dataService, shuffleQuestionOptions, shuffleAndBalanceQuestions } from '../../services/dataService';
+import { 
+  dataService, 
+  shuffleQuestionOptions, 
+  shuffleAndBalanceQuestions,
+  getQuestionMockTestUsages,
+  QuestionBankUsageReport 
+} from '../../services/dataService';
 import { aiService } from '../../services/aiService';
 import { Modal } from '../common/Modal';
 import { MCQInspectionModal } from './MCQInspectionModal';
@@ -62,7 +71,9 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const [selectedChapter, setSelectedChapter] = useState('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState('all');
   const [selectedInspectionStatus, setSelectedInspectionStatus] = useState('all');
+  const [selectedUsageFilter, setSelectedUsageFilter] = useState<'all' | 'fresh_only' | 'already_used'>('all');
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
+  const [usageReport, setUsageReport] = useState<QuestionBankUsageReport | null>(null);
 
   // Selected Questions for Batch Operations
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
@@ -70,6 +81,14 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const [isRegeneratingQuestionId, setIsRegeneratingQuestionId] = useState<string | null>(null);
   const [isGeneratingEditExplanation, setIsGeneratingEditExplanation] = useState(false);
   const [isDeduplicating, setIsDeduplicating] = useState(false);
+
+  const selectedQuestionsList = React.useMemo(() => {
+    return questions.filter((q) => selectedQuestionIds.has(q.id));
+  }, [questions, selectedQuestionIds]);
+
+  const selectedUsedQuestions = React.useMemo(() => {
+    return selectedQuestionsList.filter((q) => getQuestionMockTestUsages(q, usageReport).length > 0);
+  }, [selectedQuestionsList, usageReport]);
 
   // Modals
   const [isAiGenModalOpen, setIsAiGenModalOpen] = useState(false);
@@ -111,12 +130,14 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const loadBankData = async (forceCloudSync = false) => {
     // 1. Instant Cache Render - Zero Delay
     try {
-      const [allQ, allTests] = await Promise.all([
+      const [allQ, allTests, report] = await Promise.all([
         dataService.getAllQuestionBank(),
         dataService.getTests(true),
+        dataService.getMockTestQuestionUsageMap(),
       ]);
       setQuestions(allQ);
       setTests(allTests);
+      setUsageReport(report);
       if (allTests.length > 0 && !targetTestId) {
         setTargetTestId(allTests[0].id);
       }
@@ -132,8 +153,12 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
       try {
         const syncRes = await dataService.syncQuestionBankWithSupabase({ timeoutMs: 8000 });
         if (syncRes.success) {
-          const refreshedQ = await dataService.getAllQuestionBank();
+          const [refreshedQ, refreshedReport] = await Promise.all([
+            dataService.getAllQuestionBank(),
+            dataService.getMockTestQuestionUsageMap(),
+          ]);
           setQuestions(refreshedQ);
+          setUsageReport(refreshedReport);
           setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         }
       } catch (err) {
@@ -149,10 +174,14 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
     try {
       const res = await dataService.syncQuestionBankWithSupabase({ timeoutMs: 12000 });
       if (res.success) {
-        const refreshedQ = await dataService.getAllQuestionBank();
-        const refreshedTests = await dataService.getTests(true);
+        const [refreshedQ, refreshedTests, refreshedReport] = await Promise.all([
+          dataService.getAllQuestionBank(),
+          dataService.getTests(true),
+          dataService.getMockTestQuestionUsageMap(),
+        ]);
         setQuestions(refreshedQ);
         setTests(refreshedTests);
+        setUsageReport(refreshedReport);
         setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
         onToast?.('success', `✓ Supabase Sync Successful: ${refreshedQ.length} total MCQs ready in Bank (${res.pulledFromCloud} updated from cloud)!`);
       } else {
@@ -216,7 +245,16 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
       (selectedInspectionStatus === 'verified' && q.inspection_status === 'verified') ||
       (selectedInspectionStatus === 'pending' && q.inspection_status !== 'verified');
 
-    return textMatch && subjectMatch && chapterMatch && difficultyMatch && inspectMatch;
+    const usages = getQuestionMockTestUsages(q, usageReport);
+    const isUsed = usages.length > 0;
+    let usageMatch = true;
+    if (selectedUsageFilter === 'fresh_only') {
+      usageMatch = !isUsed;
+    } else if (selectedUsageFilter === 'already_used') {
+      usageMatch = isUsed;
+    }
+
+    return textMatch && subjectMatch && chapterMatch && difficultyMatch && inspectMatch && usageMatch;
   });
 
   // Auto-Deduplicate Bank: Keeps the highest quality version of each duplicate and removes redundant copies
@@ -743,6 +781,17 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
               <option value="pending">Pending Inspection</option>
             </select>
 
+            {/* MOCK TEST USAGE FILTER */}
+            <select
+              value={selectedUsageFilter}
+              onChange={(e) => setSelectedUsageFilter(e.target.value as any)}
+              className="px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200"
+            >
+              <option value="all">Mock Usage: All MCQs</option>
+              <option value="fresh_only">⭐ Fresh MCQs (Unused in Mocks)</option>
+              <option value="already_used">⚠️ Already In Mock Tests</option>
+            </select>
+
             {/* DUPLICATE TRACKER FILTER BUTTON */}
             <button
               type="button"
@@ -975,7 +1024,11 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
           </div>
         ) : (
           <div className="divide-y divide-slate-100 dark:divide-slate-800">
-            {filteredQuestions.map((q, idx) => (
+            {filteredQuestions.map((q, idx) => {
+              const usages = getQuestionMockTestUsages(q, usageReport);
+              const isAlreadyInMock = usages.length > 0;
+
+              return (
               <div 
                 key={q.id || idx} 
                 className={`p-5 transition-all space-y-3 hover:bg-slate-50/70 dark:hover:bg-slate-800/40 ${selectedQuestionIds.has(q.id) ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''}`}
@@ -990,8 +1043,25 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                     />
 
                     <div className="space-y-1.5 flex-1">
-                      {/* TAXONOMY BADGES */}
+                      {/* TAXONOMY & USAGE BADGES */}
                       <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-bold">
+                        
+                        {/* MOCK TEST USAGE BADGE */}
+                        {isAlreadyInMock ? (
+                          <span 
+                            className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700/80 rounded-md font-bold text-[10px] flex items-center gap-1 shadow-xs"
+                            title={`Already added in: ${usages.map(u => u.testTitle).join(', ')}`}
+                          >
+                            <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                            <span>In Mock: <b>{usages.map(u => u.testTitle).join(', ')}</b></span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 rounded-md font-bold text-[10px] flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <span>⭐ Fresh MCQ</span>
+                          </span>
+                        )}
+
                         <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded-md">
                           {q.subject || 'General Studies'}
                         </span>
@@ -1174,7 +1244,8 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -1427,6 +1498,29 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
               </span>
             </div>
 
+            {/* MOCK TEST USAGE WARNING */}
+            {selectedUsedQuestions.length > 0 && (
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/50 rounded-2xl border border-amber-300 dark:border-amber-700 text-xs text-amber-950 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <b>{selectedUsedQuestions.length}</b> of {selectedQuestionIds.size} selected questions are already part of existing mock tests.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const freshIds = new Set(selectedQuestionsList.filter(q => getQuestionMockTestUsages(q, usageReport).length === 0).map(q => q.id));
+                    setSelectedQuestionIds(freshIds);
+                    onToast?.('info', `Kept only ${freshIds.size} fresh unused MCQs in selection.`);
+                  }}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs shrink-0 cursor-pointer shadow-xs transition-all"
+                >
+                  Keep Only Fresh MCQs
+                </button>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
                 Mock Test Title *
@@ -1539,6 +1633,29 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
             <p className="text-xs text-slate-500">
               Select the destination mock test to which the {selectedQuestionIds.size} selected questions will be appended.
             </p>
+
+            {/* MOCK TEST USAGE WARNING */}
+            {selectedUsedQuestions.length > 0 && (
+              <div className="p-3.5 bg-amber-50 dark:bg-amber-950/50 rounded-2xl border border-amber-300 dark:border-amber-700 text-xs text-amber-950 dark:text-amber-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    <b>{selectedUsedQuestions.length}</b> of {selectedQuestionIds.size} selected questions are already part of existing mock tests.
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const freshIds = new Set(selectedQuestionsList.filter(q => getQuestionMockTestUsages(q, usageReport).length === 0).map(q => q.id));
+                    setSelectedQuestionIds(freshIds);
+                    onToast?.('info', `Kept only ${freshIds.size} fresh unused MCQs in selection.`);
+                  }}
+                  className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold text-xs shrink-0 cursor-pointer shadow-xs transition-all"
+                >
+                  Keep Only Fresh MCQs
+                </button>
+              </div>
+            )}
 
             <div className="space-y-2 max-h-64 overflow-y-auto p-1">
               {tests.map((t) => (

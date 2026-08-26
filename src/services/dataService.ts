@@ -188,6 +188,54 @@ export const mergeMasterQuestion = (existing: Question | undefined, incoming: Qu
   };
 };
 
+/**
+ * Question Mock Test Usage Information
+ */
+export interface MockTestUsageInfo {
+  testId: string;
+  testTitle: string;
+  testCode?: string;
+  slug?: string;
+}
+
+export interface QuestionBankUsageReport {
+  usageById: Map<string, MockTestUsageInfo[]>;
+  usageByFingerprint: Map<string, MockTestUsageInfo[]>;
+  allTests: Test[];
+}
+
+/**
+ * Helper to determine which mock tests (if any) currently contain a given question.
+ */
+export const getQuestionMockTestUsages = (
+  q: Partial<Question>,
+  usageReport?: QuestionBankUsageReport | null,
+  excludeTestId?: string
+): MockTestUsageInfo[] => {
+  if (!q || !usageReport) return [];
+
+  const foundMap = new Map<string, MockTestUsageInfo>();
+
+  if (q.id && usageReport.usageById && usageReport.usageById.has(q.id)) {
+    usageReport.usageById.get(q.id)!.forEach(u => {
+      if (!excludeTestId || u.testId !== excludeTestId) {
+        foundMap.set(u.testId, u);
+      }
+    });
+  }
+
+  const fp = getQuestionFingerprint(q);
+  if (fp && usageReport.usageByFingerprint && usageReport.usageByFingerprint.has(fp)) {
+    usageReport.usageByFingerprint.get(fp)!.forEach(u => {
+      if (!excludeTestId || u.testId !== excludeTestId) {
+        foundMap.set(u.testId, u);
+      }
+    });
+  }
+
+  return Array.from(foundMap.values());
+};
+
 // Helper: Ensure questions are permanently registered in Question Bank Master without creating duplicates
 export const syncToQuestionBankMaster = (questionsToSync: Question[]): void => {
   if (!Array.isArray(questionsToSync) || questionsToSync.length === 0) return;
@@ -2447,6 +2495,93 @@ export const dataService = {
 
     const combined = [...existing, ...cloned];
     await dataService.saveQuestions(targetTestId, combined);
+  },
+
+  // Builds an accurate map of which Mock Tests each Question is currently used in
+  getMockTestQuestionUsageMap: async (): Promise<QuestionBankUsageReport> => {
+    const tests = await dataService.getTests(true);
+    const testMap = new Map<string, Test>();
+    tests.forEach(t => {
+      if (t?.id) testMap.set(t.id, t);
+      if (t?.slug) testMap.set(t.slug, t);
+    });
+
+    const usageById = new Map<string, MockTestUsageInfo[]>();
+    const usageByFingerprint = new Map<string, MockTestUsageInfo[]>();
+
+    const recordUsage = (q: Partial<Question>, testId: string) => {
+      if (!q || !testId || testId === 'bank') return;
+      const testObj = testMap.get(testId);
+      const usageInfo: MockTestUsageInfo = {
+        testId: testId,
+        testTitle: testObj?.title || `Mock Test #${testId.slice(0, 8)}`,
+        testCode: testObj?.test_code,
+        slug: testObj?.slug
+      };
+
+      // Index by ID
+      if (q.id) {
+        const existing = usageById.get(q.id) || [];
+        if (!existing.some(u => u.testId === testId)) {
+          usageById.set(q.id, [...existing, usageInfo]);
+        }
+      }
+
+      // Index by Fingerprint (detects identical questions even if UUID was regenerated)
+      const fp = getQuestionFingerprint(q);
+      if (fp) {
+        const existing = usageByFingerprint.get(fp) || [];
+        if (!existing.some(u => u.testId === testId)) {
+          usageByFingerprint.set(fp, [...existing, usageInfo]);
+        }
+      }
+    };
+
+    // 1. Read all local questions map
+    try {
+      const rawQuestions = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+      const questionsMap: Record<string, Question[]> = rawQuestions ? JSON.parse(rawQuestions) : {};
+      Object.entries(questionsMap).forEach(([testId, qList]) => {
+        if (testId !== 'bank' && Array.isArray(qList)) {
+          qList.forEach(q => recordUsage(q, testId));
+        }
+      });
+    } catch (e) {
+      console.warn('Error indexing local questions for usage map:', e);
+    }
+
+    // 2. Read DEMO_QUESTIONS
+    try {
+      Object.entries(DEMO_QUESTIONS).forEach(([testId, qList]) => {
+        if (testId !== 'bank' && Array.isArray(qList)) {
+          qList.forEach(q => recordUsage(q, testId));
+        }
+      });
+    } catch (e) {
+      console.warn('Error indexing demo questions for usage map:', e);
+    }
+
+    // 3. Supabase Cloud lookup (if configured)
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('questions')
+          .select('id, test_id, question_text, option_a, option_b, option_c, option_d')
+          .neq('test_id', 'bank');
+        if (!error && Array.isArray(data)) {
+          data.forEach((q: any) => {
+            if (q && q.test_id && q.test_id !== 'bank') {
+              recordUsage(q, q.test_id);
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Supabase questions fetch for usage map warning:', e);
+      }
+    }
+
+    return { usageById, usageByFingerprint, allTests: tests };
   },
 
   // ------------------------------------
