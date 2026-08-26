@@ -28,7 +28,8 @@ import {
   ChevronDown,
   Shuffle,
   Cloud,
-  Database
+  Database,
+  FolderSync
 } from 'lucide-react';
 import { Question, Test } from '../../types';
 import { 
@@ -47,6 +48,7 @@ import { BulkMCQInspectionModal } from './BulkMCQInspectionModal';
 import { BulkAIExplanationModal } from './BulkAIExplanationModal';
 import { DuplicateTrackerModal } from './DuplicateTrackerModal';
 import { CompletePDFImportModal } from './CompletePDFImportModal';
+import { ShiftTaxonomyModal } from './ShiftTaxonomyModal';
 import { detectDuplicateQuestions, DuplicateGroup } from '../../utils/duplicateDetector';
 import { detectSemanticVectorDuplicates, runSemanticVectorDeduplication, SemanticDuplicateGroup } from '../../utils/semanticVectorDeduplication';
 import { duxqeMutationEngine } from '../../services/duxqeMutationEngine';
@@ -104,6 +106,8 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
   const [isCreateTestModalOpen, setIsCreateTestModalOpen] = useState(false);
   const [isAddToTestModalOpen, setIsAddToTestModalOpen] = useState(false);
+  const [isShiftTaxonomyModalOpen, setIsShiftTaxonomyModalOpen] = useState(false);
+  const [questionsToShift, setQuestionsToShift] = useState<Question[]>([]);
 
   // New Test Form State
   const [newTestForm, setNewTestForm] = useState({
@@ -902,6 +906,19 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {/* BATCH SHIFT SUBJECT / CHAPTER */}
+              <button
+                onClick={() => {
+                  setQuestionsToShift(selectedQuestionsList);
+                  setIsShiftTaxonomyModalOpen(true);
+                }}
+                className="px-3.5 py-2 bg-purple-600 hover:bg-purple-700 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                title="Shift Subject or Chapter for all selected MCQs"
+              >
+                <FolderSync className="w-3.5 h-3.5" />
+                <span>Shift Subject/Chapter ({selectedQuestionIds.size})</span>
+              </button>
+
               {/* BATCH 360 INSPECT SELECTED */}
               <button
                 onClick={() => setIsBulkInspectOpen(true)}
@@ -1062,18 +1079,49 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                           </span>
                         )}
 
-                        <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded-md">
-                          {q.subject || 'General Studies'}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuestionsToShift([q]);
+                            setIsShiftTaxonomyModalOpen(true);
+                          }}
+                          title="Click to shift subject or chapter for this MCQ"
+                          className="px-2 py-0.5 bg-blue-100 hover:bg-blue-200 dark:bg-blue-950 dark:hover:bg-blue-900 text-blue-700 dark:text-blue-300 rounded-md transition-all flex items-center gap-1 cursor-pointer font-bold"
+                        >
+                          <span>{q.subject || 'General Studies'}</span>
+                          <FolderSync className="w-2.5 h-2.5 opacity-60" />
+                        </button>
+
                         {q.section && q.section !== 'General' && (
                           <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 rounded-md">
                             Section: {q.section}
                           </span>
                         )}
-                        {q.chapter && q.chapter !== 'General' && (
-                          <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 rounded-md">
-                            Chapter: {q.chapter}
-                          </span>
+                        {q.chapter && q.chapter !== 'General' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuestionsToShift([q]);
+                              setIsShiftTaxonomyModalOpen(true);
+                            }}
+                            title="Click to shift subject or chapter for this MCQ"
+                            className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-950 dark:hover:bg-emerald-900 text-emerald-700 dark:text-emerald-300 rounded-md transition-all flex items-center gap-1 cursor-pointer font-bold"
+                          >
+                            <span>Chapter: {q.chapter}</span>
+                            <FolderSync className="w-2.5 h-2.5 opacity-60" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setQuestionsToShift([q]);
+                              setIsShiftTaxonomyModalOpen(true);
+                            }}
+                            title="Add a chapter for this question"
+                            className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-500 rounded-md transition-all flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>+ Add Chapter</span>
+                          </button>
                         )}
                         {q.topic && q.topic !== 'General Topic' && (
                           <span className="px-2 py-0.5 bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 rounded-md">
@@ -1225,6 +1273,17 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
 
                     <button
                       onClick={() => {
+                        setQuestionsToShift([q]);
+                        setIsShiftTaxonomyModalOpen(true);
+                      }}
+                      title="Shift Subject / Chapter for this MCQ"
+                      className="p-2 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 cursor-pointer transition-colors"
+                    >
+                      <FolderSync className="w-3.5 h-3.5" />
+                    </button>
+
+                    <button
+                      onClick={() => {
                         setEditingQuestion({ ...q });
                         setIsManualModalOpen(true);
                       }}
@@ -1304,11 +1363,17 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                 <input
                   type="text"
                   required
+                  list="bank-subjects-datalist"
                   value={editingQuestion.subject || ''}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, subject: e.target.value })}
                   placeholder="e.g. English Grammar, General Studies"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold"
                 />
+                <datalist id="bank-subjects-datalist">
+                  {distinctSubjects.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
               </div>
 
               <div>
@@ -1317,11 +1382,17 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
                 </label>
                 <input
                   type="text"
+                  list="bank-chapters-datalist"
                   value={editingQuestion.chapter || ''}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, chapter: e.target.value })}
                   placeholder="e.g. Noun, Tenses, Rivers..."
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold"
                 />
+                <datalist id="bank-chapters-datalist">
+                  {distinctChapters.map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
               </div>
             </div>
 
@@ -1774,6 +1845,24 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
             await dataService.saveQuestionToBank(mutated);
             onToast?.('success', `✨ Saved DU-XQE mutated variant into Question Bank!`);
             await loadBankData();
+          }}
+          onToast={onToast}
+        />
+      )}
+
+      {/* SHIFT SUBJECT & CHAPTER TAXONOMY MODAL */}
+      {isShiftTaxonomyModalOpen && (
+        <ShiftTaxonomyModal
+          isOpen={isShiftTaxonomyModalOpen}
+          questions={questionsToShift}
+          allBankQuestions={questions}
+          onClose={() => {
+            setIsShiftTaxonomyModalOpen(false);
+            setQuestionsToShift([]);
+          }}
+          onSuccess={async () => {
+            await loadBankData();
+            setSelectedQuestionIds(new Set());
           }}
           onToast={onToast}
         />

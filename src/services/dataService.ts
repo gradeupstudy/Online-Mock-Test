@@ -2400,6 +2400,37 @@ export const dataService = {
     await dataService.deleteQuestionsFromBankBatch([questionId]);
   },
 
+  // Shift/Update Subject and Chapter taxonomy for one or multiple questions in bulk
+  shiftQuestionsTaxonomy: async (
+    questionIds: string[],
+    taxonomy: { subject?: string; chapter?: string; topic?: string }
+  ): Promise<{ success: boolean; updatedCount: number }> => {
+    if (!Array.isArray(questionIds) || questionIds.length === 0) {
+      return { success: true, updatedCount: 0 };
+    }
+
+    const idsSet = new Set(questionIds);
+    const allBank = await dataService.getAllQuestionBank();
+    const toUpdate: Question[] = [];
+
+    allBank.forEach((q) => {
+      if (idsSet.has(q.id)) {
+        toUpdate.push({
+          ...q,
+          subject: taxonomy.subject !== undefined && taxonomy.subject.trim() ? taxonomy.subject.trim() : q.subject,
+          chapter: taxonomy.chapter !== undefined ? taxonomy.chapter.trim() : q.chapter,
+          topic: taxonomy.topic !== undefined ? taxonomy.topic.trim() : q.topic,
+        });
+      }
+    });
+
+    if (toUpdate.length > 0) {
+      await dataService.saveQuestionsToBankBatch(toUpdate);
+    }
+
+    return { success: true, updatedCount: toUpdate.length };
+  },
+
   createTestFromQuestions: async (
     testMeta: Partial<Test>,
     selectedQuestions: Question[]
