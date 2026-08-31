@@ -575,15 +575,27 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
                     {q.question_text}
                   </p>
 
+                  {/* Question Diagram / Image */}
+                  {q.question_image && (
+                    <div className="my-2 p-2 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 max-w-md">
+                      <img
+                        src={q.question_image}
+                        alt="Question Diagram"
+                        className="max-h-60 w-auto mx-auto object-contain rounded-lg"
+                        referrerPolicy="no-referrer"
+                      />
+                    </div>
+                  )}
+
                   {/* Options status */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs font-semibold">
                     {[
-                      { key: 'A', text: q.option_a },
-                      { key: 'B', text: q.option_b },
-                      { key: 'C', text: q.option_c },
-                      { key: 'D', text: q.option_d }
-                    ].map(({ key, text }) => {
-                      if (!text) return null;
+                      { key: 'A', text: q.option_a, img: q.option_a_image },
+                      { key: 'B', text: q.option_b, img: q.option_b_image },
+                      { key: 'C', text: q.option_c, img: q.option_c_image },
+                      { key: 'D', text: q.option_d, img: q.option_d_image }
+                    ].map(({ key, text, img }) => {
+                      if (!text && !img) return null;
                       const isCorrect = q.correct_answer?.toUpperCase() === key;
                       const isUserChoice = resp.user_answer?.toUpperCase() === key;
 
@@ -592,22 +604,46 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
                       if (isUserChoice && !isCorrect) borderStyle = 'border-rose-500 bg-rose-50 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 font-bold ring-1 ring-rose-500';
 
                       return (
-                        <div key={key} className={`p-3 rounded-xl border flex items-center justify-between ${borderStyle}`}>
-                          <span className="flex-1 pr-2"><b>{key}.</b> {text}</span>
-                          {isCorrect && <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded font-bold shrink-0">Correct Answer</span>}
-                          {isUserChoice && !isCorrect && <span className="text-[10px] bg-rose-600 text-white px-2 py-0.5 rounded font-bold shrink-0">Your Choice</span>}
+                        <div key={key} className={`p-3 rounded-xl border flex flex-col gap-2 ${borderStyle}`}>
+                          <div className="flex items-center justify-between">
+                            <span className="flex-1 pr-2"><b>{key}.</b> {text}</span>
+                            {isCorrect && <span className="text-[10px] bg-emerald-600 text-white px-2 py-0.5 rounded font-bold shrink-0">Correct Answer</span>}
+                            {isUserChoice && !isCorrect && <span className="text-[10px] bg-rose-600 text-white px-2 py-0.5 rounded font-bold shrink-0">Your Choice</span>}
+                          </div>
+                          {img && (
+                            <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white p-1 max-w-xs">
+                              <img
+                                src={img}
+                                alt={`Option ${key} Diagram`}
+                                className="max-h-36 w-auto object-contain rounded"
+                                referrerPolicy="no-referrer"
+                              />
+                            </div>
+                          )}
                         </div>
                       );
                     })}
                   </div>
 
                   {/* Detailed Explanation Box */}
-                  {q.explanation && (
-                    <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-900 text-xs space-y-1.5">
+                  {(q.explanation || q.explanation_image) && (
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/40 rounded-2xl border border-blue-200 dark:border-blue-900 text-xs space-y-2">
                       <p className="font-black text-blue-900 dark:text-blue-200 uppercase tracking-wider text-[10px] flex items-center gap-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-blue-500" /> Detailed Explanation & Solution Notes
                       </p>
-                      <p className="text-slate-700 dark:text-slate-300 leading-relaxed font-normal">{q.explanation}</p>
+                      {q.explanation && (
+                        <p className="text-slate-700 dark:text-slate-300 leading-relaxed font-normal">{q.explanation}</p>
+                      )}
+                      {q.explanation_image && (
+                        <div className="p-1.5 bg-white dark:bg-slate-800 rounded-xl border border-blue-200 dark:border-blue-800 max-w-sm">
+                          <img
+                            src={q.explanation_image}
+                            alt="Explanation Diagram"
+                            className="max-h-48 w-auto object-contain rounded-lg"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      )}
                     </div>
                   )}
 

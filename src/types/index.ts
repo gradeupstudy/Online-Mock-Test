@@ -49,11 +49,16 @@ export interface Question {
   question_text: string;
   question_image?: string | null;
   option_a: string;
+  option_a_image?: string | null;
   option_b: string;
+  option_b_image?: string | null;
   option_c: string;
+  option_c_image?: string | null;
   option_d: string;
+  option_d_image?: string | null;
   correct_answer?: 'A' | 'B' | 'C' | 'D' | string; // Optional on public student client!
   explanation?: string | null;
+  explanation_image?: string | null;
   marks: number;
   negative_marks: number;
   subject: string;

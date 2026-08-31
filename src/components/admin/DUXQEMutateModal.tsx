@@ -23,7 +23,7 @@ interface DUXQEMutateModalProps {
   isOpen: boolean;
   onClose: () => void;
   sourceQuestion: Question | null;
-  onSuccess: (mutatedQuestion: Question) => void;
+  onSuccess: (mutatedQuestion: Question, mode?: 'replace' | 'add_new') => void | Promise<void>;
   onToast?: (type: 'success' | 'error' | 'info', msg: string) => void;
 }
 
@@ -38,6 +38,7 @@ export const DUXQEMutateModal: React.FC<DUXQEMutateModalProps> = ({
   const [customInstructions, setCustomInstructions] = useState('');
   const [targetDifficulty, setTargetDifficulty] = useState(sourceQuestion?.difficulty || 'Medium');
   const [isMutating, setIsMutating] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [mutatedResult, setMutatedResult] = useState<Question | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
 
@@ -67,10 +68,21 @@ export const DUXQEMutateModal: React.FC<DUXQEMutateModalProps> = ({
     }
   };
 
-  const handleApply = () => {
+  const handleApply = async (mode: 'replace' | 'add_new') => {
     if (!mutatedResult) return;
-    onSuccess(mutatedResult);
-    onClose();
+    try {
+      setIsSaving(true);
+      const questionToSave: Question = mode === 'replace'
+        ? { ...mutatedResult, id: sourceQuestion.id, question_number: sourceQuestion.question_number }
+        : mutatedResult;
+      await onSuccess(questionToSave, mode);
+      onClose();
+    } catch (err: any) {
+      console.error('Failed to save mutation:', err);
+      onToast?.('error', 'Failed to save mutated question.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -280,14 +292,29 @@ export const DUXQEMutateModal: React.FC<DUXQEMutateModalProps> = ({
             </button>
 
             {mutatedResult && (
-              <button
-                type="button"
-                onClick={handleApply}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer animate-in fade-in"
-              >
-                <Check className="w-4 h-4" />
-                <span>Apply Mutated Version</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleApply('replace')}
+                  disabled={isSaving}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Replace original MCQ with this mutated variant"
+                >
+                  {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                  <span>Replace Original MCQ</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleApply('add_new')}
+                  disabled={isSaving}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  title="Save as a brand new distinct MCQ in bank/test"
+                >
+                  {isSaving ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Layers className="w-3.5 h-3.5" />}
+                  <span>Save as New Distinct MCQ</span>
+                </button>
+              </>
             )}
           </div>
         </div>

@@ -672,9 +672,13 @@ export const DuplicateTrackerModal: React.FC<DuplicateTrackerModalProps> = ({
           isOpen={!!mutatingQuestion}
           sourceQuestion={mutatingQuestion}
           onClose={() => setMutatingQuestion(null)}
-          onSuccess={async (mutated) => {
+          onSuccess={async (mutated, mode) => {
             await dataService.saveQuestionToBank(mutated);
-            onToast?.('success', `✨ Saved DU-XQE mutated variant into Question Bank!`);
+            if (mode === 'replace') {
+              onToast?.('success', `✨ Replaced original question with DU-XQE mutated variant!`);
+            } else {
+              onToast?.('success', `✨ Saved new DU-XQE mutated variant into Question Bank!`);
+            }
             await onRefreshData();
           }}
           onToast={onToast}

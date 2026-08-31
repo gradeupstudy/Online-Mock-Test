@@ -99,8 +99,50 @@ const STORAGE_KEYS = {
   SOCIAL: 'gradeup_social_platforms',
   SETTINGS: 'gradeup_admin_settings',
   ACTIVE_ATTEMPT: 'gradeup_active_attempt_',
-  REPORTS: 'gradeup_question_reports'
+  REPORTS: 'gradeup_question_reports',
+  MASTER_CATEGORIES: 'gradeup_master_categories',
+  MASTER_SUBJECTS: 'gradeup_master_subjects'
 };
+
+export const DEFAULT_MASTER_CATEGORIES: string[] = [
+  'HP Police Constable',
+  'HP Police SI',
+  'HP Forest Guard',
+  'HP Patwari',
+  'HPPSC HPAS (Himachal Administrative Services)',
+  'HPPSC Naib Tehsildar',
+  'HPPSC Allied Services',
+  'HPPSC Conductor',
+  'HP TGT Arts / Non-Medical / Medical',
+  'HP TET (Teacher Eligibility Test)',
+  'HP JBT / D.El.Ed',
+  'HP High Court Clerk / Process Server',
+  'HP Secretariat Clerk / JOA IT',
+  'SSC CGL / CHSL / GD / MTS',
+  'Railways RRB NTPC / Group D',
+  'Banking IBPS / SBI PO & Clerk',
+  'State PSC Exams',
+  'General Studies & Mock Tests'
+];
+
+export const DEFAULT_MASTER_SUBJECTS: string[] = [
+  'General Studies (GK)',
+  'Himachal Pradesh GK & Current Affairs',
+  'HP History, Geography & Culture',
+  'Indian Polity & Constitution',
+  'Indian History & National Movement',
+  'Geography of India & World',
+  'Indian Economy & Budget',
+  'General Science (Physics, Chemistry, Biology)',
+  'Logical Reasoning & Mental Ability',
+  'Quantitative Aptitude & Mathematics',
+  'English Language & Grammar',
+  'Hindi Bhasha & Vyakaran',
+  'Computer Awareness & IT',
+  'Environment, Ecology & Biodiversity',
+  'National & International Current Affairs',
+  'Teaching Aptitude & Pedagogy'
+];
 
 /**
  * Normalize question string for exact content fingerprinting
@@ -140,6 +182,9 @@ export const getQuestionQualityRank = (q: Partial<Question>): number => {
   let score = 0;
   if (q.inspection_status === 'verified') score += 1000;
   if (q.explanation && q.explanation.trim().length > 10) score += Math.min(q.explanation.length, 500);
+  if (q.question_image) score += 100;
+  if (q.option_a_image || q.option_b_image || q.option_c_image || q.option_d_image) score += 100;
+  if (q.explanation_image) score += 50;
   if (q.quality_score !== undefined) score += Number(q.quality_score);
   if (q.topic && q.topic !== 'General Topic') score += 50;
   if (q.chapter && q.chapter !== 'General') score += 50;
@@ -172,12 +217,18 @@ export const mergeMasterQuestion = (existing: Question | undefined, incoming: Qu
     id: existing.id || primary.id, // Preserve existing stable master ID
     test_id: 'bank',
     question_text: primary.question_text || secondary.question_text,
+    question_image: primary.question_image || secondary.question_image || null,
     option_a: primary.option_a || secondary.option_a,
+    option_a_image: primary.option_a_image || secondary.option_a_image || null,
     option_b: primary.option_b || secondary.option_b,
+    option_b_image: primary.option_b_image || secondary.option_b_image || null,
     option_c: primary.option_c || secondary.option_c,
+    option_c_image: primary.option_c_image || secondary.option_c_image || null,
     option_d: primary.option_d || secondary.option_d,
+    option_d_image: primary.option_d_image || secondary.option_d_image || null,
     correct_answer: primary.correct_answer || secondary.correct_answer || 'A',
     explanation: (primary.explanation && primary.explanation.length > (secondary.explanation?.length || 0)) ? primary.explanation : (secondary.explanation || primary.explanation || ''),
+    explanation_image: primary.explanation_image || secondary.explanation_image || null,
     subject: primary.subject && primary.subject !== 'General Studies' ? primary.subject : (secondary.subject || primary.subject || 'General Studies'),
     chapter: primary.chapter && primary.chapter !== 'General' ? primary.chapter : (secondary.chapter || primary.chapter || 'General'),
     topic: primary.topic && primary.topic !== 'General Topic' ? primary.topic : (secondary.topic || primary.topic || 'General Topic'),
@@ -493,6 +544,10 @@ export const sanitizeAdminSettings = (s?: Partial<AdminSettings> | any): AdminSe
   const data = s || {};
   const brand_name = data.brand_name || data.app_name || 'Gradeup Study';
   const logo_url = data.logo_url !== undefined && data.logo_url !== null ? data.logo_url : DEMO_ADMIN_SETTINGS.logo_url;
+  let website_url = data.website_url || DEMO_ADMIN_SETTINGS.website_url;
+  if (website_url === 'https://gradeupstudy.com' || website_url === 'http://gradeupstudy.com' || website_url === 'gradeupstudy.com') {
+    website_url = 'https://mock.gradeupstudy.com';
+  }
   const youtube_channel = sanitizeSocialUrl('youtube', data.youtube_channel);
   const telegram_channel = sanitizeSocialUrl('telegram', data.telegram_channel);
   const instagram_handle = sanitizeSocialUrl('instagram', data.instagram_handle);
@@ -503,6 +558,7 @@ export const sanitizeAdminSettings = (s?: Partial<AdminSettings> | any): AdminSe
     ...data,
     brand_name,
     logo_url,
+    website_url,
     youtube_channel,
     telegram_channel,
     instagram_handle,
@@ -760,6 +816,186 @@ export const dataService = {
       reader.onerror = () => resolve({ success: false, url: '', source: 'cloud_compressed' });
       reader.readAsDataURL(file);
     });
+  },
+
+  /**
+   * High-Performance Question & Option Image Uploader:
+   * Uploads reasoning figures, mirror/water images, diagrams to Supabase Storage,
+   * with automatic high-res canvas compression fallback.
+   */
+  uploadQuestionImage: async (file: File | Blob, folder = 'mcq_images'): Promise<{ success: boolean; url: string; source: 'supabase_storage' | 'cloud_compressed' }> => {
+    const supabase = getSupabaseClient();
+    
+    // 1. Try uploading to Supabase Storage Bucket
+    if (isSupabaseConfigured() && supabase) {
+      const possibleBuckets = ['question_images', 'question-images', 'images', 'assets', 'public', 'logos'];
+      const fileExt = file instanceof File ? file.name.split('.').pop() || 'png' : 'png';
+      const fileName = `mcq_img_${Date.now()}_${Math.random().toString(36).substr(2, 6)}.${fileExt}`;
+      const filePath = `${folder}/${fileName}`;
+
+      for (const bucket of possibleBuckets) {
+        try {
+          const { data: uploadData, error: uploadErr } = await supabase.storage
+            .from(bucket)
+            .upload(filePath, file, {
+              cacheControl: '3600',
+              upsert: true,
+              contentType: file.type || 'image/png'
+            });
+
+          if (!uploadErr && uploadData) {
+            const { data: publicData } = supabase.storage.from(bucket).getPublicUrl(filePath);
+            if (publicData?.publicUrl) {
+              return { success: true, url: publicData.publicUrl, source: 'supabase_storage' };
+            }
+          }
+        } catch {
+          // try next bucket
+        }
+      }
+    }
+
+    // 2. High-Fidelity Canvas compression for offline / direct base64 fallback (Max 1200px)
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const rawData = e.target?.result as string;
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 1200; // 1200px provides crisp detail for diagrams & mirror/water reasoning problems
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          let compressed = rawData;
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            compressed = canvas.toDataURL(file.type.includes('png') ? 'image/png' : 'image/jpeg', 0.88);
+          }
+          resolve({ success: true, url: compressed, source: 'cloud_compressed' });
+        };
+        img.onerror = () => resolve({ success: true, url: rawData, source: 'cloud_compressed' });
+        img.src = rawData;
+      };
+      reader.onerror = () => resolve({ success: false, url: '', source: 'cloud_compressed' });
+      reader.readAsDataURL(file);
+    });
+  },
+
+  // ------------------------------------
+  // MASTER CATEGORIES & SUBJECTS SYSTEM
+  // ------------------------------------
+  getMasterCategories: (): string[] => {
+    let savedCats: string[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.MASTER_CATEGORIES);
+      if (raw) {
+        savedCats = JSON.parse(raw);
+      }
+    } catch {}
+
+    // Combine with categories from existing mock tests & default standard categories
+    let testCats: string[] = [];
+    try {
+      const rawTests = localStorage.getItem(STORAGE_KEYS.TESTS);
+      if (rawTests) {
+        const tests = JSON.parse(rawTests);
+        if (Array.isArray(tests)) {
+          testCats = tests.map(t => (t.category || '').trim()).filter(Boolean);
+        }
+      }
+    } catch {}
+
+    const set = new Set<string>();
+    DEFAULT_MASTER_CATEGORIES.forEach(c => { if (c && c.trim()) set.add(c.trim()); });
+    if (Array.isArray(savedCats)) {
+      savedCats.forEach(c => { if (c && c.trim()) set.add(c.trim()); });
+    }
+    if (Array.isArray(testCats)) {
+      testCats.forEach(c => { if (c && c.trim()) set.add(c.trim()); });
+    }
+
+    return Array.from(set);
+  },
+
+  saveMasterCategory: async (categoryName: string): Promise<string[]> => {
+    const name = categoryName.trim();
+    if (!name) return dataService.getMasterCategories();
+    const existing = [...dataService.getMasterCategories()];
+    if (!existing.some(c => c.toLowerCase() === name.toLowerCase())) {
+      existing.unshift(name);
+      localStorage.setItem(STORAGE_KEYS.MASTER_CATEGORIES, JSON.stringify(existing));
+    }
+    return existing;
+  },
+
+  deleteMasterCategory: async (categoryName: string): Promise<string[]> => {
+    const current = dataService.getMasterCategories();
+    const updated = current.filter(c => c.toLowerCase() !== categoryName.toLowerCase());
+    localStorage.setItem(STORAGE_KEYS.MASTER_CATEGORIES, JSON.stringify(updated));
+    return updated;
+  },
+
+  getMasterSubjects: (): string[] => {
+    let savedSubs: string[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.MASTER_SUBJECTS);
+      if (raw) {
+        savedSubs = JSON.parse(raw);
+      }
+    } catch {}
+
+    // Combine with subjects from Question Bank Master & default standard subjects
+    let bankSubs: string[] = [];
+    try {
+      const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+      if (rawBank) {
+        const bank = JSON.parse(rawBank);
+        if (Array.isArray(bank)) {
+          bankSubs = bank.map(q => (q.subject || '').trim()).filter(Boolean);
+        }
+      }
+    } catch {}
+
+    const set = new Set<string>();
+    DEFAULT_MASTER_SUBJECTS.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    if (Array.isArray(savedSubs)) {
+      savedSubs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
+    if (Array.isArray(bankSubs)) {
+      bankSubs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
+
+    return Array.from(set);
+  },
+
+  saveMasterSubject: async (subjectName: string): Promise<string[]> => {
+    const name = subjectName.trim();
+    if (!name) return dataService.getMasterSubjects();
+    const existing = [...dataService.getMasterSubjects()];
+    if (!existing.some(s => s.toLowerCase() === name.toLowerCase())) {
+      existing.unshift(name);
+      localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(existing));
+    }
+    return existing;
+  },
+
+  deleteMasterSubject: async (subjectName: string): Promise<string[]> => {
+    const current = dataService.getMasterSubjects();
+    const updated = current.filter(s => s.toLowerCase() !== subjectName.toLowerCase());
+    localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(updated));
+    return updated;
   },
 
   updateSettings: async (newSettings: Partial<AdminSettings>): Promise<AdminSettings> => {
@@ -1197,13 +1433,21 @@ export const dataService = {
   },
 
   getPublicShareableUrl: (slugOrCode: string): string => {
-    let origin = window.location.origin;
+    let origin = 'https://mock.gradeupstudy.com';
     try {
+      // If running inside custom domain or localhost
+      if (typeof window !== 'undefined' && window.location && window.location.origin) {
+        origin = window.location.origin;
+      }
       const raw = localStorage.getItem(STORAGE_KEYS.SETTINGS);
       if (raw) {
         const s = JSON.parse(raw);
         if (s.website_url && s.website_url.startsWith('http')) {
-          origin = s.website_url.replace(/\/+$/, '');
+          let url = s.website_url.replace(/\/+$/, '');
+          if (url === 'https://gradeupstudy.com' || url === 'http://gradeupstudy.com' || url === 'gradeupstudy.com') {
+            url = 'https://mock.gradeupstudy.com';
+          }
+          origin = url;
         }
       }
     } catch {}
@@ -1471,32 +1715,27 @@ export const dataService = {
     const newId = generateUUID();
     const newCode = original.test_code + '-COPY';
     const newTitle = original.title + ' (Copy)';
-    const newSlug = original.slug + '-copy-' + Math.floor(Math.random() * 1000);
+    const randSuffix = Math.floor(100 + Math.random() * 900);
+    const newSlug = original.slug + '-copy-' + randSuffix;
 
+    // Duplicate test metadata ONLY (duration, negative marking, category, subject, instructions, timer rules, etc.)
+    // Questions are NOT copied so the administrator gets a fresh, clean test structure to add new MCQs.
     const duplicated: Test = {
       ...original,
       id: newId,
       test_code: newCode,
       title: newTitle,
       slug: newSlug,
-      status: 'published',
-      is_published: true,
+      total_questions: 0,
+      total_marks: 0,
+      status: 'draft',
+      is_published: false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
     await dataService.saveTest(duplicated);
-
-    const questions = await dataService.getQuestions(testId, true);
-    if (questions.length > 0) {
-      const duplicatedQuestions = questions.map((q, idx) => ({
-        ...q,
-        id: generateUUID(),
-        test_id: newId,
-        question_number: idx + 1
-      }));
-      await dataService.saveQuestions(newId, duplicatedQuestions);
-    }
+    await dataService.saveQuestions(newId, []);
 
     return duplicated;
   },
@@ -1702,11 +1941,16 @@ export const dataService = {
         question_text: q.question_text || '',
         question_image: q.question_image || null,
         option_a: q.option_a || '',
+        option_a_image: q.option_a_image || null,
         option_b: q.option_b || '',
+        option_b_image: q.option_b_image || null,
         option_c: q.option_c || '',
+        option_c_image: q.option_c_image || null,
         option_d: q.option_d || '',
+        option_d_image: q.option_d_image || null,
         correct_answer: validAns,
         explanation: q.explanation || null,
+        explanation_image: q.explanation_image || null,
         marks: parseSafeNumber(q.marks, 1),
         negative_marks: parseSafeNumber(q.negative_marks, 0),
         subject: q.subject || 'General Studies',

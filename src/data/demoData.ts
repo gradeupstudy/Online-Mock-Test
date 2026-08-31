@@ -3,7 +3,7 @@ import { Test, Question, SocialPlatform, AdminSettings, Attempt } from '../types
 export const DEMO_ADMIN_SETTINGS: AdminSettings = {
   brand_name: "Gradeup Study",
   logo_url: "/logo.png",
-  website_url: "https://gradeupstudy.com",
+  website_url: "https://mock.gradeupstudy.com",
   support_email: "support@gradeupstudy.com",
   whatsapp_number: "+919816000000",
   whatsapp_channel_url: "https://whatsapp.com/channel/gradeupstudy",

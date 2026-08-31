@@ -1,7 +1,7 @@
 import { Type } from '@google/genai';
 import { Question } from '../types';
 import { aiService, AIGenerateParams, normalizeAnswerKey, shuffleAndBalanceQuestions } from './aiService';
-import { dataService } from './dataService';
+import { dataService, generateUUID } from './dataService';
 import {
   buildSemanticVector,
   calculateSemanticVectorSimilarity,
@@ -167,7 +167,7 @@ CRITICAL DU-XQE MUTATION MANDATES:
 
         const mutatedQuestion: Question = {
           ...sourceQuestion,
-          id: 'q-duxqe-' + Date.now() + '-' + Math.random().toString(36).substr(2, 5),
+          id: generateUUID(),
           question_text: parsed.question_text,
           option_a: parsed.option_a,
           option_b: parsed.option_b,

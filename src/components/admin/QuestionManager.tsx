@@ -24,10 +24,12 @@ import {
   MinusCircle,
   CheckCircle2,
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle,
+  Tag
 } from 'lucide-react';
 import { Test, Question } from '../../types';
-import { dataService, generateUUID, shuffleQuestionOptions, shuffleAndBalanceQuestions, parseSafeNumber } from '../../services/dataService';
+import { dataService, generateUUID, shuffleQuestionOptions, shuffleAndBalanceQuestions, parseSafeNumber, getQuestionMockTestUsages } from '../../services/dataService';
 import { aiService } from '../../services/aiService';
 import { Modal } from '../common/Modal';
 import { AIQuestionGeneratorModal } from './AIQuestionGeneratorModal';
@@ -39,6 +41,8 @@ import { BulkAIExplanationModal } from './BulkAIExplanationModal';
 import { QuestionBankImportModal } from './QuestionBankImportModal';
 import { DuplicateTrackerModal } from './DuplicateTrackerModal';
 import { CompletePDFImportModal } from './CompletePDFImportModal';
+import { CategorySubjectManagerModal } from './CategorySubjectManagerModal';
+import { MCQImageUploader } from '../common/MCQImageUploader';
 import { detectDuplicateQuestions } from '../../utils/duplicateDetector';
 import { DUXQEMutateModal } from './DUXQEMutateModal';
 
@@ -77,6 +81,10 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   const [isDuplicateModalOpen, setIsDuplicateModalOpen] = useState(false);
   const [focusedDuplicateGroupId, setFocusedDuplicateGroupId] = useState<string | null>(null);
   const [showOnlyDuplicates, setShowOnlyDuplicates] = useState(false);
+  const [isTaxonomyManagerOpen, setIsTaxonomyManagerOpen] = useState(false);
+  const [masterCategories, setMasterCategories] = useState<string[]>([]);
+  const [masterSubjects, setMasterSubjects] = useState<string[]>([]);
+  const [usageReport, setUsageReport] = useState<any>(null);
   
   // Bulk negative marking and marks controls
   const [bulkNegativeMarksInput, setBulkNegativeMarksInput] = useState<number>(0);
@@ -101,10 +109,23 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   }, [testId]);
 
   const loadTestAndQuestions = async () => {
-    const t = await dataService.getTestBySlugOrId(testId);
+    try {
+      const cats = dataService.getMasterCategories();
+      const subs = dataService.getMasterSubjects();
+      setMasterCategories(Array.isArray(cats) ? cats : []);
+      setMasterSubjects(Array.isArray(subs) ? subs : []);
+    } catch {
+      setMasterCategories([]);
+      setMasterSubjects([]);
+    }
+    const [t, qList, report] = await Promise.all([
+      dataService.getTestBySlugOrId(testId),
+      dataService.getQuestions(testId),
+      dataService.getMockTestQuestionUsageMap()
+    ]);
     setTest(t);
-    const qList = await dataService.getQuestions(testId);
     setQuestions(qList);
+    setUsageReport(report);
     setSelectedQuestionIds(new Set());
   };
 
@@ -442,8 +463,9 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     loadTestAndQuestions();
   };
 
-  // Subjects for filter
-  const subjects = Array.from(new Set(questions.map(q => q.subject))).filter(Boolean);
+  // Subjects for filter and auto-complete
+  const safeMasterSubs = Array.isArray(masterSubjects) ? masterSubjects : [];
+  const subjects = Array.from(new Set([...safeMasterSubs, ...questions.map(q => q.subject).filter(Boolean)])).filter(Boolean);
 
   // Accurate Duplicate Detection for Mock Test
   const duplicateAnalysis = React.useMemo(() => {
@@ -551,6 +573,16 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           >
             <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
             <span>PDF OCR Engine</span>
+          </button>
+
+          {/* MASTER CATEGORY & SUBJECT TAXONOMY BUTTON */}
+          <button
+            onClick={() => setIsTaxonomyManagerOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer border border-violet-400/30"
+            title="Pre-define and manage master exam Categories, Subjects and Chapter taxonomy"
+          >
+            <Tag className="w-4 h-4 text-violet-200" />
+            <span>🏷️ Categories & Subjects</span>
           </button>
 
           <button
@@ -1049,6 +1081,22 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                     <span className="text-[9px] bg-white/20 px-1 py-0.2 rounded font-bold underline">Compare ⇄</span>
                   </button>
                 )}
+
+                {/* Cross-Mock Duplicate / Usage Indicator */}
+                {(() => {
+                  if (!usageReport) return null;
+                  const usages = getQuestionMockTestUsages(q, usageReport, testId);
+                  if (usages.length === 0) return null;
+                  return (
+                    <span 
+                      className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 rounded-md font-bold text-[10px] flex items-center gap-1 shadow-xs"
+                      title={`Also used in other mock tests: ${usages.map(u => u.testTitle).join(', ')}`}
+                    >
+                      <AlertTriangle className="w-3 h-3 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span>Also in Mock: <b>{usages.map(u => u.testTitle).join(', ')}</b></span>
+                    </span>
+                  );
+                })()}
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
@@ -1134,61 +1182,79 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             </p>
 
             {q.question_image && (
-              <img src={q.question_image} alt="Question Visual" className="max-h-48 rounded-xl mb-4 border" />
+              <div className="my-2 p-1.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 max-w-sm">
+                <img
+                  src={q.question_image}
+                  alt="Question Diagram"
+                  className="max-h-52 w-auto object-contain rounded-lg"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
             )}
 
             {/* Options Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs sm:text-sm font-medium">
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                q.correct_answer === 'A'
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800 font-bold'
-                  : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-              }`}>
-                <span>A. {q.option_a}</span>
-                {q.correct_answer === 'A' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
-              </div>
-
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                q.correct_answer === 'B'
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800 font-bold'
-                  : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-              }`}>
-                <span>B. {q.option_b}</span>
-                {q.correct_answer === 'B' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
-              </div>
-
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                q.correct_answer === 'C'
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800 font-bold'
-                  : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-              }`}>
-                <span>C. {q.option_c}</span>
-                {q.correct_answer === 'C' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
-              </div>
-
-              <div className={`p-3 rounded-xl border flex items-center justify-between ${
-                q.correct_answer === 'D'
-                  ? 'bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800 font-bold'
-                  : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
-              }`}>
-                <span>D. {q.option_d}</span>
-                {q.correct_answer === 'D' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
-              </div>
+              {[
+                { key: 'A', text: q.option_a, img: q.option_a_image },
+                { key: 'B', text: q.option_b, img: q.option_b_image },
+                { key: 'C', text: q.option_c, img: q.option_c_image },
+                { key: 'D', text: q.option_d, img: q.option_d_image },
+              ].map(({ key, text, img }) => {
+                if (!text && !img) return null;
+                const isCorrect = q.correct_answer === key;
+                return (
+                  <div
+                    key={key}
+                    className={`p-3 rounded-xl border flex flex-col gap-1.5 ${
+                      isCorrect
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800 font-bold'
+                        : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span><b className="mr-1">{key}.</b> {text}</span>
+                      {isCorrect && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                    </div>
+                    {img && (
+                      <div className="p-1 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 max-w-[150px]">
+                        <img
+                          src={img}
+                          alt={`Option ${key}`}
+                          className="max-h-20 w-auto object-contain rounded"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             {/* Explanation box */}
-            {q.explanation ? (
-              <div className="p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200/50 dark:border-amber-900/50 text-xs text-amber-900 dark:text-amber-200 flex items-start justify-between gap-2">
-                <div>
-                  <span className="font-bold text-amber-950 dark:text-amber-300">Explanation: </span> {q.explanation}
+            {q.explanation || q.explanation_image ? (
+              <div className="p-3 bg-amber-50/60 dark:bg-amber-950/30 rounded-xl border border-amber-200/50 dark:border-amber-900/50 text-xs text-amber-900 dark:text-amber-200 flex flex-col gap-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <span className="font-bold text-amber-950 dark:text-amber-300">Explanation: </span> {q.explanation}
+                  </div>
+                  <button
+                    onClick={() => handleSingleAIExplain(q)}
+                    disabled={isGeneratingExplanationId === q.id}
+                    className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-bold shrink-0 cursor-pointer"
+                  >
+                    Upgrade
+                  </button>
                 </div>
-                <button
-                  onClick={() => handleSingleAIExplain(q)}
-                  disabled={isGeneratingExplanationId === q.id}
-                  className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline font-bold shrink-0"
-                >
-                  Upgrade
-                </button>
+                {q.explanation_image && (
+                  <div className="p-1 bg-white dark:bg-slate-800 rounded-lg border border-amber-200 dark:border-amber-800 max-w-sm">
+                    <img
+                      src={q.explanation_image}
+                      alt="Solution Diagram"
+                      className="max-h-36 w-auto object-contain rounded"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                )}
               </div>
             ) : (
               <div className="p-2.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 text-xs text-slate-500 flex items-center justify-between">
@@ -1295,17 +1361,33 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
               </div>
 
               <div className="sm:col-span-5">
-                <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                  Subject Name *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400">
+                    Subject Name *
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsTaxonomyManagerOpen(true)}
+                    className="text-[10px] font-bold text-violet-600 dark:text-violet-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Tag className="w-3 h-3" />
+                    <span>Manage Masters</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   required
+                  list="qm-subject-options"
                   value={editingQuestion.subject || ''}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, subject: e.target.value })}
-                  placeholder="e.g. English Grammar"
+                  placeholder="e.g. Reasoning / Quant / English"
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-bold"
                 />
+                <datalist id="qm-subject-options">
+                  {subjects.map((s) => (
+                    <option key={s} value={s} />
+                  ))}
+                </datalist>
               </div>
 
               <div className="sm:col-span-4">
@@ -1314,11 +1396,17 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                 </label>
                 <input
                   type="text"
+                  list="qm-chapter-options"
                   value={editingQuestion.chapter || ''}
                   onChange={(e) => setEditingQuestion({ ...editingQuestion, chapter: e.target.value })}
-                  placeholder="e.g. Noun, Tenses..."
+                  placeholder="e.g. Water & Mirror Images, Syllogism..."
                   className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold"
                 />
+                <datalist id="qm-chapter-options">
+                  {Array.from(new Set(questions.map(q => q.chapter))).filter(Boolean).map((ch) => (
+                    <option key={ch} value={ch} />
+                  ))}
+                </datalist>
               </div>
             </div>
 
@@ -1331,57 +1419,92 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                 required
                 value={editingQuestion.question_text || ''}
                 onChange={(e) => setEditingQuestion({ ...editingQuestion, question_text: e.target.value })}
-                placeholder="Type question here..."
+                placeholder="Type question text here (e.g. Find the correct water/mirror image for the figure below:)..."
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
               />
             </div>
 
+            {/* Question Diagram / Image Uploader */}
+            <MCQImageUploader
+              label="Question Diagram / Image (Optional - e.g. for Mirror/Water image, Geometry, Circuit)"
+              imageUrl={editingQuestion.question_image}
+              onChange={(url) => setEditingQuestion({ ...editingQuestion, question_image: url })}
+            />
+
             {/* Options A, B, C, D */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400">
-                Answer Options *
+                Answer Options & Diagrams *
               </label>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option A *</span>
+                <div className="space-y-1.5 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">Option A *</span>
                   <input
                     type="text"
-                    required
+                    required={!editingQuestion.option_a_image}
                     value={editingQuestion.option_a || ''}
                     onChange={(e) => setEditingQuestion({ ...editingQuestion, option_a: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                    placeholder="Option A text..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+                  />
+                  <MCQImageUploader
+                    label="Option A Image"
+                    imageUrl={editingQuestion.option_a_image}
+                    compact
+                    onChange={(url) => setEditingQuestion({ ...editingQuestion, option_a_image: url })}
                   />
                 </div>
 
-                <div>
-                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option B *</span>
+                <div className="space-y-1.5 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">Option B *</span>
                   <input
                     type="text"
-                    required
+                    required={!editingQuestion.option_b_image}
                     value={editingQuestion.option_b || ''}
                     onChange={(e) => setEditingQuestion({ ...editingQuestion, option_b: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                    placeholder="Option B text..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+                  />
+                  <MCQImageUploader
+                    label="Option B Image"
+                    imageUrl={editingQuestion.option_b_image}
+                    compact
+                    onChange={(url) => setEditingQuestion({ ...editingQuestion, option_b_image: url })}
                   />
                 </div>
 
-                <div>
-                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option C</span>
+                <div className="space-y-1.5 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">Option C</span>
                   <input
                     type="text"
                     value={editingQuestion.option_c || ''}
                     onChange={(e) => setEditingQuestion({ ...editingQuestion, option_c: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                    placeholder="Option C text..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+                  />
+                  <MCQImageUploader
+                    label="Option C Image"
+                    imageUrl={editingQuestion.option_c_image}
+                    compact
+                    onChange={(url) => setEditingQuestion({ ...editingQuestion, option_c_image: url })}
                   />
                 </div>
 
-                <div>
-                  <span className="text-xs font-semibold text-slate-500 mb-1 block">Option D</span>
+                <div className="space-y-1.5 p-2.5 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/80">
+                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">Option D</span>
                   <input
                     type="text"
                     value={editingQuestion.option_d || ''}
                     onChange={(e) => setEditingQuestion({ ...editingQuestion, option_d: e.target.value })}
-                    className="w-full px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
+                    placeholder="Option D text..."
+                    className="w-full px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm"
+                  />
+                  <MCQImageUploader
+                    label="Option D Image"
+                    imageUrl={editingQuestion.option_d_image}
+                    compact
+                    onChange={(url) => setEditingQuestion({ ...editingQuestion, option_d_image: url })}
                   />
                 </div>
               </div>
@@ -1488,6 +1611,13 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
                 className="w-full px-3.5 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm"
               />
             </div>
+
+            {/* Explanation Image */}
+            <MCQImageUploader
+              label="Explanation / Solution Diagram (Optional)"
+              imageUrl={editingQuestion.explanation_image}
+              onChange={(url) => setEditingQuestion({ ...editingQuestion, explanation_image: url })}
+            />
 
             <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
               <button
@@ -1716,14 +1846,33 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
           isOpen={!!mutatingQuestion}
           sourceQuestion={mutatingQuestion}
           onClose={() => setMutatingQuestion(null)}
-          onSuccess={async (mutated) => {
-            await dataService.saveQuestion(testId, mutated);
-            notify('success', `✨ Saved DU-XQE mutated question into this mock test!`);
+          onSuccess={async (mutated, mode) => {
+            if (mode === 'replace') {
+              await dataService.saveQuestion(testId, mutated);
+              notify('success', `✨ Replaced original question with DU-XQE mutated variant!`);
+            } else {
+              const newQ = {
+                ...mutated,
+                id: generateUUID(),
+                test_id: testId,
+                question_number: questions.length + 1
+              };
+              await dataService.saveQuestion(testId, newQ);
+              notify('success', `✨ Added new DU-XQE mutated question into this mock test!`);
+            }
             await loadTestAndQuestions();
           }}
           onToast={notify}
         />
       )}
+
+      {/* Master Category & Subject Manager Modal */}
+      <CategorySubjectManagerModal
+        isOpen={isTaxonomyManagerOpen}
+        onClose={() => setIsTaxonomyManagerOpen(false)}
+        onUpdated={loadTestAndQuestions}
+        onToast={notify}
+      />
 
     </div>
   );

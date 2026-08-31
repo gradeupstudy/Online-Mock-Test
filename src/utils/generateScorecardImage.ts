@@ -375,7 +375,7 @@ export async function generateScorecardImageBlob(options: ScorecardImageOptions)
   ctx.fillText('🎯 Practice Free Mock Tests & Compete on State Leaderboards!', 60, footerY);
 
   // Link on Right
-  let cleanDomain = 'gradeupstudy.com';
+  let cleanDomain = 'mock.gradeupstudy.com';
   try {
     const parsed = new URL(shareUrl);
     cleanDomain = parsed.hostname + (parsed.search || '');

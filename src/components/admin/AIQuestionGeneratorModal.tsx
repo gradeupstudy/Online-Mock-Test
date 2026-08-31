@@ -729,8 +729,14 @@ export const AIQuestionGeneratorModal: React.FC<AIQuestionGeneratorModalProps> =
             setMutatingQuestion(null);
             setMutatingIndex(null);
           }}
-          onSuccess={(mutated) => {
-            if (mutatingIndex !== null) {
+          onSuccess={(mutated, mode) => {
+            if (mode === 'add_new') {
+              setGeneratedQuestions((prev) => [
+                ...prev,
+                { ...mutated, question_number: prev.length + 1 }
+              ]);
+              onToast?.('success', `✨ Added new DU-XQE mutated variant as Q${generatedQuestions.length + 1}!`);
+            } else if (mutatingIndex !== null) {
               setGeneratedQuestions((prev) =>
                 prev.map((item, idx) =>
                   idx === mutatingIndex ? { ...mutated, question_number: idx + 1 } : item

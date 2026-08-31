@@ -712,47 +712,58 @@ export const QuestionBankImportModal: React.FC<QuestionBankImportModalProps> = (
                           {bq.question_text}
                         </p>
 
+                        {/* Question Image / Diagram */}
+                        {bq.question_image && (
+                          <div className="my-1.5 p-1 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 max-w-xs">
+                            <img
+                              src={bq.question_image}
+                              alt="Question Diagram"
+                              className="max-h-32 w-auto object-contain rounded"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                        )}
+
                         {/* Options Grid */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
-                          <div className={`p-2 rounded-xl border text-[11px] ${
-                            bq.correct_answer === 'A' 
-                              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' 
-                              : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700/60 text-slate-700 dark:text-slate-300'
-                          }`}>
-                            <span className="font-bold mr-1">A.</span> {bq.option_a}
-                            {bq.correct_answer === 'A' && <span className="ml-1 text-emerald-600 font-bold">✓</span>}
-                          </div>
-
-                          <div className={`p-2 rounded-xl border text-[11px] ${
-                            bq.correct_answer === 'B' 
-                              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' 
-                              : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700/60 text-slate-700 dark:text-slate-300'
-                          }`}>
-                            <span className="font-bold mr-1">B.</span> {bq.option_b}
-                            {bq.correct_answer === 'B' && <span className="ml-1 text-emerald-600 font-bold">✓</span>}
-                          </div>
-
-                          <div className={`p-2 rounded-xl border text-[11px] ${
-                            bq.correct_answer === 'C' 
-                              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' 
-                              : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700/60 text-slate-700 dark:text-slate-300'
-                          }`}>
-                            <span className="font-bold mr-1">C.</span> {bq.option_c}
-                            {bq.correct_answer === 'C' && <span className="ml-1 text-emerald-600 font-bold">✓</span>}
-                          </div>
-
-                          <div className={`p-2 rounded-xl border text-[11px] ${
-                            bq.correct_answer === 'D' 
-                              ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200' 
-                              : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700/60 text-slate-700 dark:text-slate-300'
-                          }`}>
-                            <span className="font-bold mr-1">D.</span> {bq.option_d}
-                            {bq.correct_answer === 'D' && <span className="ml-1 text-emerald-600 font-bold">✓</span>}
-                          </div>
+                          {[
+                            { key: 'A', text: bq.option_a, img: bq.option_a_image },
+                            { key: 'B', text: bq.option_b, img: bq.option_b_image },
+                            { key: 'C', text: bq.option_c, img: bq.option_c_image },
+                            { key: 'D', text: bq.option_d, img: bq.option_d_image },
+                          ].map(({ key, text, img }) => {
+                            if (!text && !img) return null;
+                            const isCorrect = bq.correct_answer === key;
+                            return (
+                              <div
+                                key={key}
+                                className={`p-2 rounded-xl border text-[11px] flex flex-col gap-1 ${
+                                  isCorrect
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-400 font-bold text-emerald-900 dark:text-emerald-200'
+                                    : 'bg-slate-50 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700/60 text-slate-700 dark:text-slate-300'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span><b className="mr-1">{key}.</b> {text}</span>
+                                  {isCorrect && <span className="text-emerald-600 font-bold">✓</span>}
+                                </div>
+                                {img && (
+                                  <div className="p-0.5 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700 max-w-[120px]">
+                                    <img
+                                      src={img}
+                                      alt={`Option ${key}`}
+                                      className="max-h-16 w-auto object-contain rounded"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
 
                         {/* Optional Explanation Accordion */}
-                        {bq.explanation && (
+                        {(bq.explanation || bq.explanation_image) && (
                           <div className="pt-1" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
@@ -763,9 +774,19 @@ export const QuestionBankImportModal: React.FC<QuestionBankImportModalProps> = (
                               {isExpanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                             </button>
                             {isExpanded && (
-                              <div className="mt-1.5 p-2.5 bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-xl text-[11px] text-slate-700 dark:text-slate-300">
+                              <div className="mt-1.5 p-2.5 bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900/60 rounded-xl text-[11px] text-slate-700 dark:text-slate-300 space-y-2">
                                 <span className="font-bold text-blue-800 dark:text-blue-300 block mb-0.5">Explanation:</span>
-                                {bq.explanation}
+                                {bq.explanation && <p>{bq.explanation}</p>}
+                                {bq.explanation_image && (
+                                  <div className="p-1 bg-white dark:bg-slate-800 rounded border border-blue-200 dark:border-blue-800 max-w-xs">
+                                    <img
+                                      src={bq.explanation_image}
+                                      alt="Solution Diagram"
+                                      className="max-h-28 w-auto object-contain rounded"
+                                      referrerPolicy="no-referrer"
+                                    />
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>

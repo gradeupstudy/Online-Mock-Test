@@ -452,15 +452,27 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
                 {currentQuestion.question_text}
               </div>
 
+              {/* Question Diagram / Image (e.g. Reasoning, Mirror/Water image, Geometry) */}
+              {currentQuestion.question_image && (
+                <div className="my-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 max-w-xl shadow-xs">
+                  <img
+                    src={currentQuestion.question_image}
+                    alt="Question Diagram"
+                    className="max-h-72 w-auto mx-auto object-contain rounded-xl"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              )}
+
               {/* Options List */}
               <div className="space-y-2.5 sm:space-y-3 pt-1 sm:pt-2">
                 {[
-                  { key: 'A', text: currentQuestion.option_a },
-                  { key: 'B', text: currentQuestion.option_b },
-                  { key: 'C', text: currentQuestion.option_c },
-                  { key: 'D', text: currentQuestion.option_d }
-                ].map(({ key, text }) => {
-                  if (!text) return null;
+                  { key: 'A', text: currentQuestion.option_a, img: currentQuestion.option_a_image },
+                  { key: 'B', text: currentQuestion.option_b, img: currentQuestion.option_b_image },
+                  { key: 'C', text: currentQuestion.option_c, img: currentQuestion.option_c_image },
+                  { key: 'D', text: currentQuestion.option_d, img: currentQuestion.option_d_image }
+                ].map(({ key, text, img }) => {
+                  if (!text && !img) return null;
                   const isSelected = selectedAnswers[currentQuestion.id] === key;
 
                   return (
@@ -481,10 +493,24 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
                         {key}
                       </div>
 
-                      <div className={`text-sm sm:text-base font-semibold pt-0.5 leading-relaxed flex-1 ${
-                        isSelected ? 'text-blue-900 dark:text-blue-100 font-bold' : 'text-slate-800 dark:text-slate-200'
-                      }`}>
-                        {text}
+                      <div className="flex-1 space-y-2">
+                        {text && (
+                          <div className={`text-sm sm:text-base font-semibold pt-0.5 leading-relaxed ${
+                            isSelected ? 'text-blue-900 dark:text-blue-100 font-bold' : 'text-slate-800 dark:text-slate-200'
+                          }`}>
+                            {text}
+                          </div>
+                        )}
+                        {img && (
+                          <div className="rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 bg-white p-1.5 max-w-xs">
+                            <img
+                              src={img}
+                              alt={`Option ${key} Diagram`}
+                              className="max-h-40 w-auto object-contain rounded"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                        )}
                       </div>
                     </button>
                   );

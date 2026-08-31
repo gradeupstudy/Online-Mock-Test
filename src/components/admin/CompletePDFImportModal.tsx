@@ -737,8 +737,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
       setTestList(updatedTests);
       setTargetDestination(savedTest.id);
 
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const shareUrl = `${origin}/?t=${encodeURIComponent(savedTest.slug || savedTest.test_code)}`;
+      const shareUrl = dataService.getPublicShareableUrl(savedTest.slug || savedTest.test_code);
 
       notify('success', `🎉 Mock Test "${savedTest.title}" created with ${convertedQuestions.length} MCQs!`);
 
