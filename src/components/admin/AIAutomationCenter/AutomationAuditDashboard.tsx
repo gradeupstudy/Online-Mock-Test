@@ -50,7 +50,15 @@ interface AutomationAuditDashboardProps {
   onBatchApproveValid: () => void;
   onBatchExcludeInvalid: () => void;
   onReEnrichAllDualLanguage?: () => void;
+  isEnrichingDualLanguage?: boolean;
+  enrichDualLanguageProgress?: {
+    current: number;
+    total: number;
+    message: string;
+    percent: number;
+  } | null;
   onConvertSingleDualLanguage?: (questionId: string) => void;
+  singleEnrichingId?: string | null;
   onConfirmAuditGate1: (confirmation: AdminAuditConfirmation) => void;
   onPauseSession: () => void;
   onRejectAudit: () => void;
@@ -66,7 +74,10 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
   onBatchApproveValid,
   onBatchExcludeInvalid,
   onReEnrichAllDualLanguage,
+  isEnrichingDualLanguage = false,
+  enrichDualLanguageProgress = null,
   onConvertSingleDualLanguage,
+  singleEnrichingId = null,
   onConfirmAuditGate1,
   onPauseSession,
   onRejectAudit,
@@ -550,12 +561,25 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
           {onReEnrichAllDualLanguage && (
             <button
               type="button"
+              disabled={isEnrichingDualLanguage || isBatchRepairing}
               onClick={onReEnrichAllDualLanguage}
-              className="px-3.5 py-2 text-xs font-black rounded-xl bg-purple-600 hover:bg-purple-700 text-white cursor-pointer shadow-md shadow-purple-500/20 transition-all flex items-center gap-1.5"
+              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer ${
+                isEnrichingDualLanguage
+                  ? 'bg-purple-700 text-white shadow-purple-500/30 ring-2 ring-purple-400 animate-pulse cursor-wait'
+                  : 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/20 disabled:opacity-50'
+              }`}
               title="Ensure all questions have verified Hindi translations and comprehensive bilingual explanations"
             >
-              <Globe className="w-3.5 h-3.5" />
-              <span>Auto-Enrich All Dual Language (EN + HI)</span>
+              {isEnrichingDualLanguage ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-200" />
+              ) : (
+                <Globe className="w-3.5 h-3.5" />
+              )}
+              <span>
+                {isEnrichingDualLanguage
+                  ? `AI Enriching... (${enrichDualLanguageProgress?.current || 0}/${enrichDualLanguageProgress?.total || questions.length})`
+                  : 'Auto-Enrich All Dual Language (EN + HI)'}
+              </span>
             </button>
           )}
 
@@ -594,6 +618,55 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
           </button>
         </div>
       </div>
+
+      {/* LIVE DUAL LANGUAGE PROCESSING EFFECT BANNER */}
+      {isEnrichingDualLanguage && (
+        <div className="p-4 rounded-3xl bg-linear-to-r from-purple-900/90 via-indigo-900/90 to-purple-950/95 border-2 border-purple-500/60 shadow-xl shadow-purple-500/10 text-white space-y-3 animate-fadeIn">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-purple-500/30 border border-purple-400/40 flex items-center justify-center shrink-0 shadow-inner">
+                <Loader2 className="w-5 h-5 animate-spin text-purple-300" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-black tracking-tight text-white flex items-center gap-1.5">
+                    <span>Dual Language (EN + HI) AI Processing Active</span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-400/20 text-purple-200 border border-purple-400/30">
+                      ✨ Gemini AI Multi-Key Rotation
+                    </span>
+                  </h4>
+                </div>
+                <p className="text-xs text-purple-200/90 font-medium mt-0.5">
+                  {enrichDualLanguageProgress?.message || 'Translating questions to pure Devanagari Hindi & synthesizing detailed pedagogical explanations...'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
+              <span className="text-xs font-mono font-black px-2.5 py-1 rounded-xl bg-purple-950/80 border border-purple-700/60 text-purple-200 shadow-inner">
+                {enrichDualLanguageProgress?.current || 0} / {enrichDualLanguageProgress?.total || questions.length} MCQs
+              </span>
+              <span className="text-xs font-mono font-black px-2.5 py-1 rounded-xl bg-purple-500 text-white shadow-xs">
+                {enrichDualLanguageProgress?.percent || 0}%
+              </span>
+            </div>
+          </div>
+
+          {/* Progress Bar with Shimmer Animation */}
+          <div className="space-y-1.5">
+            <div className="w-full h-2.5 bg-purple-950/80 rounded-full overflow-hidden border border-purple-700/40 p-0.5">
+              <div
+                className="h-full bg-linear-to-r from-purple-400 via-pink-400 to-indigo-300 rounded-full transition-all duration-300 ease-out shadow-xs"
+                style={{ width: `${Math.max(5, enrichDualLanguageProgress?.percent || 0)}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[11px] text-purple-300 font-semibold px-1">
+              <span>🌐 Pure Devanagari Hindi Translation + Complete 4 Options + Bilingual Explanations</span>
+              <span>Please wait while AI processes the question bank in batches...</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* BATCH REPAIR NOTIFICATION BANNER */}
       {batchRepairMsg && (
@@ -869,12 +942,17 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
                     {onConvertSingleDualLanguage && (
                       <button
                         type="button"
+                        disabled={singleEnrichingId === q.id || isEnrichingDualLanguage}
                         onClick={() => onConvertSingleDualLanguage(q.id)}
-                        className="px-2.5 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 cursor-pointer shadow-xs transition-all text-xs font-black flex items-center gap-1"
+                        className="px-2.5 py-2 rounded-xl bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 cursor-pointer shadow-xs transition-all text-xs font-black flex items-center gap-1 disabled:opacity-50"
                         title="AI translate & enrich this MCQ into Dual Language (English + Hindi) with full explanation"
                       >
-                        <Globe className="w-3.5 h-3.5" />
-                        <span>Dual Lang</span>
+                        {singleEnrichingId === q.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-600 dark:text-purple-400" />
+                        ) : (
+                          <Globe className="w-3.5 h-3.5" />
+                        )}
+                        <span>{singleEnrichingId === q.id ? 'Translating...' : 'Dual Lang'}</span>
                       </button>
                     )}
 

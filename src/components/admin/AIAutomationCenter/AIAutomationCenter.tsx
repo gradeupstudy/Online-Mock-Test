@@ -119,6 +119,16 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
   // History Modal
   const [showHistoryModal, setShowHistoryModal] = useState(false);
 
+  // Dual Language Batch & Single Processing State
+  const [isEnrichingDualLanguage, setIsEnrichingDualLanguage] = useState(false);
+  const [enrichDualLanguageProgress, setEnrichDualLanguageProgress] = useState<{
+    current: number;
+    total: number;
+    message: string;
+    percent: number;
+  } | null>(null);
+  const [singleEnrichingId, setSingleEnrichingId] = useState<string | null>(null);
+
   // Restore saved session on mount if available
   useEffect(() => {
     try {
@@ -270,12 +280,20 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
   // ON-DEMAND BILINGUAL ENRICHMENT / AI REPAIR FROM AUDIT DASHBOARD
   // =========================================================================
   const handleReEnrichAllDualLanguage = async () => {
-    if (auditedQuestions.length === 0) return;
+    if (auditedQuestions.length === 0 || isEnrichingDualLanguage) return;
+
+    setIsEnrichingDualLanguage(true);
+    setEnrichDualLanguageProgress({
+      current: 0,
+      total: auditedQuestions.length,
+      message: `Initializing Dual Language & Explanation conversion for ${auditedQuestions.length} questions...`,
+      percent: 0,
+    });
 
     try {
       onToast?.('info', 'Starting Dual Language & Explanation conversion for all questions...');
       const questionsToEnrich = auditedQuestions.map((q, idx) => ({
-        question_number: q.question_number || idx + 1,
+        question_number: q.original_number || q.question_number || idx + 1,
         question_text: q.question_text,
         question_hi: q.question_hi || '',
         option_a: q.option_a,
@@ -293,8 +311,14 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
       const converted = await aiService.bulkConvertToDualLanguageMCQs(
         questionsToEnrich,
         langMode,
-        (_done, _total, logMsg) => {
-          console.log('[Bulk Enrichment]', logMsg);
+        (done, total, logMsg) => {
+          const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+          setEnrichDualLanguageProgress({
+            current: done,
+            total,
+            message: logMsg,
+            percent: pct,
+          });
         }
       );
 
@@ -321,21 +345,25 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
       setAuditedQuestions(updatedList);
       setAuditSummary(newSummary);
       persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
-      onToast?.('success', 'All questions successfully enriched with Dual Language (English + Hindi) & Explanations!');
+      onToast?.('success', `All ${updatedList.length} questions successfully enriched with Dual Language (English + Hindi) & Explanations!`);
     } catch (err: any) {
       console.error('Bulk Dual Language conversion failed:', err);
       onToast?.('error', `Failed to convert: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsEnrichingDualLanguage(false);
+      setEnrichDualLanguageProgress(null);
     }
   };
 
   const handleConvertSingleDualLanguage = async (questionId: string) => {
     const targetQ = auditedQuestions.find(q => q.id === questionId);
-    if (!targetQ) return;
+    if (!targetQ || singleEnrichingId) return;
 
+    setSingleEnrichingId(questionId);
     try {
-      onToast?.('info', `Converting Question #${targetQ.question_number} to Dual Language...`);
+      onToast?.('info', `Converting Question #${targetQ.original_number || targetQ.question_number} to Dual Language...`);
       const converted = await aiService.convertSingleToDualLanguage({
-        question_number: targetQ.question_number,
+        question_number: targetQ.original_number || targetQ.question_number,
         question_text: targetQ.question_text,
         question_hi: targetQ.question_hi || '',
         option_a: targetQ.option_a,
@@ -361,7 +389,7 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
             option_d: converted.option_d,
             correct_answer: converted.correct_answer,
             explanation: converted.explanation,
-            audit_status: 'VALID',
+            audit_status: 'VALID' as const,
             quality_score: 96,
             reasons: [],
           };
@@ -373,10 +401,12 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
       setAuditedQuestions(updatedList);
       setAuditSummary(newSummary);
       persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
-      onToast?.('success', `Question #${targetQ.question_number} converted to Dual Language & verified!`);
+      onToast?.('success', `Question #${targetQ.original_number || targetQ.question_number} converted to Dual Language & verified!`);
     } catch (err: any) {
       console.error('Single dual language conversion failed:', err);
       onToast?.('error', `Conversion failed: ${err.message}`);
+    } finally {
+      setSingleEnrichingId(null);
     }
   };
 
@@ -674,7 +704,10 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
           onBatchApproveValid={handleBatchApproveValid}
           onBatchExcludeInvalid={handleBatchExcludeInvalid}
           onReEnrichAllDualLanguage={handleReEnrichAllDualLanguage}
+          isEnrichingDualLanguage={isEnrichingDualLanguage}
+          enrichDualLanguageProgress={enrichDualLanguageProgress}
           onConvertSingleDualLanguage={handleConvertSingleDualLanguage}
+          singleEnrichingId={singleEnrichingId}
           onConfirmAuditGate1={handleConfirmGate1}
           onPauseSession={() => onToast?.('info', 'Session state saved in local browser storage.')}
           onRejectAudit={() => {
