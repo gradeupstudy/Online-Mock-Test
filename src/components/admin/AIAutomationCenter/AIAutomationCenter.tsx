@@ -456,39 +456,78 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
   // AUDIT QUESTION ACTIONS (Edit / Approve / Exclude)
   // =========================================================================
   const handleUpdateQuestion = (updatedQ: AuditedMCQ) => {
-    const updatedList = auditedQuestions.map(q => q.id === updatedQ.id ? updatedQ : q);
-    const newSummary = calculateAuditSummary(updatedList, config);
-    setAuditedQuestions(updatedList);
-    setAuditSummary(newSummary);
-    persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
+    setAuditedQuestions(prev => {
+      const updatedList = prev.map(q => q.id === updatedQ.id ? updatedQ : q);
+      const newSummary = calculateAuditSummary(updatedList, config);
+      setAuditSummary(newSummary);
+      persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
+      return updatedList;
+    });
+  };
+
+  const handleBatchUpdateQuestions = (updatedBatch: AuditedMCQ[]) => {
+    const updateMap = new Map<string, AuditedMCQ>(updatedBatch.map(q => [q.id, q]));
+    setAuditedQuestions(prev => {
+      const updatedList = prev.map(q => updateMap.get(q.id) || q);
+      const newSummary = calculateAuditSummary(updatedList, config);
+      setAuditSummary(newSummary);
+      persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
+      return updatedList;
+    });
   };
 
   const handleBatchApproveValid = () => {
-    const updatedList = auditedQuestions.map(q => {
-      if (q.audit_status === 'VALID') {
-        return { ...q, is_approved_by_admin: true, is_excluded: false };
-      }
-      return q;
+    setAuditedQuestions(prev => {
+      const updatedList = prev.map(q => {
+        if (q.audit_status === 'VALID') {
+          return { ...q, is_approved_by_admin: true, is_excluded: false };
+        }
+        return q;
+      });
+      const newSummary = calculateAuditSummary(updatedList, config);
+      setAuditSummary(newSummary);
+      persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
+      onToast?.('success', `Approved all ${newSummary.valid_count} Valid questions.`);
+      return updatedList;
     });
-    const newSummary = calculateAuditSummary(updatedList, config);
-    setAuditedQuestions(updatedList);
-    setAuditSummary(newSummary);
-    persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
-    onToast?.('success', `Approved all ${newSummary.valid_count} Valid questions.`);
+  };
+
+  const handleBatchApproveAllNeedsReview = () => {
+    setAuditedQuestions(prev => {
+      const updatedList = prev.map(q => {
+        if (q.audit_status === 'NEEDS_REVIEW' || q.audit_status === 'VALID') {
+          return {
+            ...q,
+            audit_status: 'VALID' as const,
+            audit_score: Math.max(90, q.audit_score),
+            is_approved_by_admin: true,
+            is_excluded: false
+          };
+        }
+        return q;
+      });
+      const newSummary = calculateAuditSummary(updatedList, config);
+      setAuditSummary(newSummary);
+      persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
+      onToast?.('success', `Approved all questions from Needs Review (${newSummary.approved_for_generation} now approved).`);
+      return updatedList;
+    });
   };
 
   const handleBatchExcludeInvalid = () => {
-    const updatedList = auditedQuestions.map(q => {
-      if (q.audit_status === 'INVALID' || q.audit_status === 'DUPLICATE') {
-        return { ...q, is_excluded: true, is_approved_by_admin: false };
-      }
-      return q;
+    setAuditedQuestions(prev => {
+      const updatedList = prev.map(q => {
+        if (q.audit_status === 'INVALID' || q.audit_status === 'DUPLICATE') {
+          return { ...q, is_excluded: true, is_approved_by_admin: false };
+        }
+        return q;
+      });
+      const newSummary = calculateAuditSummary(updatedList, config);
+      setAuditSummary(newSummary);
+      persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
+      onToast?.('info', `Excluded all invalid and duplicate questions.`);
+      return updatedList;
     });
-    const newSummary = calculateAuditSummary(updatedList, config);
-    setAuditedQuestions(updatedList);
-    setAuditSummary(newSummary);
-    persistSession(state, config, updatedList, newSummary, generatedTests, finalAuditReport);
-    onToast?.('info', `Excluded all invalid and duplicate questions.`);
   };
 
   // =========================================================================
@@ -753,7 +792,9 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
           auditSummary={auditSummary}
           adminUser={adminUser}
           onUpdateQuestion={handleUpdateQuestion}
+          onBatchUpdateQuestions={handleBatchUpdateQuestions}
           onBatchApproveValid={handleBatchApproveValid}
+          onBatchApproveAllNeedsReview={handleBatchApproveAllNeedsReview}
           onBatchExcludeInvalid={handleBatchExcludeInvalid}
           onReEnrichAllDualLanguage={handleReEnrichAllDualLanguage}
           isEnrichingDualLanguage={isEnrichingDualLanguage}
