@@ -59,7 +59,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
 
   // Helper to get effective practice mode of a test
   const getTestMode = (t: Test): PracticeMode => {
-    return t.practice_mode || inferPracticeMode(t);
+    return inferPracticeMode(t);
   };
 
   // Calculate counts for each of the 4 primary practice modes
@@ -543,10 +543,18 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
                           <span>{modeConfig.title}</span>
                         </span>
                       )}
-                      <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs flex items-center gap-1">
-                        <CategoryBadgeIcon category={test.category} className="w-3 h-3" />
-                        <span>{test.category}</span>
-                      </span>
+                      {(() => {
+                        const effectiveCat = (test.category === 'Section / Subject Practice' && mode === 'topic_wise')
+                          ? 'Topic Wise Practice'
+                          : (test.category || 'All Competitive Exams');
+                        if (effectiveCat === modeConfig?.title) return null;
+                        return (
+                          <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs flex items-center gap-1">
+                            <CategoryBadgeIcon category={effectiveCat} className="w-3 h-3" />
+                            <span>{effectiveCat}</span>
+                          </span>
+                        );
+                      })()}
                     </div>
                     <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/90 dark:border-slate-700 font-mono text-[11px] font-bold rounded-md uppercase shrink-0">
                       {test.exam_code || test.test_code}

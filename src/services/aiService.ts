@@ -1973,7 +1973,8 @@ Return strict JSON object matching the schema.
 
   /**
    * 1-Click Dual Language Converter (Single Question):
-   * Converts a single MCQ (Question Text, Options A-D, and Explanation) into high-academic Dual Language (English + Hindi / द्विभाषी).
+   * Converts a single MCQ (Question Text, Options A-D, and Explanation) into high-academic Dual Language (English + Hindi / द्विभाषी)
+   * while repairing any OCR mangled text, reconstructing missing options, and providing full bilingual explanation.
    */
   convertSingleToDualLanguage: async (
     question: {
@@ -1990,6 +1991,7 @@ Return strict JSON object matching the schema.
       chapter?: string;
       topic?: string;
     },
+    languageMode: 'bilingual' | 'english' | 'hindi' = 'bilingual',
     onLog?: (msg: string) => void
   ): Promise<{
     question_text: string;
@@ -2002,12 +2004,39 @@ Return strict JSON object matching the schema.
     explanation: string;
   }> => {
     return aiService.executeWithKeyRotation(
-      'Dual Language MCQ Conversion',
+      'Dual Language / Single MCQ Conversion',
       onLog,
       async (ai) => {
+        const isEnglish = languageMode === 'english';
+        const isHindi = languageMode === 'hindi';
+
+        const langMandates = isEnglish
+          ? `TARGET: STRICTLY ENGLISH ONLY (English Subject: Grammar / Vocabulary / Comprehension / Idioms).
+1. Keep the Question Text strictly in pristine, clear English. Set "question_hi": "". DO NOT translate into Hindi!
+2. All 4 Options (A, B, C, D) MUST be strictly in English (e.g. "Mitochondria", NOT "Mitochondria / माइटोकॉन्ड्रिया").
+3. NEVER leave options incomplete or with placeholders.
+4. Generate a comprehensive English explanation focusing on grammar rules, vocabulary roots/meanings, or factual concepts.`
+          : isHindi
+          ? `TARGET: STRICTLY HINDI ONLY (हिन्दी विषय: व्याकरण / शब्दावली / साहित्य / संधि / समास / विलोम).
+1. Keep the Question Text and "question_hi" strictly in pure, grammatically perfect Devanagari Hindi. DO NOT translate into English!
+2. All 4 Options (A, B, C, D) MUST be strictly in pure Hindi (e.g. "माइटोकॉन्ड्रिया", "संज्ञा").
+3. NEVER leave options incomplete or with placeholders.
+4. Generate a comprehensive Hindi explanation (व्याख्या) detailing व्याकरण नियम, परिभाषा, और सही विकल्प का कारण।`
+          : `TARGET: DUAL LANGUAGE (Bilingual: English + Hindi / Devanagari).
+1. DUAL LANGUAGE QUESTION TEXT:
+   - Provide crystal-clear English statement AND accurate Devanagari Hindi translation separated by a newline ('\\n').
+   - Repair any OCR-mangled Devanagari characters or broken ligatures into grammatically perfect Hindi.
+2. QUESTION_HI:
+   - Provide the standalone, pure Hindi translation in "question_hi".
+3. COMPLETE 4 BILINGUAL OPTIONS:
+   - Format options cleanly as: "English Term / हिन्दी शब्द" (e.g. "Mitochondria / माइटोकॉन्ड्रिया").
+   - NEVER leave placeholders like "Not clearly visible in text", "Incomplete", or "___". If an option was missing, generate a plausible distractor.
+4. COMPLETE BILINGUAL EXPLANATION:
+   - Provide a comprehensive bilingual explanation containing both English analysis and Hindi व्याख्या.`;
+
         const promptText = `
-You are a premier Bilingual Examination Board Editor and Master Translator (English <-> Hindi / Devanagari).
-Convert the following Multiple Choice Question (MCQ) into a complete, professional DUAL LANGUAGE (Bilingual: English + Hindi) format.
+You are a premier Examination Board Chief Editor & Master Academic Question Setter.
+Enrich and refine the following Multiple Choice Question (MCQ).
 
 INPUT QUESTION:
 - Question Number: ${question.question_number || 1}
@@ -2018,24 +2047,16 @@ ${question.question_hi ? `- Existing Hindi Text: "${question.question_hi}"` : ''
 - Option C: "${question.option_c}"
 - Option D: "${question.option_d}"
 - Correct Answer: "${question.correct_answer || 'A'}"
-- Explanation: "${question.explanation || 'None provided'}"
-- Subject: "${question.subject || 'General'}" | Chapter: "${question.chapter || 'General'}"
+- Current Explanation: "${question.explanation || 'None provided'}"
+- Subject: "${question.subject || 'General Studies'}" | Chapter: "${question.chapter || 'General'}" | Topic: "${question.topic || 'General Topic'}"
 
-CONVERSION RULES:
-1. DUAL LANGUAGE QUESTION TEXT:
-   - Provide BOTH the English statement AND the accurate Hindi (Devanagari) translation separated clearly by a newline ('\\n').
-   - Example: "Which organelle is known as the powerhouse of the cell?\\nकोशिका का पावर हाउस किस कोशिकांग को कहा जाता है?"
-2. QUESTION_HI:
-   - Provide the standalone, pure Hindi translation in "question_hi".
-3. DUAL LANGUAGE OPTIONS:
-   - For option_a, option_b, option_c, option_d, provide both English and Hindi versions cleanly formatted as: "English Term / हिन्दी शब्द" (e.g. "Mitochondria / माइटोकॉन्ड्रिया" or "Robert Hooke / रॉबर्ट हुक").
-   - If numbers/dates/formulas only (e.g. "1947" or "50%"), preserve them clearly.
-4. CORRECT ANSWER:
-   - STRICTLY preserve the exact same correct option letter (A, B, C, or D). DO NOT change the answer key.
-5. DUAL LANGUAGE EXPLANATION:
-   - Provide a comprehensive bilingual explanation containing both the English reasoning and the Hindi explanation (व्याख्या).
+CRITICAL MANDATES:
+${langMandates}
 
-Return strict JSON object.
+VERIFIED CORRECT ANSWER:
+- Verify that the correct option letter (A, B, C, or D) is factually correct.
+
+Return strict JSON object matching the schema.
 `.trim();
 
         const response = await aiService.generateWithModelFallback(
@@ -2070,7 +2091,7 @@ Return strict JSON object.
             },
           },
           onLog,
-          'Convert Single MCQ to Dual Language'
+          'Convert Single MCQ'
         );
 
         const rawText = response.text || '';
@@ -2087,7 +2108,7 @@ Return strict JSON object.
 
         return {
           question_text: parsed.question_text || question.question_text,
-          question_hi: parsed.question_hi || parsed.question_text || '',
+          question_hi: parsed.question_hi || (isEnglish ? '' : parsed.question_text || question.question_hi) || '',
           option_a: parsed.option_a || question.option_a,
           option_b: parsed.option_b || question.option_b,
           option_c: parsed.option_c || question.option_c,
@@ -2100,9 +2121,214 @@ Return strict JSON object.
   },
 
   /**
-   * 1-Click Dual Language Converter for Multiple MCQs (Batch Processing):
+   * Fast 1-Click AI Explanation Generator for a Single Question.
+   * Generates a rich, pedagogical explanation based on the question statement, options, correct answer, and subject.
+   */
+  generateSingleMCQExplanation: async (
+    question: {
+      question_text: string;
+      question_hi?: string | null;
+      option_a: string;
+      option_b: string;
+      option_c: string;
+      option_d: string;
+      correct_answer: string;
+      subject?: string;
+      chapter?: string;
+      topic?: string;
+    },
+    languageMode: 'bilingual' | 'english' | 'hindi' = 'bilingual',
+    onLog?: (msg: string) => void
+  ): Promise<string> => {
+    return aiService.executeWithKeyRotation(
+      'Generate Single MCQ Explanation',
+      onLog,
+      async (ai) => {
+        const isEnglish = languageMode === 'english';
+        const isHindi = languageMode === 'hindi';
+
+        const promptText = `
+You are a senior academic question author and competitive exam subject matter expert.
+Generate a comprehensive, high-yield pedagogical explanation for the following MCQ.
+
+QUESTION DETAILS:
+- Question: "${question.question_text}"
+${question.question_hi ? `- Hindi Question: "${question.question_hi}"` : ''}
+- Option A: "${question.option_a}"
+- Option B: "${question.option_b}"
+- Option C: "${question.option_c}"
+- Option D: "${question.option_d}"
+- Confirmed Correct Answer: Option ${question.correct_answer}
+- Subject: ${question.subject || 'General'} | Chapter: ${question.chapter || 'General'} | Topic: ${question.topic || 'General'}
+
+REQUIREMENTS:
+${
+  isEnglish
+    ? '1. Write in pristine English. Detail why the correct option is true, why common distractors are incorrect, and give a crucial exam takeaway.'
+    : isHindi
+    ? '1. शुद्ध एवं स्पष्ट हिन्दी (देवनागरी) में विस्तृत व्याख्या लिखें। सही उत्तर का कारण, अन्य विकल्पों का विश्लेषण एवं मुख्य परीक्षा तथ्य शामिल करें।'
+    : '1. Provide a comprehensive Bilingual explanation (both English explanation AND Hindi व्याख्या). Detail why Option ' + question.correct_answer + ' is true and give core exam memory takeaways.'
+}
+2. Be concise yet complete (3 to 6 sentences or bullet points).
+3. Do not include meta text like "Here is the explanation". Return only the explanation text.
+`.trim();
+
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+          },
+          onLog,
+          'Generate MCQ Explanation'
+        );
+
+        return response.text?.trim() || `Option ${question.correct_answer} is the confirmed correct answer.`;
+      }
+    );
+  },
+
+  /**
+   * AI Regenerate / Auto-Complete MCQ:
+   * Generates or repairs a complete 4-option MCQ with verified correct answer and rich explanation.
+   * Can fix incomplete options, replace duplicates with fresh concept variations, or apply custom admin prompts.
+   */
+  regenerateCompleteMCQ: async (
+    question: {
+      question_number?: number;
+      question_text: string;
+      question_hi?: string | null;
+      option_a?: string;
+      option_b?: string;
+      option_c?: string;
+      option_d?: string;
+      correct_answer?: string;
+      explanation?: string | null;
+      subject?: string;
+      chapter?: string;
+      topic?: string;
+    },
+    instructionMode: 'complete_fix' | 'new_variation' | 'fill_missing_options' = 'complete_fix',
+    languageMode: 'bilingual' | 'english' | 'hindi' = 'bilingual',
+    customPrompt?: string,
+    onLog?: (msg: string) => void
+  ): Promise<{
+    question_text: string;
+    question_hi: string;
+    option_a: string;
+    option_b: string;
+    option_c: string;
+    option_d: string;
+    correct_answer: 'A' | 'B' | 'C' | 'D';
+    explanation: string;
+  }> => {
+    return aiService.executeWithKeyRotation(
+      'Regenerate Complete MCQ',
+      onLog,
+      async (ai) => {
+        const isEnglish = languageMode === 'english';
+        const isHindi = languageMode === 'hindi';
+
+        const modeInstruction =
+          instructionMode === 'new_variation'
+            ? 'Generate a brand-new, high-quality competitive exam question testing the same topic/chapter/concept (to replace a duplicate or low-yield question).'
+            : instructionMode === 'fill_missing_options'
+            ? 'Keep the core question statement unchanged. Generate 4 complete, realistic competitive options (A, B, C, D), identify the correct answer, and write a rich explanation.'
+            : 'Perform a 360° repair and completion on this question: repair incomplete text or OCR ligatures, generate all 4 complete options, verify the correct answer, and generate an in-depth pedagogical explanation.';
+
+        const langMandates = isEnglish
+          ? 'Language Target: Strict English Only. Question text and all options must be in English. Set "question_hi": "".'
+          : isHindi
+          ? 'Language Target: Strict Hindi (Devanagari) Only. Question text and all options must be in pure Hindi.'
+          : 'Language Target: Bilingual (English + Hindi). Provide clean English statement and Hindi translation separated by newline in question_text, pure Hindi in question_hi, and "English / हिन्दी" in options.';
+
+        const promptText = `
+You are a Master Academic Examination Board Setter and Chief Question Auditor.
+${modeInstruction}
+
+INPUT QUESTION:
+- Question Number: ${question.question_number || 1}
+- Current Question Text: "${question.question_text || ''}"
+- Current Hindi Text: "${question.question_hi || ''}"
+- Current Options: A: "${question.option_a || ''}" | B: "${question.option_b || ''}" | C: "${question.option_c || ''}" | D: "${question.option_d || ''}"
+- Current Correct Answer: "${question.correct_answer || 'A'}"
+- Subject: "${question.subject || 'General Studies'}" | Chapter: "${question.chapter || 'General'}" | Topic: "${question.topic || 'General Topic'}"
+${customPrompt ? `- Admin Custom Instruction: "${customPrompt}"` : ''}
+
+MANDATES:
+1. ${langMandates}
+2. All 4 options (A, B, C, D) MUST be fully populated with plausible, high-quality competitive distractors. NEVER leave any option blank, empty, or with placeholders like "___" or "Not visible".
+3. Verify the correct answer letter (A, B, C, or D) with 100% factual accuracy.
+4. Generate a comprehensive pedagogical explanation.
+
+Return strict JSON matching the schema.
+`.trim();
+
+        const response = await aiService.generateWithModelFallback(
+          ai,
+          {
+            contents: promptText,
+            config: {
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  question_text: { type: Type.STRING },
+                  question_hi: { type: Type.STRING },
+                  option_a: { type: Type.STRING },
+                  option_b: { type: Type.STRING },
+                  option_c: { type: Type.STRING },
+                  option_d: { type: Type.STRING },
+                  correct_answer: { type: Type.STRING },
+                  explanation: { type: Type.STRING },
+                },
+                required: [
+                  'question_text',
+                  'question_hi',
+                  'option_a',
+                  'option_b',
+                  'option_c',
+                  'option_d',
+                  'correct_answer',
+                  'explanation',
+                ],
+              },
+            },
+          },
+          onLog,
+          'Regenerate Complete MCQ'
+        );
+
+        const rawText = response.text || '';
+        let parsed: any;
+        try {
+          parsed = JSON.parse(rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, ''));
+        } catch {
+          const match = rawText.match(/\{[\s\S]*\}/);
+          if (match) parsed = JSON.parse(match[0]);
+          else throw new Error('Failed to parse regenerated MCQ response.');
+        }
+
+        const validAns = normalizeAnswerKey(parsed.correct_answer, normalizeAnswerKey(question.correct_answer, 'A'));
+
+        return {
+          question_text: parsed.question_text || question.question_text,
+          question_hi: parsed.question_hi || (isEnglish ? '' : parsed.question_text || question.question_hi) || '',
+          option_a: parsed.option_a || question.option_a || 'Option A',
+          option_b: parsed.option_b || question.option_b || 'Option B',
+          option_c: parsed.option_c || question.option_c || 'Option C',
+          option_d: parsed.option_d || question.option_d || 'Option D',
+          correct_answer: validAns,
+          explanation: parsed.explanation || question.explanation || `Option ${validAns} is the correct answer.`,
+        };
+      }
+    );
+  },
+
+  /**
+   * 1-Click Dual Language & Explanation Converter for Multiple MCQs (Batch Processing):
    * Efficiently converts an array of MCQs into Dual Language (English + Hindi / द्विभाषी)
-   * in optimized chunks with progress reporting and resilient model fallback.
+   * (or English-only for English grammar/vocab, or Hindi-only for Hindi grammar/vocab)
+   * with complete options and full explanations before 360° Audit.
    */
   bulkConvertToDualLanguageMCQs: async <T extends {
     question_number?: number;
@@ -2119,16 +2345,22 @@ Return strict JSON object.
     topic?: string;
   }>(
     questions: T[],
+    languageMode: 'bilingual' | 'english' | 'hindi' = 'bilingual',
     onProgress?: (done: number, total: number, logMsg: string) => void
   ): Promise<Array<T & { question_hi: string }>> => {
     const total = questions.length;
     if (total === 0) return [];
 
-    const CHUNK_SIZE = 5; // 5 MCQs per chunk for fast, high-quality translation
+    const isEnglish = languageMode === 'english';
+    const isHindi = languageMode === 'hindi';
+
+    const CHUNK_SIZE = 5; // 5 MCQs per chunk for fast, high-quality translation & explanation
     const results: Array<T & { question_hi: string }> = [];
     let processedCount = 0;
 
-    onProgress?.(0, total, `🌐 Starting Dual Language conversion for ${total} MCQs...`);
+    const modeLabel = isEnglish ? 'English Explanations & Options' : isHindi ? 'Hindi Explanations & Options' : 'Dual Language (EN + HI)';
+
+    onProgress?.(0, total, `🌐 Starting ${modeLabel} pre-enrichment for ${total} MCQs...`);
 
     for (let i = 0; i < total; i += CHUNK_SIZE) {
       const chunk = questions.slice(i, i + CHUNK_SIZE);
@@ -2138,7 +2370,7 @@ Return strict JSON object.
       onProgress?.(
         processedCount,
         total,
-        `🌐 Translating MCQs ${startIdx} to ${endIdx} of ${total} into Dual Language (English + Hindi)...`
+        `🌐 Setting up ${modeLabel} for MCQs #${startIdx}-${endIdx} of ${total}...`
       );
 
       try {
@@ -2155,21 +2387,44 @@ Return strict JSON object.
             explanation: string;
           }>
         >(
-          `Dual Language Translation (${startIdx}-${endIdx})`,
+          `${modeLabel} Setup (${startIdx}-${endIdx})`,
           (msg) => onProgress?.(processedCount, total, msg),
           async (ai) => {
+            const batchLangMandates = isEnglish
+              ? `TARGET: STRICTLY ENGLISH ONLY (English Subject: Grammar / Vocabulary / Comprehension / Idioms).
+1. Keep the Question Text strictly in pristine English. Set "question_hi": "". DO NOT translate into Hindi!
+2. All 4 Options (A, B, C, D) MUST be strictly in English (e.g. "Mitochondria", NOT "Mitochondria / माइटोकॉन्ड्रिया").
+3. NEVER leave placeholders like "Not clearly visible in text (Incomplete)", "Incomplete", "___". Synthesize complete distractors if needed.
+4. Generate a comprehensive English explanation explaining the grammatical rule, vocabulary meaning, or concept.`
+              : isHindi
+              ? `TARGET: STRICTLY HINDI ONLY (हिन्दी विषय: व्याकरण / शब्दावली / साहित्य / संधि / समास / विलोम).
+1. Keep the Question Text and "question_hi" strictly in pure Devanagari Hindi. DO NOT translate into English!
+2. All 4 Options (A, B, C, D) MUST be strictly in pure Hindi (e.g. "माइटोकॉन्ड्रिया", "संज्ञा").
+3. NEVER leave placeholders like "Not clearly visible in text (Incomplete)", "Incomplete", "___".
+4. Generate a comprehensive Hindi explanation (व्याख्या) detailing व्याकरण नियम और सही विकल्प का कारण।`
+              : `TARGET: DUAL LANGUAGE (English + Hindi / Devanagari).
+1. DUAL LANGUAGE QUESTION TEXT:
+   - Provide BOTH English statement AND accurate Devanagari Hindi translation separated by a newline ('\\n').
+   - Fix all OCR-mangled Devanagari ligatures into clean Hindi.
+2. QUESTION_HI:
+   - Standalone clean, grammatically perfect Hindi question.
+3. 4 COMPLETE BILINGUAL OPTIONS:
+   - All 4 options (A, B, C, D) MUST be complete in bilingual format: "English Term / हिन्दी शब्द".
+   - NEVER leave placeholders like "Not clearly visible in text (Incomplete)", "Incomplete", "___". Synthesize distractors if missing.
+4. COMPREHENSIVE BILINGUAL EXPLANATION:
+   - Generate a detailed, step-by-step bilingual explanation in BOTH English and Hindi (व्याख्या).`;
+
             const promptText = `
-You are a Lead Bilingual Exam Board Translator & Academic Question Specialist.
-Convert the following ${chunk.length} Multiple Choice Questions into standard DUAL LANGUAGE (Bilingual: English + Hindi / Devanagari) format.
+You are a Lead Exam Board Translator, Chief Editor & Master Academic Question Setter.
+Transform and enrich the following ${chunk.length} raw Multiple Choice Questions.
 
-CONVERSION GUIDELINES:
-1. Question Text: Must contain both English and accurate Hindi translation separated by newline ('\\n').
-2. question_hi: Pure standalone Hindi question.
-3. Options: Both English and Hindi ("English Term / हिन्दी शब्द" or "English\\nहिन्दी").
-4. Correct Answer: STRICTLY preserve original answer key (A/B/C/D).
-5. Explanation: Comprehensive bilingual explanation (English + Hindi व्याख्या).
+CONVERSION & ENRICHMENT MANDATES:
+${batchLangMandates}
 
-QUESTIONS TO CONVERT:
+VERIFIED CORRECT ANSWER:
+- Confirm the true correct option letter (A, B, C, or D).
+
+QUESTIONS TO ENRICH:
 ${chunk
   .map(
     (q, idx) => `
@@ -2182,13 +2437,13 @@ B) ${q.option_b}
 C) ${q.option_c}
 D) ${q.option_d}
 Correct Answer: ${q.correct_answer || 'A'}
-Explanation: ${q.explanation || 'None'}
-Subject: ${q.subject || 'General'} | Chapter: ${q.chapter || 'General'}
+Current Explanation: ${q.explanation || 'None'}
+Subject: ${q.subject || 'General Studies'} | Chapter: ${q.chapter || 'General'}
 `
   )
   .join('\n---\n')}
 
-Return JSON array with converted objects matching schema.
+Return strict JSON array with converted objects matching schema.
 `.trim();
 
             const response = await aiService.generateWithModelFallback(
@@ -2228,7 +2483,7 @@ Return JSON array with converted objects matching schema.
                 },
               },
               (msg) => onProgress?.(processedCount, total, msg),
-              `Bulk Dual Language (${startIdx}-${endIdx})`
+              `Bulk ${modeLabel} (${startIdx}-${endIdx})`
             );
 
             const rawText = response.text || '';
@@ -2253,7 +2508,7 @@ Return JSON array with converted objects matching schema.
             results.push({
               ...origQ,
               question_text: converted.question_text || origQ.question_text,
-              question_hi: converted.question_hi || converted.question_text || origQ.question_hi || '',
+              question_hi: converted.question_hi || (isEnglish ? '' : converted.question_text || origQ.question_hi || ''),
               option_a: converted.option_a || origQ.option_a,
               option_b: converted.option_b || origQ.option_b,
               option_c: converted.option_c || origQ.option_c,
@@ -2264,17 +2519,17 @@ Return JSON array with converted objects matching schema.
           } else {
             results.push({
               ...origQ,
-              question_hi: origQ.question_hi || '',
+              question_hi: origQ.question_hi || (isEnglish ? '' : origQ.question_text),
             });
           }
         });
       } catch (err: any) {
-        console.error(`Error during dual language translation for chunk ${startIdx}-${endIdx}:`, err);
-        // Fallback: keep original questions
+        console.error(`Error during enrichment for chunk ${startIdx}-${endIdx}:`, err);
+        // Fallback: clean up formatting and retain original questions
         chunk.forEach((origQ) => {
           results.push({
             ...origQ,
-            question_hi: origQ.question_hi || '',
+            question_hi: origQ.question_hi || (isEnglish ? '' : origQ.question_text),
           });
         });
       }
@@ -2283,11 +2538,11 @@ Return JSON array with converted objects matching schema.
       onProgress?.(
         processedCount,
         total,
-        `✅ Converted ${processedCount} of ${total} MCQs to Dual Language (${Math.round((processedCount / total) * 100)}%)...`
+        `✅ ${modeLabel} set for ${processedCount} of ${total} MCQs (${Math.round((processedCount / total) * 100)}%)...`
       );
     }
 
-    onProgress?.(total, total, `🎉 All ${total} MCQs successfully converted to Dual Language!`);
+    onProgress?.(total, total, `🎉 All ${total} MCQs successfully enriched with complete options & explanations!`);
     return results;
   },
 

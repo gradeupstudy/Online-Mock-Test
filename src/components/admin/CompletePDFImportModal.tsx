@@ -384,6 +384,7 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
       notify('info', `Translating ${questionsToConvert.length} MCQs into Dual Language (English + Hindi)...`);
       const convertedResults = await aiService.bulkConvertToDualLanguageMCQs(
         questionsToConvert,
+        'bilingual',
         (done, total, logMsg) => {
           setDualLangProgress({ current: done, total, message: logMsg });
         }

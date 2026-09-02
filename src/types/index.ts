@@ -106,6 +106,7 @@ export interface Test {
   description: string;
   category: string;
   subject: string;
+  topic?: string;
   practice_mode?: PracticeMode;
   total_questions: number;
   total_marks: number;

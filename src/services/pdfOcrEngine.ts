@@ -330,15 +330,27 @@ export const pdfOcrEngine = {
 
     const globalAnswerKeyMap = await pdfOcrEngine.locateGlobalAnswerKeys(pages, onLog);
 
-    // Step 3: Process in sliding chunks (e.g. 2 to 4 pages per AI OCR call)
-    const chunkSize = 3; // 3 pages per chunk allows deep OCR accuracy without hitting token limits
-    const allExtractedQuestions: ExtractedPDFMCQ[] = [];
-    const chunkCount = Math.ceil(pages.length / chunkSize);
+    // Step 3: Process in sliding chunks with 1-page overlap to prevent cross-page split question cutoff
+    const chunkPageBatches: RawPageData[][] = [];
+    if (pages.length <= 3) {
+      chunkPageBatches.push(pages);
+    } else {
+      let i = 0;
+      while (i < pages.length) {
+        const batch = pages.slice(i, i + 3);
+        chunkPageBatches.push(batch);
+        if (i + 3 >= pages.length) break;
+        i += 2; // 1-page overlap between batches so consecutive pages always share context
+      }
+    }
 
-    onLog?.(`🚀 Commencing Document OCR Understanding across ${pages.length} pages in ${chunkCount} structured page batches...`);
+    const allExtractedQuestions: ExtractedPDFMCQ[] = [];
+    const chunkCount = chunkPageBatches.length;
+
+    onLog?.(`🚀 Commencing Document OCR Understanding across ${pages.length} pages in ${chunkCount} overlapping page batches with cross-page question stitching...`);
 
     for (let cIdx = 0; cIdx < chunkCount; cIdx++) {
-      const chunkPages = pages.slice(cIdx * chunkSize, (cIdx + 1) * chunkSize);
+      const chunkPages = chunkPageBatches[cIdx];
       const startP = chunkPages[0].pageNumber;
       const endP = chunkPages[chunkPages.length - 1].pageNumber;
 
@@ -381,16 +393,20 @@ export const pdfOcrEngine = {
       totalPages: totalDocPages,
       questionsFound: allExtractedQuestions.length,
       phase: 'reconciling_answers',
-      statusMessage: 'Reconciling answer keys, standardizing taxonomy, and running AI validation audit...',
+      statusMessage: 'Reconciling answer keys, stitching cross-page options, and running AI validation audit...',
       percentage: 93,
     });
 
-    onLog?.(`🧩 Reconciling extracted questions with document answer keys, deduplicating & standardizing subjects/chapters...`);
+    onLog?.(`🧩 Reconciling extracted questions with document answer keys, stitching cross-page options, deduplicating & standardizing taxonomy...`);
+
+    const pageTextMap = new Map<number, string>();
+    pages.forEach(p => pageTextMap.set(p.pageNumber, p.text));
 
     const finalQuestions = pdfOcrEngine.reconcileAndValidateQuestions(
       allExtractedQuestions,
       globalAnswerKeyMap,
       standardizeTaxonomy,
+      pageTextMap,
       onLog
     );
 
@@ -464,6 +480,7 @@ export const pdfOcrEngine = {
       defaultChapter,
       defaultTopic,
       standardizeTaxonomy = true,
+      languageMode = 'auto',
       onLog,
     } = params;
 
@@ -516,6 +533,20 @@ export const pdfOcrEngine = {
      • Chapter: "${defaultChapter}"
      • Topic: "${defaultTopic}"`;
 
+    const languageDirectives = languageMode === 'english'
+      ? `6. LANGUAGE TARGET: STRICTLY ENGLISH ONLY (English Grammar / English Vocabulary / Comprehension):
+   - Keep Question Text and all 4 options strictly in English.
+   - Do NOT translate into Hindi. Set question_hi = null.
+   - Do NOT generate bilingual slashes (e.g. use "Mitochondria", NOT "Mitochondria / माइटोकॉन्ड्रिया").`
+      : languageMode === 'hindi'
+      ? `6. LANGUAGE TARGET: STRICTLY HINDI ONLY (हिन्दी व्याकरण / हिन्दी शब्दावली / हिन्दी साहित्य):
+   - Keep Question Text and all 4 options strictly in pure Devanagari Hindi.
+   - Do NOT translate into English. Set question_text and question_hi to the Hindi text.
+   - Do NOT generate English slashes.`
+      : `6. LANGUAGE TARGET: BILINGUAL (English + Hindi) / General Studies / Multi-Disciplinary:
+   - If question in document contains both English & Hindi, put English in question_text and Hindi in question_hi.
+   - If question is only in one language, extract it cleanly.`;
+
     const systemPrompt = `
 You are the world's most accurate Exam PDF Question Extraction & OCR Engine.
 Analyze the following PDF content (Pages ${pages.map((p) => p.pageNumber).join(', ')}).
@@ -533,11 +564,15 @@ CRITICAL EXTRACTION RULES:
    - If the question is ONLY in Hindi, put the Hindi text in "question_text" AND "question_hi".
    - If ONLY English, set "question_hi": null.
 
-2. OPTIONS EXTRACTION (A, B, C, D):
-   - Extract option_a, option_b, option_c, option_d cleanly.
-   - Strip leading labels like "A.", "(A)", "1.", "(1)", "क.", "(क)".
+2. OPTIONS EXTRACTION & CROSS-PAGE STITCHING (A, B, C, D) — HIGHEST PRIORITY:
+   - Extract option_a, option_b, option_c, option_d cleanly without leading labels ("A.", "(A)", "1.", "क.", "(क)").
+   - CROSS-PAGE QUESTION SPLIT STITCHING:
+     • Questions and their option choices frequently span across page boundaries! A question may start near the bottom of Page N with options (a) and (b), followed by a watermark / website advertisement / footer / page break (e.g. "visit thegkadda.com...", "Page X of Y", telegram links, header text), and its remaining options (c) and (d) appear at the top of Page N+1 before the next question number starts!
+     • You MUST ignore all intervening watermarks, website URLs, and header/footer lines between options.
+     • Seamlessly STITCH options (c) and (d) from the top of the next page onto the preceding question from the bottom of the previous page so that the question has ALL 4 options (A, B, C, D) fully populated!
+     • If a page begins with orphan options like "c) ...", "d) ...", "(ग) ...", "(घ) ...", "(c) ...", "(d) ..." without a preceding question number, attach them to the last question from the previous page!
    - Handle Hindi option tags: क -> option_a, ख -> option_b, ग -> option_c, घ -> option_d.
-   - If an option is missing in the document, keep option text empty "" and mark validation_status = "needs_review".
+   - If an option is genuinely missing in the document, keep option text empty "" and mark validation_status = "needs_review".
 
 3. ANSWER EXTRACTION — STRICT TRUTH HIERARCHY:
    - Check for inline answers right after the question (e.g., "Ans: (B)", "उत्तर: (ख)", "Answer - C", "Ans: Ravi").
@@ -562,6 +597,8 @@ CRITICAL EXTRACTION RULES:
        - Add to validation_issues: "No answer found in document; requires admin review"
 
 ${taxonomyInstructions}
+
+${languageDirectives}
 
 5. FIELD DETAILS:
    - explanation: Extract the explanation if given in the text/solution, else null or concise rationale.
@@ -761,12 +798,14 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
   },
 
   /**
-   * Reconciles global answer keys, cleans duplicate question numbers, sorts in ascending sequence.
+   * Reconciles global answer keys, cleans duplicate question numbers, sorts in ascending sequence,
+   * stitches split cross-page options, and recovers missing options from adjacent page text.
    */
   reconcileAndValidateQuestions: (
     questions: ExtractedPDFMCQ[],
     globalAnswerKeyMap: Map<number, string>,
     standardizeTaxonomy: boolean = true,
+    pageTextMap?: Map<number, string>,
     onLog?: (msg: string) => void
   ): ExtractedPDFMCQ[] => {
     // 1. Sort by question_number, then by source_page
@@ -777,7 +816,7 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
       return a.source_page - b.source_page;
     });
 
-    // 2. Remove identical duplicates from page overlap
+    // 2. Remove identical duplicates from page overlap while merging incomplete options
     const seenMap = new Map<string, ExtractedPDFMCQ>();
     const seenTexts = new Map<string, number>();
 
@@ -801,10 +840,110 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
       const key = `${q.question_number}_${normText.substring(0, 30)}`;
 
       if (seenMap.has(key)) {
-        // Already processed from chunk overlap
+        // Question seen from chunk overlap: Merge any missing options into existing instance
+        const existing = seenMap.get(key)!;
+        if ((!existing.option_c || existing.option_c.length < 2) && q.option_c) existing.option_c = q.option_c;
+        if ((!existing.option_d || existing.option_d.length < 2) && q.option_d) existing.option_d = q.option_d;
+        if ((!existing.option_a || existing.option_a.length < 2) && q.option_a) existing.option_a = q.option_a;
+        if ((!existing.option_b || existing.option_b.length < 2) && q.option_b) existing.option_b = q.option_b;
+        if (!existing.explanation && q.explanation) existing.explanation = q.explanation;
+        if (!existing.question_hi && q.question_hi) existing.question_hi = q.question_hi;
+
+        const all4OptionsPresent = Boolean(existing.option_a && existing.option_b && existing.option_c && existing.option_d);
+        if (all4OptionsPresent) {
+          existing.validation_issues = existing.validation_issues.filter(
+            (iss) => !iss.toLowerCase().includes('missing') && !iss.toLowerCase().includes('option')
+          );
+          if (existing.validation_issues.length === 0 && existing.answer_status !== 'conflict') {
+            existing.validation_status = 'valid';
+          }
+        }
         return;
       }
       seenMap.set(key, q);
+
+      // Algorithmic Orphan Option & Translation Stitcher for cross-page splits
+      if (pageTextMap && q.source_page) {
+        const nextPageText = pageTextMap.get(q.source_page + 1);
+        if (nextPageText) {
+          // Look at top lines before the next question number
+          const lines = nextPageText.split('\n').map((l) => l.trim()).filter(Boolean);
+          const topLines: string[] = [];
+          for (const line of lines) {
+            // Stop when the next question number starts (e.g. "221.", "Q221", "(221)", "Q. 221")
+            if (/^(?:Q\.?\s*)?\d{1,4}[\.\)\:\-]\s+/i.test(line)) break;
+            topLines.push(line);
+          }
+          const topText = topLines.join('\n');
+
+          // Check if Hindi question translation was cut off / placed on the next page
+          if (!q.question_hi || q.question_hi.length < 5) {
+            // Find lines with Devanagari characters before the options
+            const hindiLines = topLines.filter(
+              (l) =>
+                /[\u0900-\u097F]/.test(l) &&
+                !/^(?:[a-d1-4क-घ]|\([a-d1-4क-घ]\))[\.\)\:\-\s]/i.test(l) &&
+                !/visit|thegkadda|telegram|http|download|mock\s*test|copyright/i.test(l)
+            );
+            if (hindiLines.length > 0) {
+              q.question_hi = hindiLines.join(' ').trim();
+            }
+          }
+
+          // Check if option A was cut off / on next page
+          if (!q.option_a || q.option_a.length < 2 || q.option_a.toLowerCase().includes('not clearly visible')) {
+            const aMatch = topText.match(/(?:^|\n)\s*(?:a|A|\(a\)|\(A\)|क|\(क\)|\(1\)|1)[\.\:\)\-\s]+([^\n]+)/i);
+            if (aMatch && aMatch[1] && !/visit|thegkadda|\.com|http/i.test(aMatch[1])) {
+              q.option_a = aMatch[1].trim();
+            }
+          }
+
+          // Check if option B was cut off / on next page
+          if (!q.option_b || q.option_b.length < 2 || q.option_b.toLowerCase().includes('not clearly visible')) {
+            const bMatch = topText.match(/(?:^|\n)\s*(?:b|B|\(b\)|\(B\)|ख|\(ख\)|\(2\)|2)[\.\:\)\-\s]+([^\n]+)/i);
+            if (bMatch && bMatch[1] && !/visit|thegkadda|\.com|http/i.test(bMatch[1])) {
+              q.option_b = bMatch[1].trim();
+            }
+          }
+
+          // Check if option C was cut off / on next page
+          if (!q.option_c || q.option_c.length < 2 || q.option_c.toLowerCase().includes('not clearly visible')) {
+            const cMatch = topText.match(/(?:^|\n)\s*(?:c|C|\(c\)|\(C\)|ग|\(ग\)|\(3\)|3)[\.\:\)\-\s]+([^\n]+)/i);
+            if (cMatch && cMatch[1] && !/visit|thegkadda|\.com|http/i.test(cMatch[1])) {
+              q.option_c = cMatch[1].trim();
+            }
+          }
+
+          // Check if option D was cut off / on next page
+          if (!q.option_d || q.option_d.length < 2 || q.option_d.toLowerCase().includes('not clearly visible')) {
+            const dMatch = topText.match(/(?:^|\n)\s*(?:d|D|\(d\)|\(D\)|घ|\(घ\)|\(4\)|4)[\.\:\)\-\s]+([^\n]+)/i);
+            if (dMatch && dMatch[1] && !/visit|thegkadda|\.com|http/i.test(dMatch[1])) {
+              q.option_d = dMatch[1].trim();
+            }
+          }
+
+          // Check for inline answer at top of next page (e.g., "Ans: D", "Ans - (d)")
+          if (!q.correct_answer || q.answer_source === 'none') {
+            const ansMatch = topText.match(/(?:Ans|Answer|उत्तर)[\s\:\-\.]*(?:Option\s*)?\(?([A-D|क-घ|1-4])\)?/i);
+            if (ansMatch && ansMatch[1]) {
+              const letter = ansMatch[1].toUpperCase();
+              const mapped = letter === 'क' || letter === '1' ? 'A' : letter === 'ख' || letter === '2' ? 'B' : letter === 'ग' || letter === '3' ? 'C' : letter === 'घ' || letter === '4' ? 'D' : (['A', 'B', 'C', 'D'].includes(letter) ? letter : 'A');
+              q.correct_answer = mapped as any;
+              q.answer_source = 'pdf_inline';
+              q.answer_status = 'verified';
+            }
+          }
+
+          if (q.option_a && q.option_b && q.option_c && q.option_d) {
+            q.validation_issues = q.validation_issues.filter(
+              (iss) => !iss.toLowerCase().includes('missing') && !iss.toLowerCase().includes('option')
+            );
+            if (q.validation_issues.length === 0 && q.answer_status !== 'conflict') {
+              q.validation_status = 'valid';
+            }
+          }
+        }
+      }
 
       // Check text-based duplicate across different numbers
       if (normText.length > 20) {
@@ -836,7 +975,7 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
       deduplicated.push(q);
     });
 
-    onLog?.(`✨ Reconciled questions: ${deduplicated.length} final MCQs after document deduplication & taxonomy standardization.`);
+    onLog?.(`✨ Reconciled questions: ${deduplicated.length} final MCQs after document deduplication, cross-page option stitching & taxonomy standardization.`);
     return deduplicated;
   },
 
@@ -899,6 +1038,7 @@ export interface ExtractMCQsFromPDFOptions {
   defaultSubject?: string;
   defaultChapter?: string;
   defaultTopic?: string;
+  languageMode?: 'auto' | 'bilingual' | 'english' | 'hindi';
   onProgress?: (
     percentage: number,
     statusMessage: string,
@@ -924,6 +1064,7 @@ export async function extractMCQsFromPDF(
       defaultTopic: options.defaultTopic || 'General Topic',
       taxonomyMode: 'auto_multi',
       standardizeTaxonomy: true,
+      languageMode: options.languageMode || 'auto',
       onProgress: (p) => {
         options.onProgress?.(
           p.percentage,

@@ -4,6 +4,7 @@ export type AutomationState =
   | 'UPLOADED'
   | 'CONFIGURED'
   | 'OCR_PROCESSING'
+  | 'BILINGUAL_ENRICHING'
   | 'AUDITING'
   | 'AUDIT_READY'
   | 'WAITING_FOR_ADMIN_CONFIRMATION'
@@ -39,6 +40,7 @@ export interface AIAutomationConfig {
   durationMinutes: number; // e.g. 15
   passingMarks?: number;
   language: 'bilingual' | 'hindi' | 'english';
+  autoEnrichDualLanguageAndExplanations?: boolean; // Pre-audit dual language & explanation enrichment
   questionReusePolicy: 'OFF' | 'ON';
   questionOrderingPreference: 'sequential' | 'topic_balanced' | 'random_shuffle';
 }

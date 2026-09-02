@@ -2,23 +2,129 @@ import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 
+/**
+ * Canonical Broad Subject Identifiers (mixed topics)
+ */
+export const BROAD_SUBJECT_PATTERNS = [
+  'general science', 'science', 'सामान्य विज्ञान', 'विज्ञान',
+  'english grammar', 'general english', 'english language', 'english vocab', 'अंग्रेजी',
+  'hindi grammar', 'general hindi', 'hindi vyakaran', 'hindi bhasha', 'hindi vocab', 'हिन्दी व्याकरण', 'हिंदी व्याकरण', 'हिंदी', 'हिन्दी',
+  'mathematics', 'quantitative aptitude', 'numerical ability', 'maths', 'math', 'गणित',
+  'reasoning ability', 'general intelligence', 'logical reasoning', 'reasoning', 'तर्कशक्ति',
+  'hp general knowledge', 'himachal pradesh gk', 'himachal gk', 'hp gk', 'हिमाचल सामान्य ज्ञान', 'हिमाचल प्रदेश सामान्य ज्ञान',
+  'general studies', 'general knowledge', 'gk / gs', 'gk/gs', 'general awareness', 'gs', 'gk', 'सामान्य ज्ञान', 'सामान्य अध्ययन',
+  'current affairs', 'समसामयिकी',
+  'computer awareness', 'computer & it', 'computer', 'कंप्यूटर',
+  'environment', 'ecology', 'biodiversity', 'पर्यावरण'
+];
+
+/**
+ * Intelligent Practice Mode Classifier
+ * Distinguishes:
+ * 1. 'pyq' -> Previous year question papers
+ * 2. 'topic_wise' -> Specific topic / chapter tests (e.g. "Understanding Plants - I", "Human Eye - II", "Blood - I", "Tenses - I")
+ * 3. 'subject_wise' -> Section / Subject mixed mock tests (e.g. "General Science Mock Test - 1", "English Grammar Mock Test - 1")
+ * 4. 'full_mock' -> Multi-subject full syllabus mock tests (e.g. "HP Police Constable Full Mock 1", "HP Patwari Full Mock 1")
+ */
 export const inferPracticeMode = (test?: Partial<Test> | null): PracticeMode => {
   if (!test) return 'full_mock';
+
+  const title = (test.title || '').trim();
+  const titleLower = title.toLowerCase();
+  const catLower = (test.category || '').toLowerCase();
+  const descLower = (test.description || '').toLowerCase();
+  const subjLower = (test.subject || '').toLowerCase();
+  const topicLower = (test.topic || '').toLowerCase();
+
+  const combined = `${titleLower} ${catLower} ${descLower} ${subjLower} ${topicLower}`;
+
+  // 1. PYQ Detection
+  if (
+    combined.includes('pyq') ||
+    combined.includes('previous year') ||
+    combined.includes('past paper') ||
+    combined.includes('solved paper') ||
+    combined.includes('official paper') ||
+    (/\b(201\d|202[0-6])\b/.test(combined) && combined.includes('paper'))
+  ) {
+    return 'pyq';
+  }
+
+  // 2. Multi-Subject Full Length Mock Detection
+  if (
+    titleLower.includes('full mock') ||
+    titleLower.includes('full length') ||
+    titleLower.includes('complete mock') ||
+    titleLower.includes('grand mock') ||
+    titleLower.includes('full syllabus') ||
+    catLower.includes('full mock') ||
+    (Array.isArray(test.sections) && test.sections.length > 1) ||
+    test.is_multisection ||
+    (test.total_questions && test.total_questions >= 80 && (
+      titleLower.includes('police constable') ||
+      titleLower.includes('patwari') ||
+      titleLower.includes('high court') ||
+      titleLower.includes('clerk') ||
+      titleLower.includes('all competitive')
+    ))
+  ) {
+    return 'full_mock';
+  }
+
+  // 3. Explicit Topic-Wise Keywords
+  if (
+    catLower.includes('topic wise') ||
+    catLower.includes('topic-wise') ||
+    catLower.includes('topicwise') ||
+    titleLower.includes('topic wise') ||
+    titleLower.includes('topic-wise') ||
+    titleLower.includes('topicwise') ||
+    titleLower.includes('topic mcq') ||
+    titleLower.includes('chapter test') ||
+    titleLower.includes('conceptual test')
+  ) {
+    return 'topic_wise';
+  }
+
+  // 4. Broad Subject Mock Test Match (Section / Subject Practice)
+  // e.g. "General Science Mock test - 1", "General Science Practice - 1", "English Grammar Mock Test - 1", "Reasoning Mock Test - 2"
+  const isBroadSubjectMock = BROAD_SUBJECT_PATTERNS.some(subjKey => {
+    const regex = new RegExp(`^${subjKey}(\\s+(mock\\s*test|practice\\s*test|sectional\\s*test|subject\\s*test|mock|test|paper|part|series))?(\\s*[-–—:]\\s*\\d+|\\s+\\d+)?$`, 'i');
+    return regex.test(titleLower);
+  });
+
+  if (isBroadSubjectMock) {
+    return 'subject_wise';
+  }
+
+  // 5. If topic is explicitly provided and is a specific topic (not 'General', 'Mixed', or empty)
+  if (
+    test.topic &&
+    test.topic.trim() &&
+    !['general', 'general topic', 'all', 'mixed', 'none', 'default'].includes(topicLower) &&
+    topicLower !== subjLower
+  ) {
+    return 'topic_wise';
+  }
+
+  // 6. Check if Title represents a specific topic (e.g. "Understanding Plants - I", "Human Eye - II", "Blood - I", "Tenses - I", "Photosynthesis")
+  // If the title does NOT match a broad whole-subject name and is not a multi-subject exam full mock, it is a topic test!
+  const isSubjectOrExamName = BROAD_SUBJECT_PATTERNS.some(k => titleLower.startsWith(k)) ||
+    titleLower.includes('constable') ||
+    titleLower.includes('patwari') ||
+    titleLower.includes('full syllabus') ||
+    titleLower.includes('mixed test');
+
+  if (!isSubjectOrExamName) {
+    return 'topic_wise';
+  }
+
+  // 7. If previously set explicitly on test object and valid
   if (test.practice_mode && ['topic_wise', 'subject_wise', 'full_mock', 'pyq'].includes(test.practice_mode)) {
     return test.practice_mode;
   }
-  const text = `${test.title || ''} ${test.category || ''} ${test.description || ''} ${test.subject || ''}`.toLowerCase();
-  
-  if (text.includes('pyq') || text.includes('previous year') || text.includes('past paper') || text.includes('solved paper') || (/\b(201\d|202[0-6])\b/.test(text) && text.includes('paper'))) {
-    return 'pyq';
-  }
-  if (text.includes('topic') || text.includes('chapter') || text.includes('topicwise') || text.includes('topic wise') || text.includes('concept')) {
-    return 'topic_wise';
-  }
-  if (text.includes('section') || text.includes('subject test') || text.includes('sectional') || (test.subject && test.subject !== 'Full Length Mock' && test.subject !== 'General Paper' && !test.is_multisection && (test.total_questions || 0) <= 30)) {
-    return 'subject_wise';
-  }
-  return 'full_mock';
+
+  return 'subject_wise';
 };
 
 export interface SupabaseTableMetric {
@@ -1317,10 +1423,20 @@ export const dataService = {
               ? (actualQuestionsCount * marksPerQ)
               : parseSafeNumber(t.total_marks, 0);
 
+            const actualMode = inferPracticeMode({
+              ...t,
+              ...(local || {}),
+              practice_mode: t.practice_mode || local?.practice_mode
+            });
+            const effectiveCategory = (t.category === 'Section / Subject Practice' && actualMode === 'topic_wise')
+              ? 'Topic Wise Practice'
+              : (t.category || 'All Competitive Exams');
+
             return {
               ...(local || {}),
               ...t,
-              practice_mode: t.practice_mode || (local?.practice_mode) || inferPracticeMode(t),
+              practice_mode: actualMode,
+              category: effectiveCategory,
               total_questions: actualQuestionsCount,
               total_marks: actualTotalMarks,
               max_attempts_per_student: maxAttempts
@@ -1357,13 +1473,23 @@ export const dataService = {
         ? (actualQuestionsCount * marksPerQ)
         : parseSafeNumber(t.total_marks, 0);
 
+      const actualMode = inferPracticeMode(t);
+      const effectiveCategory = (t.category === 'Section / Subject Practice' && actualMode === 'topic_wise')
+        ? 'Topic Wise Practice'
+        : (t.category || 'All Competitive Exams');
+
       return {
         ...t,
-        practice_mode: t.practice_mode || inferPracticeMode(t),
+        practice_mode: actualMode,
+        category: effectiveCategory,
         total_questions: actualQuestionsCount,
         total_marks: actualTotalMarks
       };
     });
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(calibratedLocalTests));
+    } catch {}
 
     if (!includeUnpublished) {
       return calibratedLocalTests.filter(t => t.is_published && (t.status === 'published' || !t.status));
@@ -1506,14 +1632,19 @@ export const dataService = {
 
     const maxAttempts = parseSafeNumber(test.max_attempts_per_student, 0);
 
+    const inferredMode = inferPracticeMode(test);
+    const effectiveCategory = (test.category === 'Section / Subject Practice' && inferredMode === 'topic_wise')
+      ? 'Topic Wise Practice'
+      : (test.category || 'Police Exam');
+
     const sanitizedTest: Test = {
       ...test,
       id: validId,
       slug: cleanSlug,
       test_code: cleanCode,
-      category: test.category || 'Police Exam',
+      category: effectiveCategory,
       subject: test.subject || 'General Paper',
-      practice_mode: test.practice_mode || inferPracticeMode(test),
+      practice_mode: inferredMode,
       total_questions: totalQuestions,
       marks_per_question: marksPerQuestion,
       total_marks: totalMarks,

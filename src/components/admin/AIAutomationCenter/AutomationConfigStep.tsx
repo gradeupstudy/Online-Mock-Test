@@ -21,7 +21,7 @@ import {
 import { AIAutomationConfig } from '../../../types/aiAutomation';
 import { PRIMARY_PRACTICE_MODES, PracticeMode } from '../../../types';
 import { getAllCanonicalSubjectNames } from '../../../utils/taxonomyCanonicalizer';
-import { dataService } from '../../../services/dataService';
+import { dataService, inferPracticeMode } from '../../../services/dataService';
 
 interface AutomationConfigStepProps {
   config: AIAutomationConfig;
@@ -46,17 +46,39 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
   const canonicalSubjects = getAllCanonicalSubjectNames();
   const existingCategories = dataService.getMasterCategories();
 
+  const handleProcessUploadedFile = (file: File) => {
+    onPdfFileChange(file);
+
+    // Extract clean name from file name
+    const rawBaseName = file.name.replace(/\.[^/.]+$/, '').replace(/[_-]+/g, ' ').trim();
+    const formattedPrefix = rawBaseName.charAt(0).toUpperCase() + rawBaseName.slice(1);
+
+    const suggestedMode = inferPracticeMode({
+      title: formattedPrefix,
+      topic: config.topic,
+      subject: config.subject
+    });
+
+    const suggestedCategory = (config.category === 'Section / Subject Practice' || config.category === 'Topic Wise Practice')
+      ? (suggestedMode === 'topic_wise' ? 'Topic Wise Practice' : 'Section / Subject Practice')
+      : config.category;
+
+    onChangeConfig({
+      fileName: file.name,
+      fileSizeFormatted: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
+      mockTestNamePrefix: config.mockTestNamePrefix === 'General Science Mock Test' || !config.mockTestNamePrefix ? formattedPrefix : config.mockTestNamePrefix,
+      practiceMode: suggestedMode,
+      category: suggestedCategory
+    });
+  };
+
   const handleFileDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
       if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        onPdfFileChange(file);
-        onChangeConfig({
-          fileName: file.name,
-          fileSizeFormatted: `${(file.size / (1024 * 1024)).toFixed(2)} MB`
-        });
+        handleProcessUploadedFile(file);
       } else {
         onToast?.('error', 'Please upload a valid PDF file.');
       }
@@ -67,11 +89,7 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
       if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-        onPdfFileChange(file);
-        onChangeConfig({
-          fileName: file.name,
-          fileSizeFormatted: `${(file.size / (1024 * 1024)).toFixed(2)} MB`
-        });
+        handleProcessUploadedFile(file);
       } else {
         onToast?.('error', 'Please upload a valid PDF file.');
       }
@@ -254,9 +272,14 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
 
             {/* Practice Mode Grid */}
             <div>
-              <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-2">
-                Practice Mode <span className="text-rose-500">*</span>
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
+                  Practice Mode <span className="text-rose-500">*</span>
+                </label>
+                <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+                  Auto-categorized by test name & topic
+                </span>
+              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {PRIMARY_PRACTICE_MODES.map((pm) => {
                   const isSelected = config.practiceMode === pm.id;
@@ -264,7 +287,16 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
                     <button
                       key={pm.id}
                       type="button"
-                      onClick={() => onChangeConfig({ practiceMode: pm.id })}
+                      onClick={() => {
+                        const targetCat = pm.id === 'topic_wise'
+                          ? 'Topic Wise Practice'
+                          : pm.id === 'subject_wise'
+                          ? 'Section / Subject Practice'
+                          : (config.category === 'Section / Subject Practice' || config.category === 'Topic Wise Practice')
+                          ? 'All Competitive Exams'
+                          : config.category;
+                        onChangeConfig({ practiceMode: pm.id, category: targetCat });
+                      }}
                       className={`p-3.5 rounded-2xl border text-left transition-all cursor-pointer relative ${
                         isSelected
                           ? 'border-blue-600 bg-blue-50/60 dark:bg-blue-950/40 shadow-xs ring-2 ring-blue-500/20'
@@ -322,20 +354,33 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
                 </label>
                 <select
                   value={config.subject}
-                  onChange={(e) => onChangeConfig({ subject: e.target.value })}
+                  onChange={(e) => {
+                    const subj = e.target.value;
+                    const updates: Partial<AIAutomationConfig> = { subject: subj };
+                    // Smart language mode auto-adjustment
+                    if (subj === 'English Grammar' || subj === 'English Vocab') {
+                      updates.language = 'english';
+                    } else if (subj === 'Hindi Grammar' || subj === 'Hindi Vocab') {
+                      updates.language = 'hindi';
+                    } else if (config.language === 'english' || config.language === 'hindi') {
+                      updates.language = 'bilingual';
+                    }
+                    onChangeConfig(updates);
+                  }}
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white"
                 >
                   <option value="General Science">General Science (सामान्य विज्ञान)</option>
-                  <option value="Hindi Grammar">Hindi Grammar (हिंदी व्याकरण)</option>
-                  <option value="Hindi Vocab">Hindi Vocab (हिंदी शब्दावली)</option>
-                  <option value="English Grammar">English Grammar</option>
+                  <option value="Hindi Grammar">Hindi Grammar (हिंदी व्याकरण - Hindi Only)</option>
+                  <option value="Hindi Vocab">Hindi Vocab (हिंदी शब्दावली - Hindi Only)</option>
+                  <option value="English Grammar">English Grammar (English Only)</option>
+                  <option value="English Vocab">English Vocab (English Only)</option>
                   <option value="Mathematics">Mathematics (गणित)</option>
                   <option value="Reasoning Ability">Reasoning Ability (तर्कशक्ति)</option>
                   <option value="HP General Knowledge">HP General Knowledge (हिमाचल सामान्य ज्ञान)</option>
                   <option value="General Studies">General Studies (सामान्य अध्ययन)</option>
                   <option value="Current Affairs">Current Affairs (समसामयिकी)</option>
                   {canonicalSubjects
-                    .filter(s => !['General Science', 'Hindi Grammar', 'Hindi Vocab', 'English Grammar', 'Mathematics', 'Reasoning Ability', 'HP General Knowledge', 'General Studies', 'Current Affairs'].includes(s))
+                    .filter(s => !['General Science', 'Hindi Grammar', 'Hindi Vocab', 'English Grammar', 'English Vocab', 'Mathematics', 'Reasoning Ability', 'HP General Knowledge', 'General Studies', 'Current Affairs'].includes(s))
                     .map(s => (
                       <option key={s} value={s}>{s}</option>
                     ))}
@@ -351,7 +396,18 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
               <input
                 type="text"
                 value={config.topic || ''}
-                onChange={(e) => onChangeConfig({ topic: e.target.value })}
+                onChange={(e) => {
+                  const newTopic = e.target.value;
+                  const suggestedMode = inferPracticeMode({
+                    title: config.mockTestNamePrefix,
+                    topic: newTopic,
+                    subject: config.subject
+                  });
+                  const suggestedCat = (config.category === 'Section / Subject Practice' || config.category === 'Topic Wise Practice')
+                    ? (suggestedMode === 'topic_wise' ? 'Topic Wise Practice' : 'Section / Subject Practice')
+                    : config.category;
+                  onChangeConfig({ topic: newTopic, practiceMode: suggestedMode, category: suggestedCat });
+                }}
                 placeholder="e.g. Glands & Hormones, Nervous System, Sandhi & Samas"
                 className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white placeholder:text-slate-400"
               />
@@ -374,7 +430,18 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
                 <input
                   type="text"
                   value={config.mockTestNamePrefix}
-                  onChange={(e) => onChangeConfig({ mockTestNamePrefix: e.target.value })}
+                  onChange={(e) => {
+                    const newPrefix = e.target.value;
+                    const suggestedMode = inferPracticeMode({
+                      title: newPrefix,
+                      topic: config.topic,
+                      subject: config.subject
+                    });
+                    const suggestedCat = (config.category === 'Section / Subject Practice' || config.category === 'Topic Wise Practice')
+                      ? (suggestedMode === 'topic_wise' ? 'Topic Wise Practice' : 'Section / Subject Practice')
+                      : config.category;
+                    onChangeConfig({ mockTestNamePrefix: newPrefix, practiceMode: suggestedMode, category: suggestedCat });
+                  }}
                   placeholder="e.g. General Science Mock Test"
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white"
                 />
