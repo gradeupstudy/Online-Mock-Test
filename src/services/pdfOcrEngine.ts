@@ -890,3 +890,61 @@ OUTPUT FORMAT: Return a JSON ARRAY of question objects matching the specified sc
     });
   },
 };
+
+export interface ExtractMCQsFromPDFOptions {
+  file: File;
+  pageRangeMode?: 'all' | 'custom';
+  startPage?: number;
+  endPage?: number;
+  defaultSubject?: string;
+  defaultChapter?: string;
+  defaultTopic?: string;
+  onProgress?: (
+    percentage: number,
+    statusMessage: string,
+    currentPage?: number,
+    totalPages?: number,
+    extractedCount?: number
+  ) => void;
+}
+
+export async function extractMCQsFromPDF(
+  options: ExtractMCQsFromPDFOptions
+): Promise<{ success: boolean; questions: ExtractedPDFMCQ[]; error?: string }> {
+  try {
+    const startP = options.pageRangeMode === 'custom' ? (options.startPage || 1) : 1;
+    const endP = options.pageRangeMode === 'custom' ? options.endPage : undefined;
+
+    const result = await pdfOcrEngine.processCompletePDF({
+      file: options.file,
+      startPage: startP,
+      endPage: endP,
+      defaultSubject: options.defaultSubject || 'General Studies',
+      defaultChapter: options.defaultChapter || 'General',
+      defaultTopic: options.defaultTopic || 'General Topic',
+      taxonomyMode: 'auto_multi',
+      standardizeTaxonomy: true,
+      onProgress: (p) => {
+        options.onProgress?.(
+          p.percentage,
+          p.statusMessage,
+          p.currentPage,
+          p.totalPages,
+          p.questionsFound
+        );
+      }
+    });
+
+    return {
+      success: true,
+      questions: result.questions || []
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      questions: [],
+      error: err?.message || 'Failed to extract MCQs from PDF'
+    };
+  }
+}
+

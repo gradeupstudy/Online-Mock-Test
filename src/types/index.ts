@@ -1,5 +1,102 @@
 export type TestStatus = 'draft' | 'published' | 'unpublished' | 'archived';
 
+export type PracticeMode = 'topic_wise' | 'subject_wise' | 'full_mock' | 'pyq';
+
+export interface PracticeModeConfig {
+  id: PracticeMode;
+  title: string;
+  hindiTitle?: string;
+  goal: string;
+  testType: string;
+  icon: string;
+  color: {
+    bg: string;
+    border: string;
+    text: string;
+    badgeBg: string;
+    accent: string;
+    gradient: string;
+    cardBg: string;
+    glow: string;
+  };
+  description: string;
+}
+
+export const PRIMARY_PRACTICE_MODES: PracticeModeConfig[] = [
+  {
+    id: 'topic_wise',
+    title: 'Topic Wise Practice',
+    goal: 'Ek particular topic strong karna',
+    testType: 'Topic MCQs',
+    icon: 'BookOpen',
+    color: {
+      bg: 'bg-blue-50 dark:bg-blue-950/40',
+      border: 'border-blue-200 dark:border-blue-800',
+      text: 'text-blue-700 dark:text-blue-300',
+      badgeBg: 'bg-blue-600 text-white',
+      accent: 'from-blue-600 to-indigo-600',
+      gradient: 'from-blue-600/10 via-blue-500/5 to-transparent',
+      cardBg: 'hover:border-blue-500/80',
+      glow: 'shadow-blue-500/10'
+    },
+    description: 'Targeted topic-level MCQs to build conceptual mastery chapter by chapter.'
+  },
+  {
+    id: 'subject_wise',
+    title: 'Section / Subject Practice',
+    goal: 'Puri section ki mixed practice',
+    testType: 'Complete Section Test',
+    icon: 'Layers',
+    color: {
+      bg: 'bg-indigo-50 dark:bg-indigo-950/40',
+      border: 'border-indigo-200 dark:border-indigo-800',
+      text: 'text-indigo-700 dark:text-indigo-300',
+      badgeBg: 'bg-indigo-600 text-white',
+      accent: 'from-indigo-600 to-violet-600',
+      gradient: 'from-indigo-600/10 via-indigo-500/5 to-transparent',
+      cardBg: 'hover:border-indigo-500/80',
+      glow: 'shadow-indigo-500/10'
+    },
+    description: 'Full section-level mixed question sets to sharpen speed and overall subject accuracy.'
+  },
+  {
+    id: 'full_mock',
+    title: 'Full Mock Tests',
+    goal: 'Actual exam ki preparation',
+    testType: 'Complete Exam Mock',
+    icon: 'Target',
+    color: {
+      bg: 'bg-emerald-50 dark:bg-emerald-950/40',
+      border: 'border-emerald-200 dark:border-emerald-800',
+      text: 'text-emerald-700 dark:text-emerald-300',
+      badgeBg: 'bg-emerald-600 text-white',
+      accent: 'from-emerald-600 to-teal-600',
+      gradient: 'from-emerald-600/10 via-emerald-500/5 to-transparent',
+      cardBg: 'hover:border-emerald-500/80',
+      glow: 'shadow-emerald-500/10'
+    },
+    description: 'Full-length simulated exam papers based on exact pattern with real timer & negative marking.'
+  },
+  {
+    id: 'pyq',
+    title: 'Previous Year Papers',
+    goal: 'Actual previous exam experience',
+    testType: 'PYQ Paper Mock',
+    icon: 'History',
+    color: {
+      bg: 'bg-amber-50 dark:bg-amber-950/40',
+      border: 'border-amber-200 dark:border-amber-800',
+      text: 'text-amber-800 dark:text-amber-300',
+      badgeBg: 'bg-amber-600 text-white',
+      accent: 'from-amber-600 to-orange-600',
+      gradient: 'from-amber-600/10 via-amber-500/5 to-transparent',
+      cardBg: 'hover:border-amber-500/80',
+      glow: 'shadow-amber-500/10'
+    },
+    description: 'Authentic previous years question papers to understand exact exam trends and difficulty.'
+  }
+];
+
 export interface Test {
   id: string;
   test_code: string;
@@ -9,6 +106,7 @@ export interface Test {
   description: string;
   category: string;
   subject: string;
+  practice_mode?: PracticeMode;
   total_questions: number;
   total_marks: number;
   marks_per_question: number;
@@ -65,6 +163,7 @@ export interface Question {
   chapter: string;
   section?: string;
   topic?: string;
+  practice_mode?: PracticeMode;
   difficulty?: 'Easy' | 'Medium' | 'Hard' | 'Mixed' | string;
   quality_score?: number;
   inspection_status?: 'verified' | 'needs_review' | 'pending';

@@ -19,7 +19,8 @@ import {
   Sparkles,
   Zap,
   FolderPlus,
-  Flag
+  Flag,
+  Cpu
 } from 'lucide-react';
 import { Test, Attempt, QuestionReport } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -34,8 +35,9 @@ import { BulkImportModal } from './BulkImportModal';
 import { ReportedMCQsManager } from './ReportedMCQsManager';
 import { BulkAITestGeneratorModal } from './BulkAITestGeneratorModal';
 import { SupabaseStorageIndicator } from './SupabaseStorageIndicator';
+import { AIAutomationCenter } from './AIAutomationCenter/AIAutomationCenter';
 
-export type AdminTab = 'dashboard' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
+export type AdminTab = 'dashboard' | 'ai_automation' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
 
 interface AdminDashboardProps {
   onNavigateTab?: (tab: AdminTab, testId?: string) => void;
@@ -172,6 +174,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <LayoutDashboard className="w-4 h-4" />
             <span>Dashboard</span>
+          </button>
+
+          <button
+            onClick={() => handleTabChange('ai_automation')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-black transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'ai_automation'
+                ? 'bg-linear-to-r from-purple-600 via-indigo-600 to-blue-600 text-white shadow-lg shadow-indigo-500/25'
+                : 'text-indigo-700 dark:text-indigo-300 bg-indigo-50/70 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 border border-indigo-200 dark:border-indigo-800'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>AI Automation</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[9px] font-black uppercase">
+              NEW
+            </span>
           </button>
 
           <button
@@ -451,8 +468,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
               <div className="flex flex-wrap items-center gap-2">
                 <button
+                  onClick={() => handleTabChange('ai_automation')}
+                  className="px-5 py-2.5 bg-linear-to-r from-amber-400 via-orange-500 to-amber-500 hover:from-amber-300 hover:to-orange-400 text-slate-950 font-black text-xs rounded-xl shadow-lg transition-all flex items-center gap-2 cursor-pointer scale-100 hover:scale-[1.02]"
+                >
+                  <Cpu className="w-4 h-4 text-slate-950" />
+                  <span>AI Automation Center (PDF → Test Series)</span>
+                </button>
+
+                <button
                   onClick={() => setIsBulkAIGeneratorOpen(true)}
-                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2.5 bg-linear-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-indigo-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
                 >
                   <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
                   <span>Multi-Test AI MCQ Generator</span>
@@ -610,6 +635,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
         </div>
+      )}
+
+      {activeTab === 'ai_automation' && (
+        <AIAutomationCenter
+          onToast={safeToast}
+          onNavigateToTests={() => handleTabChange('tests')}
+        />
       )}
 
       {activeTab === 'tests' && (

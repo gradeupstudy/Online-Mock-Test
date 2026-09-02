@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Search, Edit3, Trash2, Copy, Share2, Eye, CheckCircle, XCircle, Settings, FileText, ArrowLeft, RefreshCw, Users, HelpCircle, CheckSquare, Square, Layers, Youtube, Send, Instagram, MessageCircle, Globe, ShieldCheck, CheckCircle2, ExternalLink, Zap, Lock, Filter, Sparkles } from 'lucide-react';
-import { Test, TestStatus, SocialPlatform } from '../../types';
-import { dataService, generateUUID, parseSafeNumber } from '../../services/dataService';
+import { Test, TestStatus, SocialPlatform, PracticeMode, PRIMARY_PRACTICE_MODES } from '../../types';
+import { dataService, generateUUID, parseSafeNumber, inferPracticeMode } from '../../services/dataService';
 import { Modal } from '../common/Modal';
 import { BulkTestAttemptsModal } from './BulkTestAttemptsModal';
 import { BulkAITestGeneratorModal } from './BulkAITestGeneratorModal';
+import { PracticeModeIcon, CategoryBadgeIcon } from '../common/PracticeModeIcon';
 
 interface TestManagerProps {
   onSelectTestQuestions: (testId: string) => void;
@@ -29,6 +30,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const [loading, setLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterPracticeMode, setFilterPracticeMode] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -83,6 +85,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
       title: '',
       slug: '',
       description: '',
+      practice_mode: 'full_mock',
       category: 'Police Exam',
       subject: 'General Paper',
       total_questions: 20,
@@ -117,6 +120,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
   const handleOpenEditModal = (test: Test) => {
     setEditingTest({
       ...test,
+      practice_mode: test.practice_mode || inferPracticeMode(test),
       max_attempts_per_student: test.max_attempts_per_student !== undefined ? Number(test.max_attempts_per_student) : 0,
       social_gate_enabled: test.social_gate_enabled ?? true,
       social_gate_mode: test.social_gate_mode || 'global',
@@ -449,6 +453,8 @@ export const TestManager: React.FC<TestManagerProps> = ({
     const q = searchQuery.toLowerCase().trim();
 
     const matchesQuery = !q || title.includes(q) || code.includes(q) || cat.includes(q) || sub.includes(q);
+    const testMode = t.practice_mode || inferPracticeMode(t);
+    const matchesPracticeMode = filterPracticeMode === 'all' || testMode === filterPracticeMode;
     const matchesCategory = filterCategory === 'all' || (t.category || '') === filterCategory;
     const matchesSubject = filterSubject === 'all' || (t.subject || '') === filterSubject;
     const matchesStatus = filterStatus === 'all' || (t.status || 'published') === filterStatus;
@@ -466,7 +472,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
       (filterContent === 'has_questions' && qCount > 0) ||
       (filterContent === 'blank' && qCount === 0);
 
-    return matchesQuery && matchesCategory && matchesSubject && matchesStatus && matchesAttempts && matchesContent;
+    return matchesQuery && matchesPracticeMode && matchesCategory && matchesSubject && matchesStatus && matchesAttempts && matchesContent;
   });
 
   const isAllFilteredSelected = filteredTests.length > 0 && filteredTests.every((t) => selectedTestIds.has(t.id));
@@ -535,7 +541,7 @@ export const TestManager: React.FC<TestManagerProps> = ({
       </div>
 
       {/* Filter & Search Bar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-3 bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200/90 dark:border-slate-800 shadow-sm">
         <div className="sm:col-span-2 lg:col-span-2 relative">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
           <input
@@ -546,6 +552,20 @@ export const TestManager: React.FC<TestManagerProps> = ({
             className="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-hidden font-medium text-slate-900 dark:text-white"
           />
         </div>
+
+        {/* Practice Mode Filter */}
+        <select
+          value={filterPracticeMode}
+          onChange={(e) => setFilterPracticeMode(e.target.value)}
+          className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm outline-hidden font-bold text-slate-900 dark:text-white"
+        >
+          <option value="all">All Practice Modes</option>
+          {PRIMARY_PRACTICE_MODES.map((pm) => (
+            <option key={pm.id} value={pm.id}>
+              {pm.title} ({pm.testType})
+            </option>
+          ))}
+        </select>
 
         <select
           value={filterCategory}
@@ -798,8 +818,21 @@ export const TestManager: React.FC<TestManagerProps> = ({
                       />
                     </div>
 
-                    <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs">
-                      {test.category}
+                    {(() => {
+                      const testMode = test.practice_mode || inferPracticeMode(test);
+                      const pmConfig = PRIMARY_PRACTICE_MODES.find((m) => m.id === testMode);
+                      if (!pmConfig) return null;
+                      return (
+                        <span className={`px-2 py-0.5 rounded-lg text-[11px] font-black flex items-center gap-1.5 border ${pmConfig.color.bg} ${pmConfig.color.text} ${pmConfig.color.border}`}>
+                          <PracticeModeIcon mode={pmConfig.id} size="xs" variant="bare" />
+                          <span>{pmConfig.title}</span>
+                        </span>
+                      );
+                    })()}
+
+                    <span className="px-2.5 py-1 bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 text-xs font-bold rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs flex items-center gap-1">
+                      <CategoryBadgeIcon category={test.category} className="w-3 h-3" />
+                      <span>{test.category}</span>
                     </span>
                     <span className="px-2 py-0.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200/90 dark:border-slate-700 font-mono text-[11px] font-bold rounded-md uppercase">
                       {test.exam_code || test.test_code}
@@ -1180,6 +1213,50 @@ export const TestManager: React.FC<TestManagerProps> = ({
                   </div>
                 </div>
               )}
+            </div>
+
+            {/* Primary Practice Mode Selection */}
+            <div className="p-3.5 bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider block">
+                  Primary Practice Mode (Student Category) *
+                </label>
+                <span className="text-[11px] text-blue-600 dark:text-blue-400 font-semibold">
+                  Main Level Categorization
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {PRIMARY_PRACTICE_MODES.map((pm) => {
+                  const isSelected = (editingTest.practice_mode || 'full_mock') === pm.id;
+                  return (
+                    <div
+                      key={pm.id}
+                      onClick={() => setEditingTest({ ...editingTest, practice_mode: pm.id })}
+                      className={`p-2.5 rounded-xl border cursor-pointer transition-all flex items-start gap-2.5 select-none ${
+                        isSelected
+                          ? 'bg-white dark:bg-slate-900 border-blue-500 ring-2 ring-blue-500/20 shadow-xs'
+                          : 'bg-white/60 dark:bg-slate-900/60 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <PracticeModeIcon mode={pm.id} size="sm" variant="gradient" className="mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-black text-slate-900 dark:text-white">
+                            {pm.title}
+                          </span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
+                            {pm.testType}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-tight">
+                          Goal: {pm.goal}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Category & Subject */}

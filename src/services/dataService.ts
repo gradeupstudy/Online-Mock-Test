@@ -1,6 +1,25 @@
-import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus, QuestionReport, ReportStatus } from '../types';
+import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus, QuestionReport, ReportStatus, PracticeMode, PRIMARY_PRACTICE_MODES, PracticeModeConfig } from '../types';
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
+
+export const inferPracticeMode = (test?: Partial<Test> | null): PracticeMode => {
+  if (!test) return 'full_mock';
+  if (test.practice_mode && ['topic_wise', 'subject_wise', 'full_mock', 'pyq'].includes(test.practice_mode)) {
+    return test.practice_mode;
+  }
+  const text = `${test.title || ''} ${test.category || ''} ${test.description || ''} ${test.subject || ''}`.toLowerCase();
+  
+  if (text.includes('pyq') || text.includes('previous year') || text.includes('past paper') || text.includes('solved paper') || (/\b(201\d|202[0-6])\b/.test(text) && text.includes('paper'))) {
+    return 'pyq';
+  }
+  if (text.includes('topic') || text.includes('chapter') || text.includes('topicwise') || text.includes('topic wise') || text.includes('concept')) {
+    return 'topic_wise';
+  }
+  if (text.includes('section') || text.includes('subject test') || text.includes('sectional') || (test.subject && test.subject !== 'Full Length Mock' && test.subject !== 'General Paper' && !test.is_multisection && (test.total_questions || 0) <= 30)) {
+    return 'subject_wise';
+  }
+  return 'full_mock';
+};
 
 export interface SupabaseTableMetric {
   name: string;
@@ -1301,6 +1320,7 @@ export const dataService = {
             return {
               ...(local || {}),
               ...t,
+              practice_mode: t.practice_mode || (local?.practice_mode) || inferPracticeMode(t),
               total_questions: actualQuestionsCount,
               total_marks: actualTotalMarks,
               max_attempts_per_student: maxAttempts
@@ -1322,10 +1342,10 @@ export const dataService = {
     const rawLocal = localStorage.getItem(STORAGE_KEYS.TESTS);
     let localTests: Test[] = [];
     try {
-      localTests = rawLocal ? JSON.parse(rawLocal) : [];
-      if (!Array.isArray(localTests)) localTests = [];
+      localTests = rawLocal ? JSON.parse(rawLocal) : DEMO_TESTS;
+      if (!Array.isArray(localTests) || localTests.length === 0) localTests = DEMO_TESTS;
     } catch {
-      localTests = [];
+      localTests = DEMO_TESTS;
     }
 
     const calibratedLocalTests = localTests.map(t => {
@@ -1339,6 +1359,7 @@ export const dataService = {
 
       return {
         ...t,
+        practice_mode: t.practice_mode || inferPracticeMode(t),
         total_questions: actualQuestionsCount,
         total_marks: actualTotalMarks
       };
@@ -1492,6 +1513,7 @@ export const dataService = {
       test_code: cleanCode,
       category: test.category || 'Police Exam',
       subject: test.subject || 'General Paper',
+      practice_mode: test.practice_mode || inferPracticeMode(test),
       total_questions: totalQuestions,
       marks_per_question: marksPerQuestion,
       total_marks: totalMarks,
