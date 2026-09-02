@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -29,7 +29,12 @@ import {
   Wand2,
   Loader2,
   HelpCircle,
-  Lightbulb
+  Lightbulb,
+  Calculator,
+  Plus,
+  Minus,
+  Settings2,
+  Zap
 } from 'lucide-react';
 import {
   AuditedMCQ,
@@ -46,6 +51,7 @@ interface AutomationAuditDashboardProps {
   config: AIAutomationConfig;
   auditSummary: AuditReportSummary;
   adminUser: { id: string; email: string };
+  onUpdateConfig?: (partial: Partial<AIAutomationConfig>) => void;
   onUpdateQuestion: (updatedQ: AuditedMCQ) => void;
   onBatchUpdateQuestions?: (updatedBatch: AuditedMCQ[]) => void;
   onBatchApproveValid: () => void;
@@ -72,6 +78,7 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
   config,
   auditSummary,
   adminUser,
+  onUpdateConfig,
   onUpdateQuestion,
   onBatchUpdateQuestions,
   onBatchApproveValid,
@@ -107,9 +114,45 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
   const [isBatchRepairing, setIsBatchRepairing] = useState(false);
   const [batchRepairMsg, setBatchRepairMsg] = useState<string | null>(null);
 
+  // Adjust Config / Test Count State
+  const [showAdjustConfigModal, setShowAdjustConfigModal] = useState(false);
+  const [testCountInput, setTestCountInput] = useState<number>(config.numberOfMockTests || 1);
+  const [mcqsPerTestInput, setMcqsPerTestInput] = useState<number>(config.mcqsPerMockTest || 20);
+  const [configToastMsg, setConfigToastMsg] = useState<string | null>(null);
+
+  // Keep local test count inputs in sync with config changes
+  useEffect(() => {
+    setTestCountInput(config.numberOfMockTests);
+    setMcqsPerTestInput(config.mcqsPerMockTest);
+  }, [config.numberOfMockTests, config.mcqsPerMockTest]);
+
   // Approval Gate 1 Confirmation Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [adminNotes, setAdminNotes] = useState('');
+
+  // Feasibility Calculations based on Approved MCQs
+  const approvedMCQs = auditSummary.approved_for_generation;
+  const currentMcqsPerTest = config.mcqsPerMockTest > 0 ? config.mcqsPerMockTest : 20;
+  const maxFeasibleTests = Math.floor(approvedMCQs / currentMcqsPerTest);
+  const leftoverMCQs = approvedMCQs % currentMcqsPerTest;
+
+  // Auto-set test count to maximum feasible
+  const handleAutoSetMaxFeasible = () => {
+    if (maxFeasibleTests <= 0) return;
+    onUpdateConfig?.({ numberOfMockTests: maxFeasibleTests });
+    setConfigToastMsg(`⚡ Successfully updated to ${maxFeasibleTests} Mock Tests (${maxFeasibleTests * currentMcqsPerTest} MCQs). All ready!`);
+    setTimeout(() => setConfigToastMsg(null), 4000);
+  };
+
+  // Apply custom test count / mcqs per test
+  const handleApplyConfigAdjust = (newTests: number, newMcqsPerTest: number) => {
+    const validTests = Math.max(1, Math.floor(newTests));
+    const validMcqs = Math.max(1, Math.floor(newMcqsPerTest));
+    onUpdateConfig?.({ numberOfMockTests: validTests, mcqsPerMockTest: validMcqs });
+    setShowAdjustConfigModal(false);
+    setConfigToastMsg(`✅ Configuration updated: ${validTests} Mock Tests (${validMcqs} MCQs each).`);
+    setTimeout(() => setConfigToastMsg(null), 4000);
+  };
 
   // Filter questions
   const filteredQuestions = useMemo(() => {
@@ -613,110 +656,194 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
 
       </div>
 
+      {/* CONFIG & REPAIR TOAST BANNER */}
+      {configToastMsg && (
+        <div className="p-3.5 rounded-2xl bg-emerald-600 text-white text-xs font-bold flex items-center justify-between shadow-lg shadow-emerald-600/20 animate-fadeIn">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+            <span>{configToastMsg}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setConfigToastMsg(null)}
+            className="p-1 hover:bg-white/20 rounded-lg cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* REQUIREMENT & SUFFICIENCY STATUS BANNER */}
-      <div className={`p-5 rounded-3xl border flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-sm ${
+      <div className={`p-5 rounded-3xl border space-y-4 shadow-sm ${
         auditSummary.is_sufficient
           ? 'bg-emerald-50/90 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
           : 'bg-amber-50/90 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-900 dark:text-amber-100'
       }`}>
-        <div className="flex items-start gap-3.5">
-          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 mt-0.5 ${
-            auditSummary.is_sufficient
-              ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
-              : 'bg-amber-600 text-white shadow-md shadow-amber-500/20'
-          }`}>
-            {auditSummary.is_sufficient ? <CheckCircle2 className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+          <div className="flex items-start gap-3.5">
+            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 mt-0.5 ${
+              auditSummary.is_sufficient
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/20'
+                : 'bg-amber-600 text-white shadow-md shadow-amber-500/20'
+            }`}>
+              {auditSummary.is_sufficient ? <CheckCircle2 className="w-6 h-6" /> : <AlertTriangle className="w-6 h-6" />}
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h4 className="text-sm font-black tracking-tight">
+                  {auditSummary.is_sufficient
+                    ? `Ready for Mock Test Series Generation (${auditSummary.approved_for_generation} Approved / ${auditSummary.required_for_generation} Required)`
+                    : `Shortfall of ${auditSummary.deficit} Approved Questions for ${config.numberOfMockTests} Mock Tests`}
+                </h4>
+                <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                  auditSummary.is_sufficient
+                    ? 'bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200'
+                    : 'bg-amber-100 dark:bg-amber-900/60 text-amber-800 dark:text-amber-200'
+                }`}>
+                  Max Capacity: {maxFeasibleTests} Tests ({currentMcqsPerTest} Qs each)
+                </span>
+              </div>
+              <p className="text-xs mt-0.5 opacity-90 leading-relaxed">
+                {auditSummary.is_sufficient ? (
+                  <>You have sufficient valid approved questions to generate <strong>{config.numberOfMockTests} Mock Tests</strong> ({config.mcqsPerMockTest} unique MCQs each) with 0 duplicates. (Available capacity: up to <strong>{maxFeasibleTests} Mock Tests</strong> with {leftoverMCQs} spare MCQs).</>
+                ) : (
+                  <>You configured <strong>{config.numberOfMockTests} Mock Tests</strong> × {config.mcqsPerMockTest} MCQs (= <strong>{auditSummary.required_for_generation} MCQs</strong> needed), but currently have <strong>{auditSummary.approved_for_generation}</strong> approved. Review questions below, edit invalid items, or instantly adjust test count to <strong>{maxFeasibleTests} Mock Tests</strong>.</>
+                )}
+              </p>
+            </div>
           </div>
-          <div>
-            <h4 className="text-sm font-black tracking-tight">
-              {auditSummary.is_sufficient
-                ? `Ready for Mock Test Series Generation (${auditSummary.approved_for_generation} Approved / ${auditSummary.required_for_generation} Required)`
-                : `Shortfall of ${auditSummary.deficit} Approved Questions for ${config.numberOfMockTests} Mock Tests`}
-            </h4>
-            <p className="text-xs mt-0.5 opacity-90 leading-relaxed">
-              {auditSummary.is_sufficient ? (
-                <>You have sufficient valid approved questions to generate <strong>{config.numberOfMockTests} Mock Tests</strong> ({config.mcqsPerMockTest} unique MCQs each) with 0 duplicates.</>
-              ) : (
-                <>You need <strong>{auditSummary.required_for_generation}</strong> approved MCQs ({config.numberOfMockTests} tests × {config.mcqsPerMockTest} MCQs), but currently have <strong>{auditSummary.approved_for_generation}</strong> approved. Review questions below, edit invalid items to approve them, or reduce test count in configuration.</>
-              )}
-            </p>
-          </div>
-        </div>
 
-        {/* QUICK BATCH ACTIONS */}
-        <div className="flex flex-wrap items-center gap-2 shrink-0">
-          {onReEnrichAllDualLanguage && (
+          {/* QUICK BATCH ACTIONS & TEST COUNT ADJUSTER */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Auto-Set to Max Feasible Button (When Shortfall) */}
+            {!auditSummary.is_sufficient && maxFeasibleTests > 0 && (
+              <button
+                type="button"
+                onClick={handleAutoSetMaxFeasible}
+                className="px-3.5 py-2 text-xs font-black rounded-xl bg-linear-to-r from-amber-600 to-emerald-600 hover:from-amber-700 hover:to-emerald-700 text-white cursor-pointer shadow-md shadow-amber-600/20 transition-all flex items-center gap-1.5 animate-pulse"
+                title={`Instantly set mock test count to ${maxFeasibleTests} to match available ${approvedMCQs} approved MCQs`}
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-200" />
+                <span>⚡ Auto-Set to {maxFeasibleTests} Tests</span>
+              </button>
+            )}
+
+            {/* Adjust Mock Tests Configuration Button */}
             <button
               type="button"
-              disabled={isEnrichingDualLanguage || isBatchRepairing}
-              onClick={onReEnrichAllDualLanguage}
-              className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer ${
-                isEnrichingDualLanguage
-                  ? 'bg-purple-700 text-white shadow-purple-500/30 ring-2 ring-purple-400 animate-pulse cursor-wait'
-                  : 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/20 disabled:opacity-50'
-              }`}
-              title="Ensure all questions have verified Hindi translations and comprehensive bilingual explanations"
+              onClick={() => setShowAdjustConfigModal(true)}
+              className="px-3.5 py-2 text-xs font-black rounded-xl bg-blue-600 hover:bg-blue-700 text-white cursor-pointer shadow-md shadow-blue-500/20 transition-all flex items-center gap-1.5"
+              title="Edit number of mock tests or MCQs per test based on available questions"
             >
-              {isEnrichingDualLanguage ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-200" />
-              ) : (
-                <Globe className="w-3.5 h-3.5" />
-              )}
-              <span>
-                {isEnrichingDualLanguage
-                  ? `AI Enriching... (${enrichDualLanguageProgress?.current || 0}/${enrichDualLanguageProgress?.total || questions.length})`
-                  : 'Auto-Enrich All Dual Language (EN + HI)'}
-              </span>
+              <Settings2 className="w-3.5 h-3.5" />
+              <span>Edit Mock Tests ({config.numberOfMockTests})</span>
             </button>
-          )}
 
-          {(auditSummary.invalid_count > 0 || auditSummary.needs_review_count > 0 || auditSummary.duplicate_count > 0) && (
+            {onReEnrichAllDualLanguage && (
+              <button
+                type="button"
+                disabled={isEnrichingDualLanguage || isBatchRepairing}
+                onClick={onReEnrichAllDualLanguage}
+                className={`px-3.5 py-2 text-xs font-black rounded-xl transition-all flex items-center gap-1.5 shadow-md cursor-pointer ${
+                  isEnrichingDualLanguage
+                    ? 'bg-purple-700 text-white shadow-purple-500/30 ring-2 ring-purple-400 animate-pulse cursor-wait'
+                    : 'bg-purple-600 hover:bg-purple-700 text-white shadow-purple-500/20 disabled:opacity-50'
+                }`}
+                title="Ensure all questions have verified Hindi translations and comprehensive bilingual explanations"
+              >
+                {isEnrichingDualLanguage ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-purple-200" />
+                ) : (
+                  <Globe className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {isEnrichingDualLanguage
+                    ? `AI Enriching... (${enrichDualLanguageProgress?.current || 0}/${enrichDualLanguageProgress?.total || questions.length})`
+                    : 'Auto-Enrich All Dual Language (EN + HI)'}
+                </span>
+              </button>
+            )}
+
+            {(auditSummary.invalid_count > 0 || auditSummary.needs_review_count > 0 || auditSummary.duplicate_count > 0) && (
+              <button
+                type="button"
+                disabled={isBatchRepairing}
+                onClick={handleBatchRepairAllIssues}
+                className="px-3.5 py-2 text-xs font-black rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white cursor-pointer shadow-md shadow-purple-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                title="AI auto-fixes all missing options, detects answers, and repairs malformed OCR text across all flagged MCQs"
+              >
+                {isBatchRepairing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Wand2 className="w-3.5 h-3.5" />
+                )}
+                <span>{isBatchRepairing ? 'AI Repairing...' : `✨ AI Batch Auto-Repair (${auditSummary.invalid_count + auditSummary.needs_review_count + auditSummary.duplicate_count})`}</span>
+              </button>
+            )}
+
             <button
               type="button"
-              disabled={isBatchRepairing}
-              onClick={handleBatchRepairAllIssues}
-              className="px-3.5 py-2 text-xs font-black rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white cursor-pointer shadow-md shadow-purple-500/20 transition-all flex items-center gap-1.5 disabled:opacity-50"
-              title="AI auto-fixes all missing options, detects answers, and repairs malformed OCR text across all flagged MCQs"
-            >
-              {isBatchRepairing ? (
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              ) : (
-                <Wand2 className="w-3.5 h-3.5" />
-              )}
-              <span>{isBatchRepairing ? 'AI Repairing...' : `✨ AI Batch Auto-Repair (${auditSummary.invalid_count + auditSummary.needs_review_count + auditSummary.duplicate_count})`}</span>
-            </button>
-          )}
-
-          <button
-            type="button"
-            onClick={onBatchApproveValid}
-            className="px-3.5 py-2 text-xs font-black rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer shadow-xs transition-all flex items-center gap-1.5"
-          >
-            <Check className="w-3.5 h-3.5" />
-            <span>Approve All Valid ({auditSummary.valid_count})</span>
-          </button>
-
-          {auditSummary.needs_review_count > 0 && onBatchApproveAllNeedsReview && (
-            <button
-              type="button"
-              onClick={onBatchApproveAllNeedsReview}
-              className="px-3.5 py-2 text-xs font-black rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer shadow-xs transition-all flex items-center gap-1.5"
-              title="Instantly mark all verified questions in Needs Review as Approved"
+              onClick={onBatchApproveValid}
+              className="px-3.5 py-2 text-xs font-black rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 cursor-pointer shadow-xs transition-all flex items-center gap-1.5"
             >
               <Check className="w-3.5 h-3.5" />
-              <span>Approve All Needs Review ({auditSummary.needs_review_count})</span>
+              <span>Approve All Valid ({auditSummary.valid_count})</span>
             </button>
-          )}
 
-          <button
-            type="button"
-            onClick={onBatchExcludeInvalid}
-            className="px-3.5 py-2 text-xs font-black rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer shadow-xs transition-all flex items-center gap-1.5"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-            <span>Exclude Invalid ({auditSummary.invalid_count + auditSummary.duplicate_count})</span>
-          </button>
+            {auditSummary.needs_review_count > 0 && onBatchApproveAllNeedsReview && (
+              <button
+                type="button"
+                onClick={onBatchApproveAllNeedsReview}
+                className="px-3.5 py-2 text-xs font-black rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/50 cursor-pointer shadow-xs transition-all flex items-center gap-1.5"
+                title="Instantly mark all verified questions in Needs Review as Approved"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Approve All Needs Review ({auditSummary.needs_review_count})</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={onBatchExcludeInvalid}
+              className="px-3.5 py-2 text-xs font-black rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 cursor-pointer shadow-xs transition-all flex items-center gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Exclude Invalid ({auditSummary.invalid_count + auditSummary.duplicate_count})</span>
+            </button>
+          </div>
         </div>
+
+        {/* Shortfall Smart Helper Callout */}
+        {!auditSummary.is_sufficient && (
+          <div className="p-3.5 rounded-2xl bg-amber-100/80 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-950 dark:text-amber-100">
+            <div className="flex items-center gap-2.5">
+              <Calculator className="w-4 h-4 text-amber-700 dark:text-amber-300 shrink-0" />
+              <span>
+                💡 <strong>Auto-Feasibility Calculation:</strong> With your <strong>{approvedMCQs} approved questions</strong> ({currentMcqsPerTest} MCQs/test), you can create up to <strong>{maxFeasibleTests} Mock Tests</strong> ({maxFeasibleTests * currentMcqsPerTest} MCQs + {leftoverMCQs} spare MCQs).
+              </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {maxFeasibleTests > 0 && (
+                <button
+                  type="button"
+                  onClick={handleAutoSetMaxFeasible}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs cursor-pointer shadow-sm transition-all flex items-center gap-1"
+                >
+                  <Check className="w-3 h-3" />
+                  <span>Set to {maxFeasibleTests} Tests</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setShowAdjustConfigModal(true)}
+                className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-600 font-bold text-xs cursor-pointer transition-all flex items-center gap-1"
+              >
+                <Edit3 className="w-3 h-3" />
+                <span>Custom Adjust</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* LIVE DUAL LANGUAGE PROCESSING EFFECT BANNER */}
@@ -1197,6 +1324,16 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <button
               type="button"
+              onClick={() => setShowAdjustConfigModal(true)}
+              className="px-4 py-3 bg-white/15 hover:bg-white/25 text-white rounded-2xl text-xs font-bold backdrop-blur-md border border-white/20 cursor-pointer transition-all flex items-center gap-2"
+              title="Change number of tests or questions per test based on current approved MCQs"
+            >
+              <Settings2 className="w-4 h-4" />
+              <span>Adjust Tests ({config.numberOfMockTests})</span>
+            </button>
+
+            <button
+              type="button"
               onClick={onPauseSession}
               className="px-4 py-3 bg-white/15 hover:bg-white/25 text-white rounded-2xl text-xs font-bold backdrop-blur-md border border-white/20 cursor-pointer transition-all flex items-center gap-2"
             >
@@ -1278,15 +1415,41 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
 
             {/* DEFICIT WARNING IF NOT SUFFICIENT */}
             {!auditSummary.is_sufficient && config.questionReusePolicy === 'OFF' && (
-              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 space-y-2">
                 <div className="font-black flex items-center gap-1.5">
                   <AlertTriangle className="w-4 h-4 text-amber-600" />
                   <span>Warning: Insufficient Approved Questions</span>
                 </div>
                 <p>
                   You require {auditSummary.required_for_generation} MCQs but have {auditSummary.approved_for_generation} approved (deficit of {auditSummary.deficit}).
-                  Generation will halt unless you approve more questions or reduce test count.
+                  You can auto-set to <strong>{maxFeasibleTests} Mock Tests</strong> or adjust your test configuration now.
                 </p>
+                <div className="flex items-center gap-2 pt-1">
+                  {maxFeasibleTests > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleAutoSetMaxFeasible();
+                        setShowConfirmModal(false);
+                      }}
+                      className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs cursor-pointer shadow-xs transition-all flex items-center gap-1"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Auto-Set to {maxFeasibleTests} Tests</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowConfirmModal(false);
+                      setShowAdjustConfigModal(true);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs cursor-pointer shadow-xs transition-all flex items-center gap-1"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span>Adjust Configuration</span>
+                  </button>
+                </div>
               </div>
             )}
 
@@ -1596,6 +1759,278 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* ADJUST MOCK TEST SERIES CONFIGURATION MODAL */}
+      {/* ========================================================================= */}
+      {showAdjustConfigModal && (() => {
+        const previewReq = Math.max(1, testCountInput) * Math.max(1, mcqsPerTestInput);
+        const previewFeasible = mcqsPerTestInput > 0 ? Math.floor(approvedMCQs / mcqsPerTestInput) : 0;
+        const previewLeftover = mcqsPerTestInput > 0 ? (approvedMCQs % mcqsPerTestInput) : 0;
+        const isPreviewSufficient = approvedMCQs >= previewReq;
+        const previewDeficit = Math.max(0, previewReq - approvedMCQs);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-white dark:bg-slate-900 rounded-3xl border border-slate-200 dark:border-slate-800 max-w-xl w-full p-6 shadow-2xl space-y-6">
+              
+              {/* MODAL HEADER */}
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold shadow-inner">
+                    <Sliders className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900 dark:text-white">
+                      Adjust Mock Test Configuration
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Optimize test count & questions based on {approvedMCQs} Approved MCQs
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestCountInput(config.numberOfMockTests);
+                    setMcqsPerTestInput(config.mcqsPerMockTest);
+                    setShowAdjustConfigModal(false);
+                  }}
+                  className="p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* CURRENT CAPACITY INSIGHT BANNER */}
+              <div className="p-4 rounded-2xl bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-blue-900 dark:text-blue-200 flex items-center gap-1.5">
+                    <Calculator className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    Available Question Bank Pool
+                  </span>
+                  <span className="font-black text-blue-700 dark:text-blue-300">
+                    {approvedMCQs} Approved MCQs
+                  </span>
+                </div>
+                <p className="text-xs text-blue-800/90 dark:text-blue-300/90">
+                  ⚡ <strong>Auto-Calculated Max:</strong> At <strong>{mcqsPerTestInput} MCQs/test</strong>, you can produce exactly <strong>{previewFeasible} Complete Mock Tests</strong> ({previewFeasible * mcqsPerTestInput} MCQs) with <strong>{previewLeftover} spare questions</strong>.
+                </p>
+                {previewFeasible > 0 && previewFeasible !== testCountInput && (
+                  <button
+                    type="button"
+                    onClick={() => setTestCountInput(previewFeasible)}
+                    className="w-full mt-1 py-1.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs cursor-pointer shadow-xs transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Quick Set to Maximum Feasible ({previewFeasible} Mock Tests)</span>
+                  </button>
+                )}
+              </div>
+
+              {/* INTERACTIVE CONTROLS */}
+              <div className="space-y-4">
+                
+                {/* Number of Mock Tests Stepper */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Number of Mock Tests
+                    </label>
+                    <span className="text-xs font-black text-slate-500">
+                      Target: {testCountInput} Tests
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={testCountInput <= 1}
+                      onClick={() => setTestCountInput(prev => Math.max(1, prev - 5))}
+                      className="px-2.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 disabled:opacity-40 cursor-pointer"
+                      title="Decrease by 5"
+                    >
+                      -5
+                    </button>
+                    <button
+                      type="button"
+                      disabled={testCountInput <= 1}
+                      onClick={() => setTestCountInput(prev => Math.max(1, prev - 1))}
+                      className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 disabled:opacity-40 cursor-pointer"
+                      title="Decrease by 1"
+                    >
+                      <Minus className="w-4 h-4" />
+                    </button>
+
+                    <input
+                      type="number"
+                      min={1}
+                      max={500}
+                      value={testCountInput}
+                      onChange={(e) => setTestCountInput(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="flex-1 py-2 px-3 text-center text-base font-black rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setTestCountInput(prev => prev + 1)}
+                      className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 cursor-pointer"
+                      title="Increase by 1"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTestCountInput(prev => prev + 5)}
+                      className="px-2.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold text-slate-700 dark:text-slate-300 cursor-pointer"
+                      title="Increase by 5"
+                    >
+                      +5
+                    </button>
+                  </div>
+
+                  {/* Quick Presets */}
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                    <span className="text-[11px] font-bold text-slate-400 mr-1">Presets:</span>
+                    {[5, 10, 20, 25, 30, 50].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setTestCountInput(preset)}
+                        className={`px-2 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                          testCountInput === preset
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                        }`}
+                      >
+                        {preset} Tests
+                      </button>
+                    ))}
+                    {previewFeasible > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setTestCountInput(previewFeasible)}
+                        className={`px-2 py-1 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                          testCountInput === previewFeasible
+                            ? 'bg-emerald-600 text-white shadow-xs'
+                            : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800'
+                        }`}
+                      >
+                        ⚡ Max ({previewFeasible})
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* MCQs per Mock Test Selector */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Questions (MCQs) Per Mock Test
+                    </label>
+                    <span className="text-xs font-black text-slate-500">
+                      {mcqsPerTestInput} MCQs/Test
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[10, 15, 20, 25, 30, 50, 100].map((count) => (
+                      <button
+                        key={count}
+                        type="button"
+                        onClick={() => setMcqsPerTestInput(count)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                          mcqsPerTestInput === count
+                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                            : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        {count} MCQs
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* LIVE FEASIBILITY VERIFICATION STATUS CARD */}
+                <div className={`p-4 rounded-2xl border space-y-2 transition-all ${
+                  isPreviewSufficient
+                    ? 'bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-100'
+                    : 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-100'
+                }`}>
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className="flex items-center gap-1.5">
+                      {isPreviewSufficient ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                      )}
+                      <span>
+                        {isPreviewSufficient
+                          ? '✅ 100% Sufficient & Ready!'
+                          : `⚠️ Shortfall of ${previewDeficit} MCQs`}
+                      </span>
+                    </span>
+                    <span className="font-mono text-xs">
+                      {previewReq} Req / {approvedMCQs} Avail
+                    </span>
+                  </div>
+
+                  <p className="text-xs opacity-90 leading-relaxed">
+                    {isPreviewSufficient ? (
+                      <>
+                        Generating <strong>{testCountInput} Mock Tests</strong> ({mcqsPerTestInput} MCQs each) will use <strong>{previewReq} MCQs</strong>. The remaining <strong>{approvedMCQs - previewReq} MCQs</strong> will remain securely stored in the Question Bank.
+                      </>
+                    ) : (
+                      <>
+                        Generating <strong>{testCountInput} Mock Tests</strong> requires <strong>{previewReq} MCQs</strong>, but you only have <strong>{approvedMCQs} approved</strong>. Please reduce test count to <strong>{previewFeasible} Tests</strong> or approve more questions.
+                      </>
+                    )}
+                  </p>
+                </div>
+
+              </div>
+
+              {/* MODAL ACTIONS */}
+              <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTestCountInput(config.numberOfMockTests);
+                    setMcqsPerTestInput(config.mcqsPerMockTest);
+                    setShowAdjustConfigModal(false);
+                  }}
+                  className="px-4 py-2.5 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 cursor-pointer"
+                >
+                  Cancel
+                </button>
+
+                <div className="flex items-center gap-2">
+                  {previewFeasible > 0 && !isPreviewSufficient && (
+                    <button
+                      type="button"
+                      onClick={() => handleApplyConfigAdjust(previewFeasible, mcqsPerTestInput)}
+                      className="px-4 py-2.5 text-xs font-black rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-md shadow-emerald-500/20 cursor-pointer flex items-center gap-1.5"
+                    >
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Set to Max ({previewFeasible} Tests)</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handleApplyConfigAdjust(testCountInput, mcqsPerTestInput)}
+                    className="px-5 py-2.5 text-xs font-black rounded-xl bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20 cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Apply & Save Configuration</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

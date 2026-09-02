@@ -553,15 +553,20 @@ export async function generateMockTestsFromApprovedMCQs(
     questionPool = interleaved;
   }
 
-  const generatedSummaries: GeneratedTestSummary[] = [];
-  const testIdsCreated: string[] = [];
   const totalTests = config.numberOfMockTests;
+  const testsToSave: Test[] = [];
+  const testQuestionsMap: Record<string, Question[]> = {};
 
-  // Generate each test
+  // Phase 2 Step 1: In-memory partition & instantiation with smooth non-blocking UI progress
   for (let i = 0; i < totalTests; i++) {
     const testNum = config.startingTestNumber + i;
-    const progressPct = 10 + Math.round(((i + 1) / totalTests) * 70);
-    onProgress?.(`Generating Test ${i + 1} of ${totalTests}: ${config.mockTestNamePrefix} - ${testNum}...`, progressPct);
+    const progressPct = 10 + Math.round(((i + 1) / totalTests) * 60); // 10% to 70%
+    onProgress?.(`Structuring Test ${i + 1} of ${totalTests}: ${config.mockTestNamePrefix} - ${testNum}...`, progressPct);
+
+    // Yield event loop every few tests so React can update UI progress smoothly
+    if (i % 3 === 0 || i === totalTests - 1) {
+      await new Promise(r => setTimeout(r, 10));
+    }
 
     // Pick questions for this test
     let testQuestionsSlice: AuditedMCQ[] = [];
@@ -637,14 +642,10 @@ export async function generateMockTestsFromApprovedMCQs(
       updated_at: new Date().toISOString()
     };
 
-    // Save Test in database
-    const savedTest = await dataService.saveTest(testPayload);
-    testIdsCreated.push(savedTest.id);
-
     // Convert audited questions to Question entities
     const questionEntities: Question[] = testQuestionsSlice.map((aq, qIdx) => ({
       id: generateUUID(),
-      test_id: savedTest.id,
+      test_id: testId,
       question_number: qIdx + 1,
       question_text: aq.question_text,
       option_a: aq.option_a,
@@ -666,20 +667,29 @@ export async function generateMockTestsFromApprovedMCQs(
       created_at: new Date().toISOString()
     }));
 
-    // Save Questions to database & sync to Master Question Bank
-    await dataService.saveQuestions(savedTest.id, questionEntities);
-    await syncToQuestionBankMaster(questionEntities);
-
-    generatedSummaries.push({
-      test: savedTest,
-      questions: questionEntities,
-      question_count: questionEntities.length,
-      total_marks: savedTest.total_marks,
-      is_published: savedTest.is_published
-    });
+    testsToSave.push(testPayload);
+    (testQuestionsMap as any)[testId] = questionEntities;
   }
 
-  onProgress?.('Executing Phase 2A Final Mock Test Audit...', 90);
+  // Phase 2 Step 2: Atomic High-Performance Batch Persist (Single pass for storage & Question Bank)
+  onProgress?.(`Persisting ${testsToSave.length} Mock Tests & syncing Question Bank...`, 75);
+  await new Promise(r => setTimeout(r, 20));
+
+  const { savedTests } = await dataService.saveBatchTestsAndQuestions(testsToSave, testQuestionsMap as any);
+
+  const generatedSummaries: GeneratedTestSummary[] = savedTests.map(st => {
+    const qList = (testQuestionsMap as any)[st.id] || [];
+    return {
+      test: st,
+      questions: qList,
+      question_count: qList.length,
+      total_marks: st.total_marks,
+      is_published: st.is_published
+    };
+  });
+
+  onProgress?.('Executing Phase 2A Final Mock Test Audit & Integrity Check...', 88);
+  await new Promise(r => setTimeout(r, 30));
 
   // Perform Phase 2A Final Audit
   const finalAudit = performFinalMockTestAudit(generatedSummaries, config);

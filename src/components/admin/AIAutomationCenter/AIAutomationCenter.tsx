@@ -207,6 +207,7 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
     if (auditedQuestions.length > 0) {
       const newSummary = calculateAuditSummary(auditedQuestions, updated);
       setAuditSummary(newSummary);
+      persistSession(state, updated, auditedQuestions, newSummary, generatedTests, finalAuditReport);
     }
   };
 
@@ -791,6 +792,7 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
           config={config}
           auditSummary={auditSummary}
           adminUser={adminUser}
+          onUpdateConfig={handleConfigChange}
           onUpdateQuestion={handleUpdateQuestion}
           onBatchUpdateQuestions={handleBatchUpdateQuestions}
           onBatchApproveValid={handleBatchApproveValid}
@@ -817,6 +819,7 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
           progressPercentage={genProgress}
           currentStepMessage={genStepMsg}
           config={config}
+          onCancel={() => setState('AUDIT_READY')}
         />
       )}
 
