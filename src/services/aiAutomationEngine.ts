@@ -13,7 +13,7 @@ import { Question, Test, PracticeMode } from '../types';
 import { ExtractedPDFMCQ } from './pdfOcrEngine';
 import { dataService, generateUUID, parseSafeNumber, syncToQuestionBankMaster, shuffleAndBalanceQuestions, inferPracticeMode } from './dataService';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
-import { aiService } from './aiService';
+import { aiService, sanitizeBilingualQuestionFields } from './aiService';
 
 const AUDIT_LOGS_STORAGE_KEY = 'gradeup_automation_audit_logs';
 const AUTOMATION_SESSION_STORAGE_KEY = 'gradeup_current_ai_automation_session';
@@ -159,11 +159,16 @@ export async function enrichRawMCQsWithDualLanguageAndExplanations(
     return enriched.map((eq, i) => {
       const orig = rawQuestions[i];
       const validAnswer = (eq.correct_answer || orig?.correct_answer || 'A').toUpperCase() as 'A' | 'B' | 'C' | 'D';
+      const sanitized = sanitizeBilingualQuestionFields(
+        eq.question_text || orig?.question_text || '',
+        langMode === 'english' ? '' : (eq.question_hi || orig?.question_hi || ''),
+        langMode
+      );
       return {
         ...orig,
         ...eq,
-        question_text: eq.question_text || orig?.question_text || '',
-        question_hi: langMode === 'english' ? null : (eq.question_hi || eq.question_text || orig?.question_hi || ''),
+        question_text: sanitized.question_text,
+        question_hi: langMode === 'english' ? null : (sanitized.question_hi || null),
         option_a: eq.option_a || orig?.option_a || '',
         option_b: eq.option_b || orig?.option_b || '',
         option_c: eq.option_c || orig?.option_c || '',
@@ -177,10 +182,11 @@ export async function enrichRawMCQsWithDualLanguageAndExplanations(
   } catch (err) {
     console.error('Pre-Audit Dual Language Enrichment failed, applying resilient fallback synthesis:', err);
     return rawQuestions.map((q) => {
+      const sanitized = sanitizeBilingualQuestionFields(q.question_text, q.question_hi, langMode);
       return {
         ...q,
-        question_text: q.question_text,
-        question_hi: langMode === 'english' ? null : (q.question_hi || q.question_text),
+        question_text: sanitized.question_text,
+        question_hi: langMode === 'english' ? null : (sanitized.question_hi || null),
         option_a: q.option_a || 'Option A',
         option_b: q.option_b || 'Option B',
         option_c: q.option_c || 'Option C',
@@ -338,11 +344,17 @@ export function perform360MCQAudit(
     // Determine initial approval state: only pristine VALID questions are initially approved
     const isApprovedInitially = auditStatus === 'VALID';
 
+    const sanitizedFields = sanitizeBilingualQuestionFields(
+      qText,
+      raw.question_hi,
+      langMode
+    );
+
     auditedList.push({
       id: qId,
       original_number: raw.question_number || (idx + 1),
-      question_text: qText,
-      question_hi: raw.question_hi || (hasHindi ? qText : null),
+      question_text: sanitizedFields.question_text,
+      question_hi: langMode === 'english' ? null : (sanitizedFields.question_hi || null),
       option_a: optA,
       option_b: optB,
       option_c: optC,

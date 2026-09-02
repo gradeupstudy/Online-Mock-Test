@@ -39,7 +39,7 @@ import {
   AdminAuditConfirmation
 } from '../../../types/aiAutomation';
 import { resolveQuestionLanguageMode } from '../../../services/aiAutomationEngine';
-import { aiService } from '../../../services/aiService';
+import { aiService, sanitizeBilingualQuestionFields } from '../../../services/aiService';
 
 interface AutomationAuditDashboardProps {
   questions: AuditedMCQ[];
@@ -171,11 +171,12 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
     setLoadingRegenId(q.id);
     try {
       const langMode = resolveQuestionLanguageMode(config, q.subject);
+      const sanitizedInput = sanitizeBilingualQuestionFields(q.question_text, q.question_hi, langMode);
       const res = await aiService.regenerateCompleteMCQ(
         {
           question_number: q.original_number,
-          question_text: q.question_text,
-          question_hi: q.question_hi,
+          question_text: sanitizedInput.question_text,
+          question_hi: sanitizedInput.question_hi,
           option_a: q.option_a,
           option_b: q.option_b,
           option_c: q.option_c,
@@ -190,10 +191,16 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
         langMode
       );
 
+      const sanitizedRes = sanitizeBilingualQuestionFields(
+        res.question_text || q.question_text,
+        res.question_hi,
+        langMode
+      );
+
       const updated: AuditedMCQ = {
         ...q,
-        question_text: res.question_text || q.question_text,
-        question_hi: langMode === 'english' ? null : (res.question_hi || res.question_text),
+        question_text: sanitizedRes.question_text,
+        question_hi: langMode === 'english' ? null : (sanitizedRes.question_hi || null),
         option_a: res.option_a,
         option_b: res.option_b,
         option_c: res.option_c,
@@ -273,11 +280,12 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
         await Promise.all(
           chunk.map(async (q) => {
             try {
+              const sanitizedInput = sanitizeBilingualQuestionFields(q.question_text, q.question_hi, langMode);
               const res = await aiService.regenerateCompleteMCQ(
                 {
                   question_number: q.original_number,
-                  question_text: q.question_text,
-                  question_hi: q.question_hi,
+                  question_text: sanitizedInput.question_text,
+                  question_hi: sanitizedInput.question_hi,
                   option_a: q.option_a,
                   option_b: q.option_b,
                   option_c: q.option_c,
@@ -292,10 +300,16 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
                 langMode
               );
 
+              const sanitizedRes = sanitizeBilingualQuestionFields(
+                res.question_text || q.question_text,
+                res.question_hi,
+                langMode
+              );
+
               const updated: AuditedMCQ = {
                 ...q,
-                question_text: res.question_text || q.question_text,
-                question_hi: langMode === 'english' ? null : (res.question_hi || res.question_text),
+                question_text: sanitizedRes.question_text,
+                question_hi: langMode === 'english' ? null : (sanitizedRes.question_hi || null),
                 option_a: res.option_a,
                 option_b: res.option_b,
                 option_c: res.option_c,
@@ -333,11 +347,12 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
     setIsModalRegenerating(true);
     try {
       const langMode = resolveQuestionLanguageMode(config, editingQuestion.subject);
+      const sanitizedInput = sanitizeBilingualQuestionFields(editingQuestion.question_text, editingQuestion.question_hi, langMode);
       const res = await aiService.regenerateCompleteMCQ(
         {
           question_number: editingQuestion.original_number,
-          question_text: editingQuestion.question_text,
-          question_hi: editingQuestion.question_hi,
+          question_text: sanitizedInput.question_text,
+          question_hi: sanitizedInput.question_hi,
           option_a: editingQuestion.option_a,
           option_b: editingQuestion.option_b,
           option_c: editingQuestion.option_c,
@@ -353,10 +368,16 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
         customAiPrompt.trim() || undefined
       );
 
+      const sanitizedRes = sanitizeBilingualQuestionFields(
+        res.question_text || editingQuestion.question_text,
+        res.question_hi,
+        langMode
+      );
+
       setEditingQuestion({
         ...editingQuestion,
-        question_text: res.question_text || editingQuestion.question_text,
-        question_hi: langMode === 'english' ? '' : (res.question_hi || res.question_text),
+        question_text: sanitizedRes.question_text,
+        question_hi: langMode === 'english' ? '' : (sanitizedRes.question_hi || ''),
         option_a: res.option_a,
         option_b: res.option_b,
         option_c: res.option_c,
@@ -1007,14 +1028,23 @@ export const AutomationAuditDashboard: React.FC<AutomationAuditDashboardProps> =
 
                 {/* QUESTION BODY */}
                 <div className="pt-3 space-y-3">
-                  <p className="text-sm font-black text-slate-900 dark:text-white leading-relaxed">
-                    {q.question_text}
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-sm font-black text-slate-900 dark:text-white leading-relaxed">
+                      {q.question_text}
+                    </p>
+                  </div>
 
                   {q.question_hi && q.question_hi !== q.question_text && (
-                    <p className="text-xs font-bold text-slate-600 dark:text-slate-300 italic">
-                      {q.question_hi}
-                    </p>
+                    <div className="p-2.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-800/50 space-y-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="px-1.5 py-0.5 rounded bg-purple-200 dark:bg-purple-900 text-purple-800 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider">
+                          हिन्दी अनुवाद
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-purple-950 dark:text-purple-200 leading-relaxed">
+                        {q.question_hi}
+                      </p>
+                    </div>
                   )}
 
                   {/* 4 OPTIONS GRID */}

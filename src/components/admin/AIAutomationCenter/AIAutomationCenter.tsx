@@ -14,7 +14,11 @@ import {
   Database,
   Send,
   Eye,
-  Check
+  Check,
+  Key,
+  X,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import {
   AutomationState,
@@ -36,7 +40,7 @@ import {
   enrichRawMCQsWithDualLanguageAndExplanations,
   resolveQuestionLanguageMode
 } from '../../../services/aiAutomationEngine';
-import { aiService } from '../../../services/aiService';
+import { aiService, sanitizeBilingualQuestionFields } from '../../../services/aiService';
 import { dataService } from '../../../services/dataService';
 import { AutomationConfigStep } from './AutomationConfigStep';
 import { AutomationOcrProgress } from './AutomationOcrProgress';
@@ -118,6 +122,28 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
 
   // History Modal
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+
+  // Gemini API Key Manager Modal
+  const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+  const [geminiKeys, setGeminiKeys] = useState<string[]>([]);
+  const [apiKeyInputText, setApiKeyInputText] = useState('');
+
+  useEffect(() => {
+    const keys = aiService.getStoredApiKeys();
+    setGeminiKeys(keys);
+    setApiKeyInputText(keys.join('\n'));
+  }, [showApiKeyModal]);
+
+  const handleSaveGeminiKeys = () => {
+    const splitKeys = apiKeyInputText
+      .split(/[\n,]+/)
+      .map((k) => k.trim())
+      .filter((k) => k.length > 0);
+    aiService.saveApiKeys(splitKeys);
+    setGeminiKeys(splitKeys);
+    setShowApiKeyModal(false);
+    onToast?.('success', `Saved ${splitKeys.length} Gemini API Key(s) for AI Rotation & Cascading!`);
+  };
 
   // Dual Language Batch & Single Processing State
   const [isEnrichingDualLanguage, setIsEnrichingDualLanguage] = useState(false);
@@ -292,22 +318,25 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
 
     try {
       onToast?.('info', 'Starting Dual Language & Explanation conversion for all questions...');
-      const questionsToEnrich = auditedQuestions.map((q, idx) => ({
-        question_number: q.original_number || q.question_number || idx + 1,
-        question_text: q.question_text,
-        question_hi: q.question_hi || '',
-        option_a: q.option_a,
-        option_b: q.option_b,
-        option_c: q.option_c,
-        option_d: q.option_d,
-        correct_answer: q.correct_answer,
-        explanation: q.explanation || '',
-        subject: q.subject || config.subject,
-        chapter: q.chapter,
-        topic: q.topic || config.topic,
-      }));
-
       const langMode = resolveQuestionLanguageMode(config);
+      const questionsToEnrich = auditedQuestions.map((q, idx) => {
+        const sanitized = sanitizeBilingualQuestionFields(q.question_text, q.question_hi, langMode);
+        return {
+          question_number: q.original_number || q.question_number || idx + 1,
+          question_text: sanitized.question_text,
+          question_hi: sanitized.question_hi || '',
+          option_a: q.option_a,
+          option_b: q.option_b,
+          option_c: q.option_c,
+          option_d: q.option_d,
+          correct_answer: q.correct_answer,
+          explanation: q.explanation || '',
+          subject: q.subject || config.subject,
+          chapter: q.chapter,
+          topic: q.topic || config.topic,
+        };
+      });
+
       const converted = await aiService.bulkConvertToDualLanguageMCQs(
         questionsToEnrich,
         langMode,
@@ -325,10 +354,15 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
       const updatedList: AuditedMCQ[] = auditedQuestions.map((orig, i) => {
         const conv = converted[i];
         if (!conv) return orig;
+        const sanitized = sanitizeBilingualQuestionFields(
+          conv.question_text || orig.question_text,
+          conv.question_hi,
+          langMode
+        );
         return {
           ...orig,
-          question_text: conv.question_text,
-          question_hi: conv.question_hi || conv.question_text,
+          question_text: sanitized.question_text,
+          question_hi: langMode === 'english' ? null : (sanitized.question_hi || null),
           option_a: conv.option_a,
           option_b: conv.option_b,
           option_c: conv.option_c,
@@ -361,11 +395,13 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
 
     setSingleEnrichingId(questionId);
     try {
+      const langMode = resolveQuestionLanguageMode(config, targetQ.subject);
+      const sanitizedInput = sanitizeBilingualQuestionFields(targetQ.question_text, targetQ.question_hi, langMode);
       onToast?.('info', `Converting Question #${targetQ.original_number || targetQ.question_number} to Dual Language...`);
       const converted = await aiService.convertSingleToDualLanguage({
         question_number: targetQ.original_number || targetQ.question_number,
-        question_text: targetQ.question_text,
-        question_hi: targetQ.question_hi || '',
+        question_text: sanitizedInput.question_text,
+        question_hi: sanitizedInput.question_hi || '',
         option_a: targetQ.option_a,
         option_b: targetQ.option_b,
         option_c: targetQ.option_c,
@@ -375,14 +411,20 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
         subject: targetQ.subject || config.subject,
         chapter: targetQ.chapter,
         topic: targetQ.topic || config.topic,
-      });
+      }, langMode);
+
+      const sanitizedResult = sanitizeBilingualQuestionFields(
+        converted.question_text || targetQ.question_text,
+        converted.question_hi,
+        langMode
+      );
 
       const updatedList = auditedQuestions.map(q => {
         if (q.id === questionId) {
           return {
             ...q,
-            question_text: converted.question_text,
-            question_hi: converted.question_hi || converted.question_text,
+            question_text: sanitizedResult.question_text,
+            question_hi: langMode === 'english' ? null : (sanitizedResult.question_hi || null),
             option_a: converted.option_a,
             option_b: converted.option_b,
             option_c: converted.option_c,
@@ -600,6 +642,16 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setShowApiKeyModal(true)}
+              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-300 dark:border-amber-700/60 cursor-pointer transition-all flex items-center gap-1.5 shadow-2xs"
+              title="Manage and configure multiple Gemini API Keys for rotation & failover"
+            >
+              <Key className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+              <span>Gemini Keys ({geminiKeys.length})</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setShowHistoryModal(true)}
               className="px-3.5 py-2 text-xs font-bold rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 cursor-pointer transition-all flex items-center gap-1.5"
             >
@@ -744,6 +796,94 @@ export const AIAutomationCenter: React.FC<AIAutomationCenterProps> = ({
         isOpen={showHistoryModal}
         onClose={() => setShowHistoryModal(false)}
       />
+
+      {/* Gemini API Key Manager Modal */}
+      {showApiKeyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden animate-scaleUp">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/50">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400">
+                  <Key className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Gemini API Keys Manager
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Configure one or multiple API keys for multi-key rotation & failover
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-4">
+              <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-900 dark:text-indigo-200 font-medium space-y-1">
+                <p className="font-bold flex items-center gap-1.5 text-indigo-700 dark:text-indigo-300">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  Auto-Cascade & Load Balancing Active
+                </p>
+                <p>
+                  Paste your Google Gemini API Keys below (one key per line or separated by comma). The system prioritizes <strong>Gemini 3.7 Flash</strong> and automatically cascades to backup models and rotates through your keys if quota or rate limits occur.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Gemini API Keys ({geminiKeys.length} currently saved)
+                </label>
+                <textarea
+                  rows={6}
+                  value={apiKeyInputText}
+                  onChange={(e) => setApiKeyInputText(e.target.value)}
+                  placeholder="Paste your Gemini API Keys here:&#10;AIzaSyA...&#10;AIzaSyB...&#10;AIzaSyC..."
+                  className="w-full px-3.5 py-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 focus:ring-2 focus:ring-amber-500 outline-hidden resize-y"
+                />
+              </div>
+
+              <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center justify-between">
+                <span>Keys are securely saved in your browser's local storage.</span>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
+                >
+                  Get Gemini API Key ↗
+                </a>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-end gap-2.5 bg-slate-50/50 dark:bg-slate-950/50">
+              <button
+                type="button"
+                onClick={() => setShowApiKeyModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveGeminiKeys}
+                className="px-5 py-2 rounded-xl text-xs font-black bg-linear-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white shadow-md shadow-amber-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Save API Keys</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

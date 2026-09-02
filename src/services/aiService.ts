@@ -5,6 +5,102 @@ import { shuffleAndBalanceQuestions, shuffleQuestionOptions } from './dataServic
 const STORAGE_KEY = 'gradeup_gemini_api_keys';
 
 /**
+ * Sanitizes and cleanly separates English Question Text and Hindi Question Translation.
+ * Ensures:
+ * 1. question_text contains strictly English (no Hindi/Devanagari text attached).
+ * 2. question_hi contains strictly pure Devanagari Hindi translation.
+ * 3. Any old/duplicate translation in question_text or question_hi is cleanly separated.
+ */
+export function sanitizeBilingualQuestionFields(
+  qText: string,
+  qHi: string | null | undefined,
+  languageMode: 'bilingual' | 'english' | 'hindi' = 'bilingual'
+): { question_text: string; question_hi: string } {
+  let englishText = (qText || '').trim();
+  let hindiText = (qHi || '').trim();
+
+  if (languageMode === 'english') {
+    // English only mode: strip any Devanagari characters
+    englishText = englishText.replace(/[\u0900-\u097F]+[\s\S]*/g, '').trim();
+    return {
+      question_text: englishText || qText,
+      question_hi: '',
+    };
+  }
+
+  if (languageMode === 'hindi') {
+    // Hindi only mode
+    return {
+      question_text: hindiText || englishText,
+      question_hi: hindiText || englishText,
+    };
+  }
+
+  // BILINGUAL / DUAL LANGUAGE MODE:
+  // Check if englishText has Devanagari characters
+  const hasDevanagariInEnglish = /[\u0900-\u097F]/.test(englishText);
+
+  if (hasDevanagariInEnglish) {
+    // Check if separated by newline
+    if (englishText.includes('\n')) {
+      const lines = englishText.split('\n').map((l) => l.trim()).filter(Boolean);
+      const engLines: string[] = [];
+      const hiLines: string[] = [];
+
+      for (const line of lines) {
+        if (/[\u0900-\u097F]/.test(line)) {
+          hiLines.push(line);
+        } else {
+          engLines.push(line);
+        }
+      }
+
+      if (engLines.length > 0) {
+        englishText = engLines.join(' ').trim();
+      }
+      if (hiLines.length > 0) {
+        hindiText = hiLines.join(' ').trim();
+      }
+    } else {
+      // Inline mixed text (e.g. "Which part of body is affected? मानव शरीर का...")
+      const match = englishText.match(/[\u0900-\u097F]/);
+      if (match && match.index !== undefined && match.index > 0) {
+        const engPart = englishText.substring(0, match.index).trim();
+        const hiPart = englishText.substring(match.index).trim();
+        if (engPart.length > 3) {
+          englishText = engPart;
+          if (!hindiText || hindiText === qText || !/[\u0900-\u097F]/.test(hindiText)) {
+            hindiText = hiPart;
+          }
+        }
+      }
+    }
+  }
+
+  // If question_hi has English prefix (e.g. "English / हिन्दी" or "English\nहिन्दी"), strip the English part
+  if (hindiText) {
+    if (hindiText.includes('\n')) {
+      const hiLines = hindiText.split('\n').map((l) => l.trim()).filter((l) => /[\u0900-\u097F]/.test(l));
+      if (hiLines.length > 0) {
+        hindiText = hiLines.join(' ').trim();
+      }
+    } else if (/^[A-Za-z0-9\s.,?':;-]+\s*\/\s*[\u0900-\u097F]/.test(hindiText)) {
+      const parts = hindiText.split('/');
+      hindiText = parts.slice(1).join('/').trim();
+    }
+  }
+
+  // Final cleanup: remove trailing slashes or duplicate punctuation
+  englishText = englishText.replace(/\s*\/\s*$/, '').trim();
+  hindiText = hindiText.replace(/^\s*\/\s*/, '').trim();
+
+  return {
+    question_text: englishText,
+    question_hi: hindiText,
+  };
+}
+
+/**
  * Model Cascade Priority:
  * 1. 'gemini-3.7-flash' (Primary model: Highest quality & speed, always tried FIRST)
  * 2. 'gemini-flash-latest' (Secondary fallback: Stable flash alias)
@@ -2023,13 +2119,14 @@ Return strict JSON object matching the schema.
 3. NEVER leave options incomplete or with placeholders.
 4. Generate a comprehensive Hindi explanation (व्याख्या) detailing व्याकरण नियम, परिभाषा, और सही विकल्प का कारण।`
           : `TARGET: DUAL LANGUAGE (Bilingual: English + Hindi / Devanagari).
-1. DUAL LANGUAGE QUESTION TEXT:
-   - Provide crystal-clear English statement AND accurate Devanagari Hindi translation separated by a newline ('\\n').
-   - Repair any OCR-mangled Devanagari characters or broken ligatures into grammatically perfect Hindi.
-2. QUESTION_HI:
-   - Provide the standalone, pure Hindi translation in "question_hi".
+1. "question_text" (STRICTLY ENGLISH ONLY):
+   - Provide ONLY the crystal-clear, pure English question statement in "question_text".
+   - CRITICAL: DO NOT include, append, or mix Hindi / Devanagari text inside "question_text". It MUST be 100% English.
+2. "question_hi" (STRICTLY PURE DEVANAGARI HINDI ONLY):
+   - Provide the complete, accurate, pure Devanagari Hindi translation in "question_hi".
+   - Replace any old, broken, missing, or merged Hindi translation with a fresh, grammatically perfect Devanagari translation.
 3. COMPLETE 4 BILINGUAL OPTIONS:
-   - Format options cleanly as: "English Term / हिन्दी शब्द" (e.g. "Mitochondria / माइटोकॉन्ड्रिया").
+   - Format options cleanly as: "English Term / हिन्दी शब्द" (e.g. "Heart / हृदय", "Brain / मस्तिष्क").
    - NEVER leave placeholders like "Not clearly visible in text", "Incomplete", or "___". If an option was missing, generate a plausible distractor.
 4. COMPLETE BILINGUAL EXPLANATION:
    - Provide a comprehensive bilingual explanation containing both English analysis and Hindi व्याख्या.`;
@@ -2105,10 +2202,15 @@ Return strict JSON object matching the schema.
         }
 
         const validAns = normalizeAnswerKey(parsed.correct_answer, normalizeAnswerKey(question.correct_answer, 'A'));
+        const sanitized = sanitizeBilingualQuestionFields(
+          parsed.question_text || question.question_text,
+          parsed.question_hi || (isEnglish ? '' : question.question_hi),
+          languageMode
+        );
 
         return {
-          question_text: parsed.question_text || question.question_text,
-          question_hi: parsed.question_hi || (isEnglish ? '' : parsed.question_text || question.question_hi) || '',
+          question_text: sanitized.question_text,
+          question_hi: sanitized.question_hi,
           option_a: parsed.option_a || question.option_a,
           option_b: parsed.option_b || question.option_b,
           option_c: parsed.option_c || question.option_c,
@@ -2239,7 +2341,7 @@ ${
           ? 'Language Target: Strict English Only. Question text and all options must be in English. Set "question_hi": "".'
           : isHindi
           ? 'Language Target: Strict Hindi (Devanagari) Only. Question text and all options must be in pure Hindi.'
-          : 'Language Target: Bilingual (English + Hindi). Provide clean English statement and Hindi translation separated by newline in question_text, pure Hindi in question_hi, and "English / हिन्दी" in options.';
+          : 'Language Target: Bilingual (English + Hindi). "question_text" MUST be strictly pure English only (no Hindi/Devanagari text). "question_hi" MUST be strictly pure Devanagari Hindi translation. Options formatted as "English / हिन्दी".';
 
         const promptText = `
 You are a Master Academic Examination Board Setter and Chief Question Auditor.
@@ -2309,10 +2411,15 @@ Return strict JSON matching the schema.
         }
 
         const validAns = normalizeAnswerKey(parsed.correct_answer, normalizeAnswerKey(question.correct_answer, 'A'));
+        const sanitized = sanitizeBilingualQuestionFields(
+          parsed.question_text || question.question_text,
+          parsed.question_hi || (isEnglish ? '' : question.question_hi),
+          languageMode
+        );
 
         return {
-          question_text: parsed.question_text || question.question_text,
-          question_hi: parsed.question_hi || (isEnglish ? '' : parsed.question_text || question.question_hi) || '',
+          question_text: sanitized.question_text,
+          question_hi: sanitized.question_hi,
           option_a: parsed.option_a || question.option_a || 'Option A',
           option_b: parsed.option_b || question.option_b || 'Option B',
           option_c: parsed.option_c || question.option_c || 'Option C',
@@ -2403,13 +2510,14 @@ Return strict JSON matching the schema.
 3. NEVER leave placeholders like "Not clearly visible in text (Incomplete)", "Incomplete", "___".
 4. Generate a comprehensive Hindi explanation (व्याख्या) detailing व्याकरण नियम और सही विकल्प का कारण।`
               : `TARGET: DUAL LANGUAGE (English + Hindi / Devanagari).
-1. DUAL LANGUAGE QUESTION TEXT:
-   - Provide BOTH English statement AND accurate Devanagari Hindi translation separated by a newline ('\\n').
-   - Fix all OCR-mangled Devanagari ligatures into clean Hindi.
-2. QUESTION_HI:
-   - Standalone clean, grammatically perfect Hindi question.
+1. "question_text" (STRICTLY ENGLISH ONLY):
+   - Write ONLY the clean, crystal-clear English question statement in "question_text".
+   - CRITICAL: DO NOT merge, append, or mix Hindi/Devanagari text inside "question_text"! It must contain pure English words only.
+2. "question_hi" (STRICTLY PURE DEVANAGARI HINDI ONLY):
+   - Write the complete, pure Devanagari Hindi translation in "question_hi".
+   - Replace any old, broken, missing, or merged Hindi translation with a fresh, grammatically perfect Devanagari translation.
 3. 4 COMPLETE BILINGUAL OPTIONS:
-   - All 4 options (A, B, C, D) MUST be complete in bilingual format: "English Term / हिन्दी शब्द".
+   - All 4 options (A, B, C, D) MUST be complete in bilingual format: "English Term / हिन्दी शब्द" (e.g. "Kidney / गुर्दा").
    - NEVER leave placeholders like "Not clearly visible in text (Incomplete)", "Incomplete", "___". Synthesize distractors if missing.
 4. COMPREHENSIVE BILINGUAL EXPLANATION:
    - Generate a detailed, step-by-step bilingual explanation in BOTH English and Hindi (व्याख्या).`;
@@ -2505,10 +2613,15 @@ Return strict JSON array with converted objects matching schema.
           const converted = chunkResults.find((r) => r.index === cIdx) || chunkResults[cIdx];
           if (converted) {
             const validKey = normalizeAnswerKey(converted.correct_answer, normalizeAnswerKey(origQ.correct_answer, 'A'));
+            const sanitized = sanitizeBilingualQuestionFields(
+              converted.question_text || origQ.question_text,
+              converted.question_hi || (isEnglish ? '' : origQ.question_hi),
+              languageMode
+            );
             results.push({
               ...origQ,
-              question_text: converted.question_text || origQ.question_text,
-              question_hi: converted.question_hi || (isEnglish ? '' : converted.question_text || origQ.question_hi || ''),
+              question_text: sanitized.question_text,
+              question_hi: sanitized.question_hi,
               option_a: converted.option_a || origQ.option_a,
               option_b: converted.option_b || origQ.option_b,
               option_c: converted.option_c || origQ.option_c,
@@ -2517,9 +2630,15 @@ Return strict JSON array with converted objects matching schema.
               explanation: converted.explanation || origQ.explanation || `Option ${validKey} is the correct answer.`,
             });
           } else {
+            const fallbackSanitized = sanitizeBilingualQuestionFields(
+              origQ.question_text,
+              origQ.question_hi,
+              languageMode
+            );
             results.push({
               ...origQ,
-              question_hi: origQ.question_hi || (isEnglish ? '' : origQ.question_text),
+              question_text: fallbackSanitized.question_text,
+              question_hi: fallbackSanitized.question_hi,
             });
           }
         });
@@ -2527,9 +2646,15 @@ Return strict JSON array with converted objects matching schema.
         console.error(`Error during enrichment for chunk ${startIdx}-${endIdx}:`, err);
         // Fallback: clean up formatting and retain original questions
         chunk.forEach((origQ) => {
+          const fallbackSanitized = sanitizeBilingualQuestionFields(
+            origQ.question_text,
+            origQ.question_hi,
+            languageMode
+          );
           results.push({
             ...origQ,
-            question_hi: origQ.question_hi || (isEnglish ? '' : origQ.question_text),
+            question_text: fallbackSanitized.question_text,
+            question_hi: fallbackSanitized.question_hi,
           });
         });
       }
