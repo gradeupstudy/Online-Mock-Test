@@ -55,7 +55,7 @@ import {
   getCanonicalChaptersForSubject
 } from '../../utils/taxonomyCanonicalizer';
 import { dataService, parseSafeNumber, generateUUID, syncToQuestionBankMaster } from '../../services/dataService';
-import { aiService } from '../../services/aiService';
+import { aiService, sanitizeBilingualQuestionFields } from '../../services/aiService';
 import { Test, Question } from '../../types';
 
 interface CompletePDFImportModalProps {
@@ -396,10 +396,15 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
         targetIndices.forEach((origIdx, cIdx) => {
           const conv = convertedResults[cIdx];
           if (conv) {
+            const sanitized = sanitizeBilingualQuestionFields(
+              conv.question_text || updated[origIdx].question_text,
+              conv.question_hi,
+              'bilingual'
+            );
             updated[origIdx] = {
               ...updated[origIdx],
-              question_text: conv.question_text || updated[origIdx].question_text,
-              question_hi: conv.question_hi || updated[origIdx].question_hi || '',
+              question_text: sanitized.question_text,
+              question_hi: sanitized.question_hi || '',
               option_a: conv.option_a || updated[origIdx].option_a,
               option_b: conv.option_b || updated[origIdx].option_b,
               option_c: conv.option_c || updated[origIdx].option_c,
@@ -428,14 +433,20 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
     try {
       setConvertingSingleIdx(idx);
       notify('info', `Translating Q${q.question_number} to Dual Language (English + Hindi)...`);
-      const res = await aiService.convertSingleToDualLanguage(q);
+      const sanitizedInput = sanitizeBilingualQuestionFields(q.question_text, q.question_hi, 'bilingual');
+      const res = await aiService.convertSingleToDualLanguage({
+        ...q,
+        question_text: sanitizedInput.question_text,
+        question_hi: sanitizedInput.question_hi,
+      }, 'bilingual');
+      const sanitizedRes = sanitizeBilingualQuestionFields(res.question_text || q.question_text, res.question_hi, 'bilingual');
       setExtractedQuestions((prev) =>
         prev.map((item, i) =>
           i === idx
             ? {
                 ...item,
-                question_text: res.question_text,
-                question_hi: res.question_hi,
+                question_text: sanitizedRes.question_text,
+                question_hi: sanitizedRes.question_hi,
                 option_a: res.option_a,
                 option_b: res.option_b,
                 option_c: res.option_c,
@@ -461,11 +472,17 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
     try {
       setIsConvertingDraft(true);
       notify('info', 'Translating question draft to Dual Language...');
-      const res = await aiService.convertSingleToDualLanguage(editingDraft);
+      const sanitizedInput = sanitizeBilingualQuestionFields(editingDraft.question_text, editingDraft.question_hi, 'bilingual');
+      const res = await aiService.convertSingleToDualLanguage({
+        ...editingDraft,
+        question_text: sanitizedInput.question_text,
+        question_hi: sanitizedInput.question_hi,
+      }, 'bilingual');
+      const sanitizedRes = sanitizeBilingualQuestionFields(res.question_text || editingDraft.question_text, res.question_hi, 'bilingual');
       setEditingDraft({
         ...editingDraft,
-        question_text: res.question_text,
-        question_hi: res.question_hi,
+        question_text: sanitizedRes.question_text,
+        question_hi: sanitizedRes.question_hi,
         option_a: res.option_a,
         option_b: res.option_b,
         option_c: res.option_c,

@@ -1565,10 +1565,26 @@ export function normalizeQuestionTaxonomy(question: {
 }
 
 /**
- * Retrieves list of all canonical subjects for dropdown selectors.
+ * Retrieves list of all canonical subjects for dropdown selectors,
+ * combining canonical subjects with custom master subjects saved by admin.
  */
 export function getAllCanonicalSubjectNames(): string[] {
-  return MASTER_CANONICAL_TAXONOMY.map((s) => s.name);
+  const defaultList = MASTER_CANONICAL_TAXONOMY.map((s) => s.name);
+  let customSubjects: string[] = [];
+  try {
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('gradeup_master_subjects') : null;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        customSubjects = parsed.filter(Boolean);
+      }
+    }
+  } catch {}
+
+  const set = new Set<string>();
+  defaultList.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+  customSubjects.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+  return Array.from(set).sort((a, b) => a.localeCompare(b));
 }
 
 /**

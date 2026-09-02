@@ -1,6 +1,7 @@
 import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus, QuestionReport, ReportStatus, PracticeMode, PRIMARY_PRACTICE_MODES, PracticeModeConfig } from '../types';
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
+import { idbStorage } from '../utils/idbStorage';
 
 /**
  * Canonical Broad Subject Identifiers (mixed topics)
@@ -226,10 +227,14 @@ const STORAGE_KEYS = {
   ACTIVE_ATTEMPT: 'gradeup_active_attempt_',
   REPORTS: 'gradeup_question_reports',
   MASTER_CATEGORIES: 'gradeup_master_categories',
-  MASTER_SUBJECTS: 'gradeup_master_subjects'
+  MASTER_SUBJECTS: 'gradeup_master_subjects',
+  MASTER_SECTIONS: 'gradeup_master_sections'
 };
 
 export const DEFAULT_MASTER_CATEGORIES: string[] = [
+  'Section / Subject Practice',
+  'Topic Wise Practice',
+  'All Competitive Exams',
   'HP Police Constable',
   'HP Police SI',
   'HP Forest Guard',
@@ -247,18 +252,20 @@ export const DEFAULT_MASTER_CATEGORIES: string[] = [
   'Railways RRB NTPC / Group D',
   'Banking IBPS / SBI PO & Clerk',
   'State PSC Exams',
+  'Himachal Pradesh GK',
   'General Studies & Mock Tests'
 ];
 
 export const DEFAULT_MASTER_SUBJECTS: string[] = [
-  'General Studies (GK)',
-  'Himachal Pradesh GK & Current Affairs',
+  'General Science',
+  'General Knowledge',
+  'General Studies',
+  'Himachal Pradesh GK',
   'HP History, Geography & Culture',
   'Indian Polity & Constitution',
   'Indian History & National Movement',
   'Geography of India & World',
   'Indian Economy & Budget',
-  'General Science (Physics, Chemistry, Biology)',
   'Logical Reasoning & Mental Ability',
   'Quantitative Aptitude & Mathematics',
   'English Language & Grammar',
@@ -267,6 +274,21 @@ export const DEFAULT_MASTER_SUBJECTS: string[] = [
   'Environment, Ecology & Biodiversity',
   'National & International Current Affairs',
   'Teaching Aptitude & Pedagogy'
+];
+
+export const DEFAULT_MASTER_SECTIONS: string[] = [
+  'General Knowledge',
+  'General Science',
+  'General Studies',
+  'Reasoning Ability',
+  'Quantitative Aptitude',
+  'General English',
+  'General Hindi',
+  'Himachal Pradesh GK',
+  'Current Affairs',
+  'Computer Knowledge',
+  'Section / Subject Practice',
+  'General'
 ];
 
 /**
@@ -470,7 +492,13 @@ export const syncToQuestionBankMaster = (questionsToSync: Question[]): void => {
       if (fp) fingerprintMap.set(fp, targetId);
     });
 
-    localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(Array.from(bankMap.values())));
+    const updatedList = Array.from(bankMap.values());
+    try {
+      localStorage.setItem(STORAGE_KEYS.QUESTION_BANK, JSON.stringify(updatedList));
+    } catch (lsErr) {
+      console.warn('localStorage quota reached for Question Bank; persisting safely in IndexedDB:', lsErr);
+    }
+    idbStorage.set(STORAGE_KEYS.QUESTION_BANK, updatedList);
   } catch (e) {
     console.warn('Failed to sync to Question Bank Master:', e);
   }
@@ -1019,7 +1047,7 @@ export const dataService = {
   },
 
   // ------------------------------------
-  // MASTER CATEGORIES & SUBJECTS SYSTEM
+  // MASTER CATEGORIES, SUBJECTS & SECTIONS SYSTEM
   // ------------------------------------
   getMasterCategories: (): string[] => {
     let savedCats: string[] = [];
@@ -1051,7 +1079,7 @@ export const dataService = {
       testCats.forEach(c => { if (c && c.trim()) set.add(c.trim()); });
     }
 
-    return Array.from(set);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   },
 
   saveMasterCategory: async (categoryName: string): Promise<string[]> => {
@@ -1060,7 +1088,10 @@ export const dataService = {
     const existing = [...dataService.getMasterCategories()];
     if (!existing.some(c => c.toLowerCase() === name.toLowerCase())) {
       existing.unshift(name);
-      localStorage.setItem(STORAGE_KEYS.MASTER_CATEGORIES, JSON.stringify(existing));
+      try {
+        localStorage.setItem(STORAGE_KEYS.MASTER_CATEGORIES, JSON.stringify(existing));
+      } catch {}
+      idbStorage.set(STORAGE_KEYS.MASTER_CATEGORIES, existing);
     }
     return existing;
   },
@@ -1068,7 +1099,10 @@ export const dataService = {
   deleteMasterCategory: async (categoryName: string): Promise<string[]> => {
     const current = dataService.getMasterCategories();
     const updated = current.filter(c => c.toLowerCase() !== categoryName.toLowerCase());
-    localStorage.setItem(STORAGE_KEYS.MASTER_CATEGORIES, JSON.stringify(updated));
+    try {
+      localStorage.setItem(STORAGE_KEYS.MASTER_CATEGORIES, JSON.stringify(updated));
+    } catch {}
+    idbStorage.set(STORAGE_KEYS.MASTER_CATEGORIES, updated);
     return updated;
   },
 
@@ -1081,7 +1115,7 @@ export const dataService = {
       }
     } catch {}
 
-    // Combine with subjects from Question Bank Master & default standard subjects
+    // Combine with subjects from Question Bank Master, Tests & default standard subjects
     let bankSubs: string[] = [];
     try {
       const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
@@ -1089,6 +1123,17 @@ export const dataService = {
         const bank = JSON.parse(rawBank);
         if (Array.isArray(bank)) {
           bankSubs = bank.map(q => (q.subject || '').trim()).filter(Boolean);
+        }
+      }
+    } catch {}
+
+    let testSubs: string[] = [];
+    try {
+      const rawTests = localStorage.getItem(STORAGE_KEYS.TESTS);
+      if (rawTests) {
+        const tests = JSON.parse(rawTests);
+        if (Array.isArray(tests)) {
+          testSubs = tests.map(t => (t.subject || '').trim()).filter(Boolean);
         }
       }
     } catch {}
@@ -1101,8 +1146,11 @@ export const dataService = {
     if (Array.isArray(bankSubs)) {
       bankSubs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
     }
+    if (Array.isArray(testSubs)) {
+      testSubs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
 
-    return Array.from(set);
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
   },
 
   saveMasterSubject: async (subjectName: string): Promise<string[]> => {
@@ -1111,7 +1159,10 @@ export const dataService = {
     const existing = [...dataService.getMasterSubjects()];
     if (!existing.some(s => s.toLowerCase() === name.toLowerCase())) {
       existing.unshift(name);
-      localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(existing));
+      try {
+        localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(existing));
+      } catch {}
+      idbStorage.set(STORAGE_KEYS.MASTER_SUBJECTS, existing);
     }
     return existing;
   },
@@ -1119,7 +1170,88 @@ export const dataService = {
   deleteMasterSubject: async (subjectName: string): Promise<string[]> => {
     const current = dataService.getMasterSubjects();
     const updated = current.filter(s => s.toLowerCase() !== subjectName.toLowerCase());
-    localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(updated));
+    try {
+      localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(updated));
+    } catch {}
+    idbStorage.set(STORAGE_KEYS.MASTER_SUBJECTS, updated);
+    return updated;
+  },
+
+  getMasterSections: (): string[] => {
+    let savedSections: string[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.MASTER_SECTIONS);
+      if (raw) {
+        savedSections = JSON.parse(raw);
+      }
+    } catch {}
+
+    // Combine with sections from Tests & Questions
+    let testSections: string[] = [];
+    try {
+      const rawTests = localStorage.getItem(STORAGE_KEYS.TESTS);
+      if (rawTests) {
+        const tests = JSON.parse(rawTests);
+        if (Array.isArray(tests)) {
+          tests.forEach(t => {
+            if (Array.isArray(t.sections)) {
+              t.sections.forEach((sec: any) => {
+                const secName = typeof sec === 'string' ? sec : (sec?.name || sec?.title || '');
+                if (secName && secName.trim()) testSections.push(secName.trim());
+              });
+            }
+          });
+        }
+      }
+    } catch {}
+
+    let questionSections: string[] = [];
+    try {
+      const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+      if (rawBank) {
+        const bank = JSON.parse(rawBank);
+        if (Array.isArray(bank)) {
+          questionSections = bank.map(q => (q.section || '').trim()).filter(Boolean);
+        }
+      }
+    } catch {}
+
+    const set = new Set<string>();
+    DEFAULT_MASTER_SECTIONS.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    if (Array.isArray(savedSections)) {
+      savedSections.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
+    if (Array.isArray(testSections)) {
+      testSections.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
+    if (Array.isArray(questionSections)) {
+      questionSections.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
+
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  },
+
+  saveMasterSection: async (sectionName: string): Promise<string[]> => {
+    const name = sectionName.trim();
+    if (!name) return dataService.getMasterSections();
+    const existing = [...dataService.getMasterSections()];
+    if (!existing.some(s => s.toLowerCase() === name.toLowerCase())) {
+      existing.unshift(name);
+      try {
+        localStorage.setItem(STORAGE_KEYS.MASTER_SECTIONS, JSON.stringify(existing));
+      } catch {}
+      idbStorage.set(STORAGE_KEYS.MASTER_SECTIONS, existing);
+    }
+    return existing;
+  },
+
+  deleteMasterSection: async (sectionName: string): Promise<string[]> => {
+    const current = dataService.getMasterSections();
+    const updated = current.filter(s => s.toLowerCase() !== sectionName.toLowerCase());
+    try {
+      localStorage.setItem(STORAGE_KEYS.MASTER_SECTIONS, JSON.stringify(updated));
+    } catch {}
+    idbStorage.set(STORAGE_KEYS.MASTER_SECTIONS, updated);
     return updated;
   },
 
@@ -2250,7 +2382,7 @@ export const dataService = {
       }
     } catch {}
 
-    // 1. Load Question Bank Master pool from cache immediately
+    // 1. Load Question Bank Master pool from cache / IndexedDB immediately
     const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
     let masterBank: Question[] = [];
     try {
@@ -2258,6 +2390,15 @@ export const dataService = {
       if (!Array.isArray(masterBank)) masterBank = [];
     } catch {
       masterBank = [];
+    }
+
+    if (masterBank.length === 0) {
+      try {
+        const idbBank = await idbStorage.get<Question[]>(STORAGE_KEYS.QUESTION_BANK);
+        if (Array.isArray(idbBank) && idbBank.length > 0) {
+          masterBank = idbBank;
+        }
+      } catch {}
     }
 
     const bankMap = new Map<string, Question>();

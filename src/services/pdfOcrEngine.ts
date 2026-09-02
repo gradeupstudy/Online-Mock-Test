@@ -344,46 +344,82 @@ export const pdfOcrEngine = {
       }
     }
 
-    const allExtractedQuestions: ExtractedPDFMCQ[] = [];
     const chunkCount = chunkPageBatches.length;
+    const chunkResults: ExtractedPDFMCQ[][] = new Array(chunkCount).fill(null).map(() => []);
+    const OCR_CONCURRENCY = 3;
+    let completedChunks = 0;
+    let totalQuestionsFound = 0;
 
-    onLog?.(`🚀 Commencing Document OCR Understanding across ${pages.length} pages in ${chunkCount} overlapping page batches with cross-page question stitching...`);
+    onLog?.(`🚀 Commencing High-Throughput Document OCR Understanding across ${pages.length} pages in ${chunkCount} overlapping page batches (Concurrency: ${OCR_CONCURRENCY})...`);
 
-    for (let cIdx = 0; cIdx < chunkCount; cIdx++) {
-      const chunkPages = chunkPageBatches[cIdx];
+    const processSingleBatch = async (batchIdx: number) => {
+      const chunkPages = chunkPageBatches[batchIdx];
       const startP = chunkPages[0].pageNumber;
       const endP = chunkPages[chunkPages.length - 1].pageNumber;
 
-      const progressPct = 40 + Math.round(((cIdx + 1) / chunkCount) * 50);
+      let attempts = 0;
+      const maxAttempts = 3;
+      let success = false;
 
+      while (attempts < maxAttempts && !success) {
+        attempts++;
+        try {
+          onLog?.(`🔄 [Batch ${batchIdx + 1}/${chunkCount}] Processing Pages ${startP}–${endP}...`);
+          const chunkMCQs = await pdfOcrEngine.processPageChunk({
+            pages: chunkPages,
+            globalAnswerKeyMap,
+            taxonomyMode,
+            defaultSubject,
+            defaultChapter,
+            defaultTopic,
+            standardizeTaxonomy,
+            languageMode,
+            onLog,
+          });
+
+          chunkResults[batchIdx] = chunkMCQs;
+          totalQuestionsFound += chunkMCQs.length;
+          success = true;
+          onLog?.(`✨ [Batch ${batchIdx + 1}/${chunkCount}] Successfully extracted ${chunkMCQs.length} MCQs from Pages ${startP}–${endP}!`);
+        } catch (chunkErr: any) {
+          if (attempts < maxAttempts) {
+            onLog?.(`⚠️ [Batch ${batchIdx + 1}] Retrying attempt ${attempts + 1}/${maxAttempts} for Pages ${startP}–${endP}...`);
+            await new Promise((res) => setTimeout(res, 1500 * attempts));
+          } else {
+            onLog?.(`❌ [Batch ${batchIdx + 1} Failed] Could not parse Pages ${startP}–${endP}: ${chunkErr?.message || chunkErr}. Continuing with other batches.`);
+          }
+        }
+      }
+
+      completedChunks++;
+      const progressPct = 40 + Math.round((completedChunks / chunkCount) * 50);
       onProgress?.({
         currentPage: endP,
         totalPages: totalDocPages,
-        questionsFound: allExtractedQuestions.length,
+        questionsFound: totalQuestionsFound,
         phase: 'ocr_chunk_processing',
-        statusMessage: `Processing Pages ${startP} to ${endP} of ${totalDocPages} (${allExtractedQuestions.length} MCQs found so far)...`,
+        statusMessage: `Processed ${completedChunks} of ${chunkCount} page batches (${totalQuestionsFound} MCQs found so far)...`,
         percentage: progressPct,
       });
+    };
 
-      onLog?.(`🔄 [Batch ${cIdx + 1}/${chunkCount}] Processing Pages ${startP}–${endP}...`);
+    let nextBatchIdx = 0;
+    const worker = async () => {
+      while (nextBatchIdx < chunkCount) {
+        const cur = nextBatchIdx++;
+        if (cur < chunkCount) {
+          await processSingleBatch(cur);
+        }
+      }
+    };
 
-      try {
-        const chunkMCQs = await pdfOcrEngine.processPageChunk({
-          pages: chunkPages,
-          globalAnswerKeyMap,
-          taxonomyMode,
-          defaultSubject,
-          defaultChapter,
-          defaultTopic,
-          standardizeTaxonomy,
-          languageMode,
-          onLog,
-        });
+    const workers = Array.from({ length: Math.min(OCR_CONCURRENCY, chunkCount) }, () => worker());
+    await Promise.all(workers);
 
-        onLog?.(`✨ [Batch ${cIdx + 1}/${chunkCount}] Successfully extracted ${chunkMCQs.length} MCQs from Pages ${startP}–${endP}!`);
-        allExtractedQuestions.push(...chunkMCQs);
-      } catch (chunkErr: any) {
-        onLog?.(`⚠️ [Batch ${cIdx + 1} Warning] Error processing Pages ${startP}–${endP}: ${chunkErr?.message || chunkErr}. Continuing next batch...`);
+    const allExtractedQuestions: ExtractedPDFMCQ[] = [];
+    for (const res of chunkResults) {
+      if (Array.isArray(res) && res.length > 0) {
+        allExtractedQuestions.push(...res);
       }
     }
 

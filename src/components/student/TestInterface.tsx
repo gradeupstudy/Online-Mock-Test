@@ -446,10 +446,25 @@ export const TestInterface: React.FC<TestInterfaceProps> = ({
               </div>
 
               {/* Question Statement */}
-              <div className={`text-slate-900 dark:text-white font-bold leading-relaxed whitespace-pre-line ${
-                fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
-              }`}>
-                {currentQuestion.question_text}
+              <div className="space-y-2">
+                <div className={`text-slate-900 dark:text-white font-bold leading-relaxed whitespace-pre-line ${
+                  fontSize === 'sm' ? 'text-sm' : fontSize === 'lg' ? 'text-lg sm:text-xl' : 'text-base sm:text-lg'
+                }`}>
+                  {currentQuestion.question_text}
+                </div>
+
+                {currentQuestion.question_hi && currentQuestion.question_hi !== currentQuestion.question_text && (
+                  <div className="p-3 rounded-2xl bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-800/40 space-y-1">
+                    <span className="inline-block px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider">
+                      हिन्दी अनुवाद
+                    </span>
+                    <p className={`font-semibold text-purple-950 dark:text-purple-200 leading-relaxed whitespace-pre-line ${
+                      fontSize === 'sm' ? 'text-xs' : fontSize === 'lg' ? 'text-base' : 'text-sm'
+                    }`}>
+                      {currentQuestion.question_hi}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Question Diagram / Image (e.g. Reasoning, Mirror/Water image, Geometry) */}

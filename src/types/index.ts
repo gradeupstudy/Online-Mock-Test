@@ -146,6 +146,7 @@ export interface Question {
   test_id: string;
   question_number: number;
   question_text: string;
+  question_hi?: string | null;
   question_image?: string | null;
   option_a: string;
   option_a_image?: string | null;

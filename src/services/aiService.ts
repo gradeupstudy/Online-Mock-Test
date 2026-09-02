@@ -2461,55 +2461,68 @@ Return strict JSON matching the schema.
     const isEnglish = languageMode === 'english';
     const isHindi = languageMode === 'hindi';
 
-    const CHUNK_SIZE = 5; // 5 MCQs per chunk for fast, high-quality translation & explanation
-    const results: Array<T & { question_hi: string }> = [];
-    let processedCount = 0;
-
+    const CHUNK_SIZE = 12; // 12 MCQs per chunk for ultra-high throughput up to 5000+ MCQs
+    const CONCURRENCY = 3; // 3 parallel chunk workers running concurrently
     const modeLabel = isEnglish ? 'English Explanations & Options' : isHindi ? 'Hindi Explanations & Options' : 'Dual Language (EN + HI)';
 
-    onProgress?.(0, total, `🌐 Starting ${modeLabel} pre-enrichment for ${total} MCQs...`);
+    onProgress?.(0, total, `🌐 Starting high-speed ${modeLabel} pre-enrichment for ${total} MCQs...`);
 
+    // Prepare all chunk descriptors
+    const chunks: Array<{ chunk: T[]; startIdx: number; endIdx: number; chunkIndex: number }> = [];
     for (let i = 0; i < total; i += CHUNK_SIZE) {
-      const chunk = questions.slice(i, i + CHUNK_SIZE);
-      const startIdx = i + 1;
-      const endIdx = Math.min(i + CHUNK_SIZE, total);
+      const slice = questions.slice(i, i + CHUNK_SIZE);
+      chunks.push({
+        chunk: slice,
+        startIdx: i + 1,
+        endIdx: Math.min(i + CHUNK_SIZE, total),
+        chunkIndex: Math.floor(i / CHUNK_SIZE),
+      });
+    }
 
-      onProgress?.(
-        processedCount,
-        total,
-        `🌐 Setting up ${modeLabel} for MCQs #${startIdx}-${endIdx} of ${total}...`
-      );
+    const chunkResultsArray: Array<Array<T & { question_hi: string }>> = new Array(chunks.length);
+    let completedQuestionsCount = 0;
 
-      try {
-        const chunkResults = await aiService.executeWithKeyRotation<
-          Array<{
-            index: number;
-            question_text: string;
-            question_hi: string;
-            option_a: string;
-            option_b: string;
-            option_c: string;
-            option_d: string;
-            correct_answer: string;
-            explanation: string;
-          }>
-        >(
-          `${modeLabel} Setup (${startIdx}-${endIdx})`,
-          (msg) => onProgress?.(processedCount, total, msg),
-          async (ai) => {
-            const batchLangMandates = isEnglish
-              ? `TARGET: STRICTLY ENGLISH ONLY (English Subject: Grammar / Vocabulary / Comprehension / Idioms).
+    // Helper to process a single chunk with retry
+    const processSingleChunk = async (chunkItem: (typeof chunks)[0]) => {
+      const { chunk, startIdx, endIdx, chunkIndex } = chunkItem;
+      const chunkEnriched: Array<T & { question_hi: string }> = [];
+
+      let attempts = 0;
+      const maxAttempts = 3;
+      let success = false;
+
+      while (attempts < maxAttempts && !success) {
+        attempts++;
+        try {
+          const rawChunkResults = await aiService.executeWithKeyRotation<
+            Array<{
+              index: number;
+              question_text: string;
+              question_hi: string;
+              option_a: string;
+              option_b: string;
+              option_c: string;
+              option_d: string;
+              correct_answer: string;
+              explanation: string;
+            }>
+          >(
+            `${modeLabel} Setup (${startIdx}-${endIdx})`,
+            (msg) => onProgress?.(completedQuestionsCount, total, msg),
+            async (ai) => {
+              const batchLangMandates = isEnglish
+                ? `TARGET: STRICTLY ENGLISH ONLY (English Subject: Grammar / Vocabulary / Comprehension / Idioms).
 1. Keep the Question Text strictly in pristine English. Set "question_hi": "". DO NOT translate into Hindi!
 2. All 4 Options (A, B, C, D) MUST be strictly in English (e.g. "Mitochondria", NOT "Mitochondria / माइटोकॉन्ड्रिया").
 3. NEVER leave placeholders like "Not clearly visible in text (Incomplete)", "Incomplete", "___". Synthesize complete distractors if needed.
 4. Generate a comprehensive English explanation explaining the grammatical rule, vocabulary meaning, or concept.`
-              : isHindi
-              ? `TARGET: STRICTLY HINDI ONLY (हिन्दी विषय: व्याकरण / शब्दावली / साहित्य / संधि / समास / विलोम).
+                : isHindi
+                ? `TARGET: STRICTLY HINDI ONLY (हिन्दी विषय: व्याकरण / शब्दावली / साहित्य / संधि / समास / विलोम).
 1. Keep the Question Text and "question_hi" strictly in pure Devanagari Hindi. DO NOT translate into English!
 2. All 4 Options (A, B, C, D) MUST be strictly in pure Hindi (e.g. "माइटोकॉन्ड्रिया", "संज्ञा").
 3. NEVER leave placeholders like "Not clearly visible in text (Incomplete)", "Incomplete", "___".
 4. Generate a comprehensive Hindi explanation (व्याख्या) detailing व्याकरण नियम और सही विकल्प का कारण।`
-              : `TARGET: DUAL LANGUAGE (English + Hindi / Devanagari).
+                : `TARGET: DUAL LANGUAGE (English + Hindi / Devanagari).
 1. "question_text" (STRICTLY ENGLISH ONLY):
    - Write ONLY the clean, crystal-clear English question statement in "question_text".
    - CRITICAL: DO NOT merge, append, or mix Hindi/Devanagari text inside "question_text"! It must contain pure English words only.
@@ -2522,7 +2535,7 @@ Return strict JSON matching the schema.
 4. COMPREHENSIVE BILINGUAL EXPLANATION:
    - Generate a detailed, step-by-step bilingual explanation in BOTH English and Hindi (व्याख्या).`;
 
-            const promptText = `
+              const promptText = `
 You are a Lead Exam Board Translator, Chief Editor & Master Academic Question Setter.
 Transform and enrich the following ${chunk.length} raw Multiple Choice Questions.
 
@@ -2554,117 +2567,148 @@ Subject: ${q.subject || 'General Studies'} | Chapter: ${q.chapter || 'General'}
 Return strict JSON array with converted objects matching schema.
 `.trim();
 
-            const response = await aiService.generateWithModelFallback(
-              ai,
-              {
-                contents: promptText,
-                config: {
-                  responseMimeType: 'application/json',
-                  responseSchema: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        index: { type: Type.INTEGER },
-                        question_text: { type: Type.STRING },
-                        question_hi: { type: Type.STRING },
-                        option_a: { type: Type.STRING },
-                        option_b: { type: Type.STRING },
-                        option_c: { type: Type.STRING },
-                        option_d: { type: Type.STRING },
-                        correct_answer: { type: Type.STRING },
-                        explanation: { type: Type.STRING },
+              const response = await aiService.generateWithModelFallback(
+                ai,
+                {
+                  contents: promptText,
+                  config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          index: { type: Type.INTEGER },
+                          question_text: { type: Type.STRING },
+                          question_hi: { type: Type.STRING },
+                          option_a: { type: Type.STRING },
+                          option_b: { type: Type.STRING },
+                          option_c: { type: Type.STRING },
+                          option_d: { type: Type.STRING },
+                          correct_answer: { type: Type.STRING },
+                          explanation: { type: Type.STRING },
+                        },
+                        required: [
+                          'index',
+                          'question_text',
+                          'question_hi',
+                          'option_a',
+                          'option_b',
+                          'option_c',
+                          'option_d',
+                          'correct_answer',
+                          'explanation',
+                        ],
                       },
-                      required: [
-                        'index',
-                        'question_text',
-                        'question_hi',
-                        'option_a',
-                        'option_b',
-                        'option_c',
-                        'option_d',
-                        'correct_answer',
-                        'explanation',
-                      ],
                     },
                   },
                 },
-              },
-              (msg) => onProgress?.(processedCount, total, msg),
-              `Bulk ${modeLabel} (${startIdx}-${endIdx})`
-            );
+                (msg) => onProgress?.(completedQuestionsCount, total, msg),
+                `Bulk ${modeLabel} (${startIdx}-${endIdx})`
+              );
 
-            const rawText = response.text || '';
-            let parsed: any;
-            try {
-              parsed = JSON.parse(rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, ''));
-            } catch {
-              const match = rawText.match(/\[\s*\{[\s\S]*\}\s*\]/);
-              if (match) parsed = JSON.parse(match[0]);
-              else throw new Error('Failed to parse bulk dual language JSON.');
+              const rawText = response.text || '';
+              let parsed: any;
+              try {
+                parsed = JSON.parse(rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/, ''));
+              } catch {
+                const match = rawText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+                if (match) parsed = JSON.parse(match[0]);
+                else throw new Error('Failed to parse bulk dual language JSON.');
+              }
+              if (!Array.isArray(parsed)) parsed = [parsed];
+              return parsed;
             }
-            if (!Array.isArray(parsed)) parsed = [parsed];
-            return parsed;
-          }
-        );
-
-        // Map converted items back to chunk
-        chunk.forEach((origQ, cIdx) => {
-          const converted = chunkResults.find((r) => r.index === cIdx) || chunkResults[cIdx];
-          if (converted) {
-            const validKey = normalizeAnswerKey(converted.correct_answer, normalizeAnswerKey(origQ.correct_answer, 'A'));
-            const sanitized = sanitizeBilingualQuestionFields(
-              converted.question_text || origQ.question_text,
-              converted.question_hi || (isEnglish ? '' : origQ.question_hi),
-              languageMode
-            );
-            results.push({
-              ...origQ,
-              question_text: sanitized.question_text,
-              question_hi: sanitized.question_hi,
-              option_a: converted.option_a || origQ.option_a,
-              option_b: converted.option_b || origQ.option_b,
-              option_c: converted.option_c || origQ.option_c,
-              option_d: converted.option_d || origQ.option_d,
-              correct_answer: validKey,
-              explanation: converted.explanation || origQ.explanation || `Option ${validKey} is the correct answer.`,
-            });
-          } else {
-            const fallbackSanitized = sanitizeBilingualQuestionFields(
-              origQ.question_text,
-              origQ.question_hi,
-              languageMode
-            );
-            results.push({
-              ...origQ,
-              question_text: fallbackSanitized.question_text,
-              question_hi: fallbackSanitized.question_hi,
-            });
-          }
-        });
-      } catch (err: any) {
-        console.error(`Error during enrichment for chunk ${startIdx}-${endIdx}:`, err);
-        // Fallback: clean up formatting and retain original questions
-        chunk.forEach((origQ) => {
-          const fallbackSanitized = sanitizeBilingualQuestionFields(
-            origQ.question_text,
-            origQ.question_hi,
-            languageMode
           );
-          results.push({
-            ...origQ,
-            question_text: fallbackSanitized.question_text,
-            question_hi: fallbackSanitized.question_hi,
+
+          // Map converted items back to chunk
+          chunk.forEach((origQ, cIdx) => {
+            const converted = rawChunkResults.find((r) => r.index === cIdx) || rawChunkResults[cIdx];
+            if (converted) {
+              const validKey = normalizeAnswerKey(converted.correct_answer, normalizeAnswerKey(origQ.correct_answer, 'A'));
+              const sanitized = sanitizeBilingualQuestionFields(
+                converted.question_text || origQ.question_text,
+                converted.question_hi || (isEnglish ? '' : origQ.question_hi),
+                languageMode
+              );
+              chunkEnriched.push({
+                ...origQ,
+                question_text: sanitized.question_text,
+                question_hi: sanitized.question_hi,
+                option_a: converted.option_a || origQ.option_a,
+                option_b: converted.option_b || origQ.option_b,
+                option_c: converted.option_c || origQ.option_c,
+                option_d: converted.option_d || origQ.option_d,
+                correct_answer: validKey,
+                explanation: converted.explanation || origQ.explanation || `Option ${validKey} is the correct answer.`,
+              });
+            } else {
+              const fallbackSanitized = sanitizeBilingualQuestionFields(
+                origQ.question_text,
+                origQ.question_hi,
+                languageMode
+              );
+              chunkEnriched.push({
+                ...origQ,
+                question_text: fallbackSanitized.question_text,
+                question_hi: fallbackSanitized.question_hi,
+              });
+            }
           });
-        });
+
+          success = true;
+        } catch (err) {
+          if (attempts < maxAttempts) {
+            await new Promise((res) => setTimeout(res, 1200 * attempts));
+          } else {
+            console.warn(`Enrichment fallback for chunk ${startIdx}-${endIdx}:`, err);
+            // Fallback: clean up formatting and retain original questions
+            chunk.forEach((origQ) => {
+              const fallbackSanitized = sanitizeBilingualQuestionFields(
+                origQ.question_text,
+                origQ.question_hi,
+                languageMode
+              );
+              chunkEnriched.push({
+                ...origQ,
+                question_text: fallbackSanitized.question_text,
+                question_hi: fallbackSanitized.question_hi,
+              });
+            });
+          }
+        }
       }
 
-      processedCount += chunk.length;
+      chunkResultsArray[chunkIndex] = chunkEnriched;
+      completedQuestionsCount += chunk.length;
       onProgress?.(
-        processedCount,
+        completedQuestionsCount,
         total,
-        `✅ ${modeLabel} set for ${processedCount} of ${total} MCQs (${Math.round((processedCount / total) * 100)}%)...`
+        `🌐 Processed ${completedQuestionsCount} of ${total} MCQs with ${modeLabel}...`
       );
+    };
+
+    // Execute concurrent workers across chunk queue
+    let nextChunkIndex = 0;
+    const worker = async () => {
+      while (nextChunkIndex < chunks.length) {
+        const currentIdx = nextChunkIndex++;
+        const item = chunks[currentIdx];
+        if (item) {
+          await processSingleChunk(item);
+        }
+      }
+    };
+
+    const workers = Array.from({ length: Math.min(CONCURRENCY, chunks.length) }, () => worker());
+    await Promise.all(workers);
+
+    // Flatten in strict original order
+    const results: Array<T & { question_hi: string }> = [];
+    for (const chunkEnriched of chunkResultsArray) {
+      if (Array.isArray(chunkEnriched)) {
+        results.push(...chunkEnriched);
+      }
     }
 
     onProgress?.(total, total, `🎉 All ${total} MCQs successfully enriched with complete options & explanations!`);

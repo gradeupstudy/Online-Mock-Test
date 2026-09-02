@@ -571,9 +571,22 @@ export const TestResult: React.FC<TestResultProps> = ({ attempt, onBackToHome, o
                     </div>
                   </div>
 
-                  <p className="font-bold text-slate-900 dark:text-white text-base leading-relaxed">
-                    {q.question_text}
-                  </p>
+                  <div className="space-y-2">
+                    <p className="font-bold text-slate-900 dark:text-white text-base leading-relaxed">
+                      {q.question_text}
+                    </p>
+
+                    {q.question_hi && q.question_hi !== q.question_text && (
+                      <div className="p-2.5 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-800/40 space-y-1">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider">
+                          हिन्दी अनुवाद
+                        </span>
+                        <p className="text-xs font-semibold text-purple-950 dark:text-purple-200 leading-relaxed">
+                          {q.question_hi}
+                        </p>
+                      </div>
+                    )}
+                  </div>
 
                   {/* Question Diagram / Image */}
                   {q.question_image && (

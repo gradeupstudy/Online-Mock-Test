@@ -334,9 +334,22 @@ export const AutomationFinalReview: React.FC<AutomationFinalReviewProps> = ({
                     </span>
                   </div>
 
-                  <p className="font-bold text-slate-900 dark:text-white text-sm">
-                    {q.question_text}
-                  </p>
+                  <div className="space-y-1.5">
+                    <p className="font-bold text-slate-900 dark:text-white text-sm">
+                      {q.question_text}
+                    </p>
+
+                    {q.question_hi && q.question_hi !== q.question_text && (
+                      <div className="p-2 rounded-xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-800/40">
+                        <span className="inline-block px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-900/60 text-purple-700 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider mb-1">
+                          हिन्दी अनुवाद
+                        </span>
+                        <p className="text-xs font-semibold text-purple-950 dark:text-purple-200">
+                          {q.question_hi}
+                        </p>
+                      </div>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-2 gap-2 pt-1">
                     <div className={`p-2 rounded-xl border ${q.correct_answer === 'A' ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 font-bold text-emerald-800 dark:text-emerald-200' : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'}`}>

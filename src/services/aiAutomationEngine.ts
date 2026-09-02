@@ -344,6 +344,7 @@ export function perform360MCQAudit(
     // Determine initial approval state: only pristine VALID questions are initially approved
     const isApprovedInitially = auditStatus === 'VALID';
 
+    const langMode = resolveQuestionLanguageMode(config, raw.subject);
     const sanitizedFields = sanitizeBilingualQuestionFields(
       qText,
       raw.question_hi,

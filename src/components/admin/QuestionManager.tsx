@@ -26,11 +26,13 @@ import {
   RefreshCw,
   AlertCircle,
   AlertTriangle,
-  Tag
+  Tag,
+  Languages,
+  Globe
 } from 'lucide-react';
 import { Test, Question } from '../../types';
 import { dataService, generateUUID, shuffleQuestionOptions, shuffleAndBalanceQuestions, parseSafeNumber, getQuestionMockTestUsages } from '../../services/dataService';
-import { aiService } from '../../services/aiService';
+import { aiService, sanitizeBilingualQuestionFields } from '../../services/aiService';
 import { Modal } from '../common/Modal';
 import { AIQuestionGeneratorModal } from './AIQuestionGeneratorModal';
 import { TextJsonImportModal } from './TextJsonImportModal';
@@ -94,6 +96,9 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
 
   // Selection states for batch actions on mock test questions
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<Set<string>>(new Set());
+  const [isConvertingDualLang, setIsConvertingDualLang] = useState(false);
+  const [convertingSingleQuestionId, setConvertingSingleQuestionId] = useState<string | null>(null);
+  const [dualLangProgress, setDualLangProgress] = useState<{ done: number; total: number; message: string } | null>(null);
   const [isGeneratingExplanationId, setIsGeneratingExplanationId] = useState<string | null>(null);
   const [isRegeneratingQuestionId, setIsRegeneratingQuestionId] = useState<string | null>(null);
   const [mutatingQuestion, setMutatingQuestion] = useState<Question | null>(null);
@@ -246,6 +251,118 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
       notify('success', `🔀 Shuffled & balanced options for all ${shuffled.length} MCQs!`);
     } catch (err: any) {
       notify('error', err?.message || 'Failed to shuffle options.');
+    }
+  };
+
+  // Bulk Dual Language conversion for selected or all questions
+  const handleBulkConvertToDualLanguage = async (onlySelected = false) => {
+    const targetIds = onlySelected ? selectedQuestionIds : new Set(questions.map(q => q.id));
+    if (targetIds.size === 0) {
+      notify('error', 'Please select at least 1 question to convert.');
+      return;
+    }
+
+    const targetQuestions = questions.filter(q => targetIds.has(q.id));
+    const sanitizedTargets = targetQuestions.map(q => {
+      const sanitized = sanitizeBilingualQuestionFields(q.question_text, q.question_hi, 'bilingual');
+      return {
+        ...q,
+        question_text: sanitized.question_text,
+        question_hi: sanitized.question_hi,
+      };
+    });
+
+    setIsConvertingDualLang(true);
+    setDualLangProgress({
+      done: 0,
+      total: sanitizedTargets.length,
+      message: `Starting Dual Language conversion for ${sanitizedTargets.length} MCQs...`
+    });
+
+    try {
+      const convertedResults = await aiService.bulkConvertToDualLanguageMCQs(
+        sanitizedTargets,
+        'bilingual',
+        (done, total, logMsg) => {
+          setDualLangProgress({ done, total, message: logMsg });
+        }
+      );
+
+      const resultMap = new Map<string, Question>();
+      convertedResults.forEach((conv, idx) => {
+        const orig = sanitizedTargets[idx];
+        if (orig) {
+          const sanitized = sanitizeBilingualQuestionFields(
+            conv.question_text || orig.question_text,
+            conv.question_hi,
+            'bilingual'
+          );
+          resultMap.set(orig.id, {
+            ...orig,
+            question_text: sanitized.question_text,
+            question_hi: sanitized.question_hi || '',
+            option_a: conv.option_a || orig.option_a,
+            option_b: conv.option_b || orig.option_b,
+            option_c: conv.option_c || orig.option_c,
+            option_d: conv.option_d || orig.option_d,
+            correct_answer: conv.correct_answer || orig.correct_answer,
+            explanation: conv.explanation || orig.explanation,
+          });
+        }
+      });
+
+      const updated = questions.map(q => resultMap.get(q.id) || q);
+      await dataService.saveQuestions(testId, updated);
+      setQuestions(updated);
+      notify('success', `🎉 Successfully converted ${convertedResults.length} MCQs into Dual Language (English + Hindi)!`);
+    } catch (err: any) {
+      console.error('Dual Language conversion error in QuestionManager:', err);
+      notify('error', err?.message || 'Failed to convert questions into Dual Language.');
+    } finally {
+      setIsConvertingDualLang(false);
+      setDualLangProgress(null);
+    }
+  };
+
+  // 1-Click single question Dual Language conversion
+  const handleSingleConvertToDualLanguage = async (q: Question) => {
+    try {
+      setConvertingSingleQuestionId(q.id);
+      notify('info', `Translating Q${q.question_number} to Dual Language (English + Hindi)...`);
+      const sanitizedInput = sanitizeBilingualQuestionFields(q.question_text, q.question_hi, 'bilingual');
+      const res = await aiService.convertSingleToDualLanguage({
+        ...q,
+        correct_answer: q.correct_answer || 'A',
+        question_text: sanitizedInput.question_text,
+        question_hi: sanitizedInput.question_hi,
+      }, 'bilingual');
+
+      const sanitizedRes = sanitizeBilingualQuestionFields(
+        res.question_text || q.question_text,
+        res.question_hi,
+        'bilingual'
+      );
+
+      const updatedQ: Question = {
+        ...q,
+        question_text: sanitizedRes.question_text,
+        question_hi: sanitizedRes.question_hi || '',
+        option_a: res.option_a || q.option_a,
+        option_b: res.option_b || q.option_b,
+        option_c: res.option_c || q.option_c,
+        option_d: res.option_d || q.option_d,
+        correct_answer: res.correct_answer || q.correct_answer,
+        explanation: res.explanation || q.explanation,
+      };
+
+      await dataService.saveQuestion(testId, updatedQ);
+      setQuestions(prev => prev.map(item => item.id === q.id ? updatedQ : item));
+      notify('success', `🎉 Converted Q${q.question_number} into Dual Language (English + Hindi)!`);
+    } catch (err: any) {
+      console.error('Failed to convert single question:', err);
+      notify('error', err?.message || 'Failed to convert question to Dual Language.');
+    } finally {
+      setConvertingSingleQuestionId(null);
     }
   };
 
@@ -541,6 +658,17 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             <span>AI Explanations (Bulk)</span>
           </button>
 
+          {/* DUAL LANGUAGE BULK CONVERT (ALL AT ONCE) */}
+          <button
+            onClick={() => handleBulkConvertToDualLanguage(false)}
+            disabled={isConvertingDualLang || questions.length === 0}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all cursor-pointer disabled:opacity-50"
+            title="Convert all MCQs in this test to clean Dual Language (English + Hindi separate fields)"
+          >
+            <Languages className="w-4 h-4 text-teal-200" />
+            <span>{isConvertingDualLang ? 'Converting...' : '🌐 Dual Language All'}</span>
+          </button>
+
           {/* SHUFFLE ALL OPTIONS (1-CLICK RANDOMIZE) */}
           <button
             onClick={handleShuffleAllTestOptions}
@@ -677,6 +805,16 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
               >
                 <Shuffle className="w-3.5 h-3.5" />
                 <span>Shuffle Options ({selectedQuestionIds.size})</span>
+              </button>
+
+              <button
+                onClick={() => handleBulkConvertToDualLanguage(true)}
+                disabled={isConvertingDualLang}
+                className="px-3.5 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                title="Convert selected questions to Dual Language (English + Hindi)"
+              >
+                <Languages className="w-3.5 h-3.5" />
+                <span>{isConvertingDualLang ? 'Converting...' : `Dual Language (${selectedQuestionIds.size})`}</span>
               </button>
 
               <button
@@ -1000,6 +1138,27 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
         </div>
       </div>
 
+      {/* Dual Language Conversion Live Progress Bar */}
+      {isConvertingDualLang && dualLangProgress && (
+        <div className="p-4 bg-teal-50 dark:bg-teal-950/40 rounded-2xl border border-teal-200 dark:border-teal-800 space-y-2 animate-in fade-in">
+          <div className="flex items-center justify-between text-xs font-bold text-teal-800 dark:text-teal-200">
+            <span className="flex items-center gap-1.5">
+              <Languages className="w-4 h-4 animate-spin text-teal-600" />
+              <span>{dualLangProgress.message}</span>
+            </span>
+            <span>
+              {dualLangProgress.done} / {dualLangProgress.total} ({Math.round((dualLangProgress.done / Math.max(1, dualLangProgress.total)) * 100)}%)
+            </span>
+          </div>
+          <div className="w-full bg-teal-200 dark:bg-teal-900 rounded-full h-2.5 overflow-hidden">
+            <div
+              className="bg-teal-600 h-2.5 rounded-full transition-all duration-300"
+              style={{ width: `${(dualLangProgress.done / Math.max(1, dualLangProgress.total)) * 100}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Questions List */}
       <div className="space-y-4">
         {filteredQuestions.map((q) => (
@@ -1100,6 +1259,21 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
               </div>
 
               <div className="flex items-center gap-1 shrink-0">
+                {/* 1-Click Dual Language Convert */}
+                <button
+                  onClick={() => handleSingleConvertToDualLanguage(q)}
+                  disabled={convertingSingleQuestionId === q.id}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border flex items-center gap-1 cursor-pointer disabled:opacity-50 transition-all shadow-xs mr-1 ${
+                    q.question_hi
+                      ? 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800 hover:bg-teal-100'
+                      : 'bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  }`}
+                  title={q.question_hi ? "Re-translate / update Hindi translation" : "Translate this question into Dual Language (English + Hindi)"}
+                >
+                  <Languages className={`w-3.5 h-3.5 ${convertingSingleQuestionId === q.id ? 'animate-spin' : 'text-teal-600'}`} />
+                  <span>{convertingSingleQuestionId === q.id ? 'Translating...' : (q.question_hi ? '🌐 Re-translate' : '🌐 Dual Lang')}</span>
+                </button>
+
                 {/* 1-Click AI Explain Button */}
                 <button
                   onClick={() => handleSingleAIExplain(q)}
@@ -1180,6 +1354,19 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
             <p className="font-semibold text-base text-slate-900 dark:text-white leading-relaxed">
               {q.question_text}
             </p>
+
+            {/* Dedicated Hindi Translation Box when present */}
+            {q.question_hi && (
+              <div className="p-3 bg-blue-50/70 dark:bg-blue-950/40 rounded-xl border border-blue-200 dark:border-blue-900/60 text-slate-900 dark:text-slate-100 text-sm leading-relaxed space-y-1">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-blue-700 dark:text-blue-300">
+                  <Languages className="w-3.5 h-3.5" />
+                  <span>हिन्दी अनुवाद (Hindi Translation):</span>
+                </div>
+                <p className="font-medium">
+                  {q.question_hi}
+                </p>
+              </div>
+            )}
 
             {q.question_image && (
               <div className="my-2 p-1.5 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 max-w-sm">
@@ -1412,15 +1599,59 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
 
             <div>
               <label className="block text-xs font-bold uppercase text-slate-600 dark:text-slate-400 mb-1">
-                Question Text *
+                Question Text (English) *
               </label>
               <textarea
                 rows={3}
                 required
                 value={editingQuestion.question_text || ''}
                 onChange={(e) => setEditingQuestion({ ...editingQuestion, question_text: e.target.value })}
-                placeholder="Type question text here (e.g. Find the correct water/mirror image for the figure below:)..."
+                placeholder="Type English question text here..."
                 className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-bold uppercase text-blue-600 dark:text-blue-400">
+                  Hindi Translation (हिन्दी अनुवाद - Optional)
+                </label>
+                {editingQuestion.question_text && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!editingQuestion.question_text) return;
+                      try {
+                        notify('info', 'Translating to Hindi...');
+                        const res = await aiService.convertSingleToDualLanguage({
+                          question_text: editingQuestion.question_text,
+                          question_hi: editingQuestion.question_hi || '',
+                          option_a: editingQuestion.option_a || '',
+                          option_b: editingQuestion.option_b || '',
+                          option_c: editingQuestion.option_c || '',
+                          option_d: editingQuestion.option_d || '',
+                          correct_answer: editingQuestion.correct_answer || 'A',
+                        }, 'bilingual');
+                        const sanitized = sanitizeBilingualQuestionFields(editingQuestion.question_text, res.question_hi, 'bilingual');
+                        setEditingQuestion(prev => prev ? ({ ...prev, question_hi: sanitized.question_hi }) : null);
+                        notify('success', 'Hindi translation generated!');
+                      } catch (err: any) {
+                        notify('error', 'Translation failed: ' + err.message);
+                      }
+                    }}
+                    className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>AI Translate to Hindi</span>
+                  </button>
+                )}
+              </div>
+              <textarea
+                rows={2}
+                value={editingQuestion.question_hi || ''}
+                onChange={(e) => setEditingQuestion({ ...editingQuestion, question_hi: e.target.value })}
+                placeholder="यहाँ हिन्दी अनुवाद लिखें (उदा. नीचे दिए गए प्रश्न का उत्तर दें)..."
+                className="w-full px-3.5 py-2 rounded-xl border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/30 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
               />
             </div>
 
