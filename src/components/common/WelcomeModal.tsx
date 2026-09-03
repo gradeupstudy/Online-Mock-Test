@@ -26,8 +26,20 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onClose }) =
       }
     };
 
+    const handleStorageChange = () => {
+      dataService.getSettings().then(s => {
+        if (s?.logo_url) {
+          setLogoUrl(s.logo_url);
+        }
+      }).catch(err => console.warn('Failed to load settings in WelcomeModal', err));
+    };
+
     window.addEventListener('gradeup_settings_updated', handleSettingsUpdated);
-    return () => window.removeEventListener('gradeup_settings_updated', handleSettingsUpdated);
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('gradeup_settings_updated', handleSettingsUpdated);
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, [isOpen]);
 
   if (!isOpen) return null;
