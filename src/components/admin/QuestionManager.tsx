@@ -68,6 +68,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   };
 
   const [test, setTest] = useState<Test | null>(null);
+  const [loading, setLoading] = useState(true);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('all');
@@ -114,6 +115,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   }, [testId]);
 
   const loadTestAndQuestions = async () => {
+    setLoading(true);
     try {
       const cats = dataService.getMasterCategories();
       const subs = dataService.getMasterSubjects();
@@ -122,6 +124,12 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     } catch {
       setMasterCategories([]);
       setMasterSubjects([]);
+    }
+    if (!testId) {
+      setTest(null);
+      setQuestions([]);
+      setLoading(false);
+      return;
     }
     const [t, qList, report] = await Promise.all([
       dataService.getTestBySlugOrId(testId),
@@ -132,6 +140,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     setQuestions(qList);
     setUsageReport(report);
     setSelectedQuestionIds(new Set());
+    setLoading(false);
   };
 
   const handleOpenBankImportModal = () => {
@@ -600,13 +609,36 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     if (showOnlyDuplicates && !duplicateIdsSet.has(q.id)) {
       return false;
     }
-    const matchesSearch = q.question_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.chapter?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.topic?.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = (searchQuery || '').toLowerCase();
+    const matchesSearch = !query ||
+                          (q.question_text || '').toLowerCase().includes(query) ||
+                          (q.subject || '').toLowerCase().includes(query) ||
+                          (q.chapter || '').toLowerCase().includes(query) ||
+                          (q.topic || '').toLowerCase().includes(query);
     const matchesSubject = selectedSubject === 'all' || q.subject === selectedSubject;
     return matchesSearch && matchesSubject;
   });
+
+  if (!loading && !test) {
+    return (
+      <div className="bg-white dark:bg-slate-900 p-8 rounded-2xl border border-amber-200 dark:border-amber-900/50 text-center space-y-4 max-w-lg mx-auto my-12 shadow-sm">
+        <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
+          <AlertCircle className="w-6 h-6" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-900 dark:text-white">Mock Test Not Found</h2>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          No mock test found matching identifier "{testId || 'unspecified'}". It may have been deleted or an invalid ID was requested.
+        </p>
+        <button
+          onClick={onBackToTests}
+          className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm rounded-xl transition-colors cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Mock Tests</span>
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">

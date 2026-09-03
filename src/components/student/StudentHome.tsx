@@ -1,8 +1,34 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Clock, Award, FileText, CheckCircle, ArrowRight, Sparkles, Filter, ShieldCheck, Flame, BookOpen, Layers, X, Tag, Compass, Target, BookMarked, History, Check } from 'lucide-react';
-import { Test, PracticeMode, PRIMARY_PRACTICE_MODES, PracticeModeConfig } from '../../types';
+import { 
+  Search, 
+  Clock, 
+  Award, 
+  FileText, 
+  CheckCircle, 
+  ArrowRight, 
+  Sparkles, 
+  Filter, 
+  ShieldCheck, 
+  Flame, 
+  BookOpen, 
+  Layers, 
+  X, 
+  Tag, 
+  Compass, 
+  Target, 
+  BookMarked, 
+  History, 
+  Check,
+  ChevronRight,
+  SlidersHorizontal,
+  RotateCcw,
+  Zap
+} from 'lucide-react';
+import { Test, PracticeMode, PRIMARY_PRACTICE_MODES, TargetExam } from '../../types';
 import { dataService, inferPracticeMode } from '../../services/dataService';
 import { PracticeModeIcon, CategoryBadgeIcon, SubjectBadgeIcon } from '../common/PracticeModeIcon';
+import { TargetExamIcon } from '../common/TargetExamIcon';
+import { TargetExamSelectModal } from './TargetExamSelectModal';
 
 interface StudentHomeProps {
   onSelectTest: (test: Test) => void;
@@ -10,7 +36,12 @@ interface StudentHomeProps {
 }
 
 export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAdmin }) => {
-  const [tests, setTests] = useState<Test[]>([]);
+  const [allTests, setAllTests] = useState<Test[]>([]);
+  const [targetExams, setTargetExams] = useState<TargetExam[]>([]);
+  const [selectedTargetExamId, setSelectedTargetExamId] = useState<string | null>(null);
+  const [selectedTargetExam, setSelectedTargetExam] = useState<TargetExam | null>(null);
+  const [isTargetModalOpen, setIsTargetModalOpen] = useState(false);
+
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPracticeMode, setSelectedPracticeMode] = useState<PracticeMode | 'All'>('All');
@@ -21,14 +52,77 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
   const filterSectionRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    loadPublishedTests();
+    loadData();
+
+    const handleTargetExamsUpdated = () => {
+      loadData();
+    };
+
+    const handleSelectedTargetExamChanged = (e: any) => {
+      const examId = e.detail?.targetExamId || dataService.getSelectedTargetExamId();
+      setSelectedTargetExamId(examId);
+      dataService.getTargetExams().then(exams => {
+        setTargetExams(exams);
+        setSelectedTargetExam(exams.find(ex => ex.id === examId) || null);
+      });
+    };
+
+    const handleOpenModalEvent = () => {
+      setIsTargetModalOpen(true);
+    };
+
+    window.addEventListener('gradeup_target_exams_updated', handleTargetExamsUpdated);
+    window.addEventListener('gradeup_selected_target_exam_changed', handleSelectedTargetExamChanged);
+    window.addEventListener('gradeup_open_target_exam_modal', handleOpenModalEvent);
+
+    return () => {
+      window.removeEventListener('gradeup_target_exams_updated', handleTargetExamsUpdated);
+      window.removeEventListener('gradeup_selected_target_exam_changed', handleSelectedTargetExamChanged);
+      window.removeEventListener('gradeup_open_target_exam_modal', handleOpenModalEvent);
+    };
   }, []);
 
-  const loadPublishedTests = async () => {
+  const loadData = async () => {
     setLoading(true);
-    const allTests = await dataService.getTests(false); // only published
-    setTests(allTests);
+    const [fetchedTests, fetchedTargetExams] = await Promise.all([
+      dataService.getTests(false), // published tests only
+      dataService.getTargetExams()
+    ]);
+
+    setAllTests(fetchedTests);
+    setTargetExams(fetchedTargetExams);
+
+    const activeId = dataService.getSelectedTargetExamId();
+    setSelectedTargetExamId(activeId);
+    
+    if (activeId) {
+      const found = fetchedTargetExams.find(ex => ex.id === activeId) || null;
+      setSelectedTargetExam(found);
+    } else {
+      setSelectedTargetExam(null);
+      // If user has not chosen any target exam yet, prompt modal automatically on first entry
+      const hasDismissed = sessionStorage.getItem('gradeup_target_modal_dismissed');
+      if (!hasDismissed) {
+        setIsTargetModalOpen(true);
+      }
+    }
+
     setLoading(false);
+  };
+
+  const handleSelectTargetExam = (exam: TargetExam | null) => {
+    if (exam) {
+      dataService.setSelectedTargetExamId(exam.id);
+      setSelectedTargetExamId(exam.id);
+      setSelectedTargetExam(exam);
+    } else {
+      dataService.setSelectedTargetExamId(null);
+      setSelectedTargetExamId(null);
+      setSelectedTargetExam(null);
+    }
+    // Reset secondary filters when target exam changes so tests populate cleanly
+    setSelectedCategory('All');
+    setSelectedSubject('All');
   };
 
   // Helper to scroll smoothly down to "Showing Tests for:" mock tests section
@@ -57,12 +151,12 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
     }
   };
 
-  // Helper to get effective practice mode of a test
-  const getTestMode = (t: Test): PracticeMode => {
-    return inferPracticeMode(t);
-  };
+  // Tests available under the selected Target Exam (or all tests if 'All Exams' is selected)
+  const targetExamTests = React.useMemo(() => {
+    return dataService.getTestsForTargetExam(selectedTargetExam, 'All', allTests);
+  }, [selectedTargetExam, allTests]);
 
-  // Calculate counts for each of the 4 primary practice modes
+  // Calculate counts for each of the 4 primary practice modes within the current Target Exam
   const practiceModeCounts = React.useMemo(() => {
     const counts: Record<PracticeMode, number> = {
       topic_wise: 0,
@@ -70,24 +164,21 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
       full_mock: 0,
       pyq: 0
     };
-    tests.forEach((t) => {
-      const mode = getTestMode(t);
-      if (counts[mode] !== undefined) {
-        counts[mode]++;
-      } else {
-        counts.full_mock++;
-      }
+
+    (['topic_wise', 'subject_wise', 'full_mock', 'pyq'] as PracticeMode[]).forEach(mode => {
+      const modeTests = dataService.getTestsForTargetExam(selectedTargetExam, mode, allTests);
+      counts[mode] = modeTests.length;
     });
+
     return counts;
-  }, [tests]);
+  }, [selectedTargetExam, allTests]);
 
-  // Tests within selected practice mode (used to compute available categories & subjects)
+  // Tests within selected practice mode & target exam (used to compute available categories & subjects)
   const modeFilteredTests = React.useMemo(() => {
-    if (selectedPracticeMode === 'All') return tests;
-    return tests.filter((t) => getTestMode(t) === selectedPracticeMode);
-  }, [tests, selectedPracticeMode]);
+    return dataService.getTestsForTargetExam(selectedTargetExam, selectedPracticeMode, allTests);
+  }, [selectedTargetExam, selectedPracticeMode, allTests]);
 
-  // Derive unique categories based on current practice mode filter
+  // Derive unique categories based on current target exam + practice mode filter
   const categories = React.useMemo(() => {
     return ['All', ...Array.from(new Set(modeFilteredTests.map((t) => t.category).filter(Boolean)))];
   }, [modeFilteredTests]);
@@ -110,34 +201,34 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
 
   // Helper to test if a test matches the selected subject
   const matchesSubjectFilter = (t: Test, subject: string) => {
-    if (subject === 'All') return true;
-    const subLower = subject.toLowerCase();
+    if (!subject || subject === 'All') return true;
+    const subLower = (subject || '').toLowerCase();
     if (t.subject && t.subject.toLowerCase() === subLower) return true;
-    if (Array.isArray(t.sections) && t.sections.some((s) => s.toLowerCase() === subLower)) return true;
-    if (t.title.toLowerCase().includes(subLower)) return true;
+    if (Array.isArray(t.sections) && t.sections.some((s) => s && typeof s === 'string' && s.toLowerCase() === subLower)) return true;
+    if (t.title && t.title.toLowerCase().includes(subLower)) return true;
     return false;
   };
 
-  const filteredTests = tests.filter((t) => {
-    const q = searchQuery.toLowerCase().trim();
+  // Final filtered test list (Target Exam + Practice Mode + Search Query + Category + Subject)
+  const filteredTests = modeFilteredTests.filter((t) => {
+    const q = (searchQuery || '').toLowerCase().trim();
     const codeStr = (t.exam_code || t.test_code || '').toLowerCase();
     const subjectStr = (t.subject || '').toLowerCase();
     const sectionsStr = (t.sections || []).join(' ').toLowerCase();
 
     const matchesSearch =
       !q ||
-      t.title.toLowerCase().includes(q) ||
+      (t.title || '').toLowerCase().includes(q) ||
       codeStr.includes(q) ||
       (t.description || '').toLowerCase().includes(q) ||
       (t.category || '').toLowerCase().includes(q) ||
       subjectStr.includes(q) ||
       sectionsStr.includes(q);
 
-    const matchesMode = selectedPracticeMode === 'All' || getTestMode(t) === selectedPracticeMode;
     const matchesCat = selectedCategory === 'All' || t.category === selectedCategory;
     const matchesSub = matchesSubjectFilter(t, selectedSubject);
 
-    return matchesSearch && matchesMode && matchesCat && matchesSub;
+    return matchesSearch && matchesCat && matchesSub;
   });
 
   const handleResetFilters = () => {
@@ -152,21 +243,124 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
   const activeModeConfig = PRIMARY_PRACTICE_MODES.find((m) => m.id === selectedPracticeMode);
 
   return (
-    <div className="space-y-8 pb-12">
+    <div className="space-y-6 sm:space-y-8 pb-12">
       
-      {/* Banner / Hero */}
+      {/* 1. TARGET EXAM SELECTOR BAR (HIGH VISIBILITY TOP STRIP) */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200 dark:border-slate-800 p-4 sm:p-5 shadow-sm">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          
+          {/* Active Target Exam Info */}
+          <div className="flex items-center gap-3.5">
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+              selectedTargetExam 
+                ? 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white shadow-blue-500/25 ring-2 ring-blue-500/30' 
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300'
+            }`}>
+              {selectedTargetExam ? (
+                <TargetExamIcon name={selectedTargetExam.icon || 'Target'} className="w-6 h-6" />
+              ) : (
+                <Compass className="w-6 h-6" />
+              )}
+            </div>
+
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800">
+                  🎯 Target Exam
+                </span>
+                {selectedTargetExam && (
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
+                    Active
+                  </span>
+                )}
+              </div>
+
+              <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-0.5 flex items-center gap-2">
+                <span>{selectedTargetExam ? selectedTargetExam.title : 'All Competitive Exams'}</span>
+                {selectedTargetExam?.short_name && (
+                  <span className="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono">
+                    ({selectedTargetExam.short_name})
+                  </span>
+                )}
+              </h2>
+            </div>
+          </div>
+
+          {/* Target Exam Switcher & Quick Pills */}
+          <div className="flex flex-wrap items-center gap-2">
+            
+            {/* Quick Chips for Top Exams */}
+            <div className="hidden sm:flex items-center gap-1.5 overflow-x-auto py-1">
+              <button
+                onClick={() => handleSelectTargetExam(null)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+                  !selectedTargetExam
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                }`}
+              >
+                All Exams
+              </button>
+
+              {targetExams.slice(0, 3).map((exam) => {
+                const isSelected = selectedTargetExam?.id === exam.id;
+                return (
+                  <button
+                    key={exam.id}
+                    onClick={() => handleSelectTargetExam(exam)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <TargetExamIcon name={exam.icon} className="w-3.5 h-3.5" />
+                    <span>{exam.short_name || exam.title}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Change Target Exam Modal Trigger Button */}
+            <button
+              onClick={() => setIsTargetModalOpen(true)}
+              className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs sm:text-sm font-black shadow-md shadow-blue-500/20 flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+            >
+              <Target className="w-4 h-4 text-amber-300" />
+              <span>{selectedTargetExam ? 'Change Target Exam' : 'Select Target Exam'}</span>
+              <ChevronRight className="w-4 h-4" />
+            </button>
+
+          </div>
+
+        </div>
+      </div>
+      
+      {/* 2. Banner / Hero */}
       <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white p-5 sm:p-8 md:p-10 shadow-xl border border-blue-900/40">
         <div className="relative z-10 max-w-2xl space-y-3 sm:space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-400/30 text-xs font-semibold">
               <Sparkles className="w-3.5 h-3.5" /> Gradeup Study Official Test Portal
             </div>
+            {selectedTargetExam && (
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30 text-xs font-bold flex items-center gap-1">
+                <Target className="w-3 h-3 text-amber-400" />
+                <span>Target: {selectedTargetExam.title}</span>
+              </span>
+            )}
           </div>
+
           <h1 className="text-2xl sm:text-3xl md:text-4xl font-black tracking-tight text-white leading-tight">
-            Master Competitive Exams with Real Exam Pattern Mock Tests
+            {selectedTargetExam ? (
+              <span>Crack <span className="text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-blue-200 to-indigo-200">{selectedTargetExam.title}</span> with Real Exam Pattern Mocks</span>
+            ) : (
+              <span>Master Competitive Exams with Real Exam Pattern Mock Tests</span>
+            )}
           </h1>
+
           <p className="text-xs sm:text-sm md:text-base text-slate-300 leading-relaxed">
-            Choose from 4 primary practice modes: Topic Wise MCQs, Section / Subject Tests, Full Length Mock Tests, or Official Previous Year Papers.
+            {selectedTargetExam?.description || 'Choose from 4 primary practice modes: Topic Wise MCQs, Section / Subject Tests, Full Length Mock Tests, or Official Previous Year Papers.'}
           </p>
 
           <div className="pt-2 flex flex-wrap items-center gap-3 sm:gap-6 text-xs text-slate-300">
@@ -177,7 +371,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
               <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>Instant Performance Result</span>
             </div>
             <div className="flex items-center gap-1.5 sm:gap-2">
-              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>Detailed Explanations</span>
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" /> <span>Detailed Hindi / English Explanations</span>
             </div>
           </div>
         </div>
@@ -186,7 +380,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
         <div className="absolute -right-12 -bottom-12 w-80 h-80 rounded-full bg-blue-500/10 blur-3xl pointer-events-none" />
       </div>
 
-      {/* 4 PRIMARY PRACTICE MODES (MAIN LEVEL SELECTION) */}
+      {/* 3. 4 PRIMARY PRACTICE MODES (MAIN LEVEL SELECTION) */}
       <div className="space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
@@ -197,7 +391,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
               </h2>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium">
-              Targeted practice designed for every stage of your exam preparation
+              Targeted practice designed for every stage of your {selectedTargetExam ? selectedTargetExam.short_name || selectedTargetExam.title : 'exam'} preparation
             </p>
           </div>
 
@@ -293,7 +487,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
         </div>
       </div>
 
-      {/* Filter and Search Section */}
+      {/* 4. FILTER AND SEARCH SECTION */}
       <div
         id="mock-tests-filter-section"
         ref={filterSectionRef}
@@ -306,7 +500,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
             <input
               type="text"
-              placeholder="Search exam title, subject (e.g. English, GK, Maths), or code..."
+              placeholder="Search exam title, subject (e.g. Hindi, English, Maths, GK)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full pl-10 pr-10 py-2.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-sm font-medium text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-hidden"
@@ -323,7 +517,8 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
 
           <div className="flex items-center justify-between sm:justify-end gap-3 text-xs text-slate-600 dark:text-slate-400 font-semibold">
             <span>
-              Showing <strong className="text-blue-600 dark:text-blue-400 font-black">{filteredTests.length}</strong> of {tests.length} tests
+              Showing <strong className="text-blue-600 dark:text-blue-400 font-black">{filteredTests.length}</strong> of {targetExamTests.length} tests
+              {selectedTargetExam && <span className="text-slate-400"> for {selectedTargetExam.short_name || selectedTargetExam.title}</span>}
             </span>
             {isFiltered && (
               <button
@@ -362,7 +557,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
                 selectedPracticeMode === 'All' ? 'bg-blue-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
               }`}>
-                {tests.length}
+                {targetExamTests.length}
               </span>
             </button>
 
@@ -392,47 +587,49 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
           </div>
         </div>
 
-        {/* 1. Exam Category Filter Pills */}
-        <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
-          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-            <Layers className="w-3.5 h-3.5 text-blue-500" />
-            <span>Filter by Category:</span>
+        {/* Categories / Sections Filter */}
+        {categories.length > 2 && (
+          <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
+              <Layers className="w-3.5 h-3.5 text-blue-500" />
+              <span>Category / Stream:</span>
+            </div>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-2 px-2">
+              {categories.map((cat) => {
+                const count = cat === 'All'
+                  ? modeFilteredTests.length
+                  : modeFilteredTests.filter((t) => t.category === cat).length;
+                const isSelected = selectedCategory === cat;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                        : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
+                    }`}
+                  >
+                    {cat !== 'All' && <CategoryBadgeIcon category={cat} className="w-3.5 h-3.5" />}
+                    <span>{cat === 'All' ? 'All Categories' : cat}</span>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                      isSelected ? 'bg-blue-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-2 px-2">
-            {categories.map((cat) => {
-              const count = cat === 'All'
-                ? modeFilteredTests.length
-                : modeFilteredTests.filter((t) => t.category === cat).length;
-              const isSelected = selectedCategory === cat;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-3.5 py-1.5 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs ${
-                    isSelected
-                      ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                      : 'bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700'
-                  }`}
-                >
-                  {cat !== 'All' && <CategoryBadgeIcon category={cat} className="w-3.5 h-3.5" />}
-                  <span>{cat === 'All' ? 'All Exams' : cat}</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
-                    isSelected ? 'bg-blue-700 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-                  }`}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        )}
 
-        {/* 2. Subject Name Filter Pills */}
-        {subjects.length > 1 && (
+        {/* Subjects Filter */}
+        {subjects.length > 2 && (
           <div className="space-y-1.5 pt-1 border-t border-slate-100 dark:border-slate-800/80">
             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               <BookOpen className="w-3.5 h-3.5 text-indigo-500" />
-              <span>Filter by Subject:</span>
+              <span>Subject:</span>
             </div>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none -mx-2 px-2">
               {subjects.map((sub) => {
@@ -466,65 +663,100 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
 
       </div>
 
-      {/* Target Anchor & Active Practice Mode Status Header */}
+      {/* Target Anchor & Active Mode / Target Status Banner */}
       <div id="showing-tests-position" ref={showingTestsHeaderRef} className="scroll-mt-24">
-        {selectedPracticeMode !== 'All' && activeModeConfig && (
-          <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs animate-in fade-in ${activeModeConfig.color.bg} ${activeModeConfig.color.border}`}>
+        {(selectedPracticeMode !== 'All' || selectedTargetExam) && (
+          <div className="p-4 rounded-2xl border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
             <div className="flex items-center gap-3">
-              <PracticeModeIcon mode={activeModeConfig.id} size="md" variant="gradient" />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] uppercase font-black tracking-wider text-slate-600 dark:text-slate-400">
-                    Showing Tests for:
-                  </span>
-                  <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white">
-                    {activeModeConfig.testType}
-                  </span>
+              {activeModeConfig ? (
+                <PracticeModeIcon mode={activeModeConfig.id} size="md" variant="gradient" />
+              ) : selectedTargetExam ? (
+                <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-xs">
+                  <TargetExamIcon name={selectedTargetExam.icon} className="w-5 h-5" />
                 </div>
-                <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white">
-                  {activeModeConfig.title}
+              ) : (
+                <Compass className="w-8 h-8 text-blue-600" />
+              )}
+              
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] uppercase font-black tracking-wider text-slate-600 dark:text-slate-400">
+                    Mock Tests Curated For:
+                  </span>
+                  {selectedTargetExam && (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-blue-600 text-white shadow-2xs">
+                      🎯 {selectedTargetExam.title}
+                    </span>
+                  )}
+                  {activeModeConfig && (
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-md bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white">
+                      {activeModeConfig.title}
+                    </span>
+                  )}
+                </div>
+                <h4 className="text-sm sm:text-base font-black text-slate-900 dark:text-white mt-0.5">
+                  {selectedTargetExam ? `${selectedTargetExam.title} Test Series` : 'All Competitive Exam Tests'}
                 </h4>
               </div>
             </div>
-            <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60 dark:border-slate-800">
+
+            <div className="flex items-center justify-between sm:justify-end gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-blue-200/60 dark:border-blue-900/60">
               <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                <strong className="font-black text-blue-600 dark:text-blue-400">{filteredTests.length}</strong> Mock Tests Available
+                <strong className="font-black text-blue-600 dark:text-blue-400">{filteredTests.length}</strong> Tests Available
               </span>
-              <button
-                onClick={() => handleSelectPracticeMode('All', false)}
-                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer shadow-2xs text-slate-700 dark:text-slate-300 transition-all"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>Show All Tests</span>
-              </button>
+
+              {selectedTargetExam && (
+                <button
+                  onClick={() => handleSelectTargetExam(null)}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-xs font-bold rounded-xl border border-slate-200 dark:border-slate-700 cursor-pointer shadow-2xs text-slate-700 dark:text-slate-300 transition-all"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Show All Exams</span>
+                </button>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {/* Test List Grid */}
+      {/* 5. TEST LIST GRID */}
       {loading ? (
-        <div className="py-16 text-center text-slate-500 font-bold text-sm">Loading available mock tests...</div>
+        <div className="py-16 text-center text-slate-500 font-bold text-sm">Loading mock test series...</div>
       ) : filteredTests.length === 0 ? (
-        <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-8 space-y-3 shadow-md">
-          <BookOpen className="w-12 h-12 text-slate-300 mx-auto" />
-          <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">No mock tests found</h3>
-          <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            No mock tests match the selected filters. Try changing your practice mode or clearing filters.
+        <div className="py-16 text-center bg-white dark:bg-slate-900 rounded-2xl border border-slate-200/90 dark:border-slate-800 p-8 space-y-4 shadow-md">
+          <BookOpen className="w-12 h-12 text-slate-300 dark:text-slate-700 mx-auto" />
+          <h3 className="text-base font-black text-slate-800 dark:text-slate-200">
+            No mock tests found for {selectedTargetExam ? selectedTargetExam.title : 'selected filters'}
+          </h3>
+          <p className="text-xs text-slate-500 max-w-md mx-auto">
+            {selectedTargetExam 
+              ? `Mock tests for ${selectedTargetExam.title} are being added. You can switch practice modes or view tests across all competitive exams.`
+              : 'Try changing your search query or practice mode filter to view available tests.'}
           </p>
-          <button
-            onClick={handleResetFilters}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
-          >
-            Clear All Filters
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+            {selectedTargetExam && (
+              <button
+                onClick={() => handleSelectTargetExam(null)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Show Tests for All Exams</span>
+              </button>
+            )}
+            <button
+              onClick={handleResetFilters}
+              className="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 text-slate-700 dark:text-slate-300 text-xs font-bold rounded-xl transition-all cursor-pointer"
+            >
+              Clear Filters
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredTests.map((test) => {
             const hasExplicitSubject = Boolean(test.subject && test.subject.trim());
             const hasSections = Boolean(test.sections && test.sections.length > 0);
-            const mode = getTestMode(test);
+            const mode = inferPracticeMode(test);
             const modeConfig = PRIMARY_PRACTICE_MODES.find((m) => m.id === mode);
 
             return (
@@ -546,7 +778,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
                       {(() => {
                         const effectiveCat = (test.category === 'Section / Subject Practice' && mode === 'topic_wise')
                           ? 'Topic Wise Practice'
-                          : (test.category || 'All Competitive Exams');
+                          : (test.category || 'Competitive Exam');
                         if (effectiveCat === modeConfig?.title) return null;
                         return (
                           <span className="px-2 py-0.5 bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-lg border border-blue-200 dark:border-blue-900 shadow-2xs flex items-center gap-1">
@@ -652,6 +884,19 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
           })}
         </div>
       )}
+
+      {/* 6. TARGET EXAM SELECTOR MODAL */}
+      <TargetExamSelectModal
+        isOpen={isTargetModalOpen}
+        onClose={() => {
+          setIsTargetModalOpen(false);
+          sessionStorage.setItem('gradeup_target_modal_dismissed', 'true');
+        }}
+        onSelectExam={(exam) => {
+          handleSelectTargetExam(exam);
+        }}
+        selectedExamId={selectedTargetExamId}
+      />
 
     </div>
   );

@@ -601,18 +601,18 @@ export const CompletePDFImportModal: React.FC<CompletePDFImportModalProps> = ({
       if (activeFilterTab === 'duplicate' && q.duplicate_status === 'unique') return false;
 
       // Subject Filter (from breakdown chips)
-      if (selectedSubjectFilter !== 'all' && q.subject.toLowerCase() !== selectedSubjectFilter.toLowerCase()) {
+      if (selectedSubjectFilter !== 'all' && (q.subject || '').toLowerCase() !== selectedSubjectFilter.toLowerCase()) {
         return false;
       }
 
       // Search query
       if (searchQuery.trim()) {
         const query = searchQuery.toLowerCase();
-        const textMatch = q.question_text.toLowerCase().includes(query);
-        const hiMatch = q.question_hi?.toLowerCase().includes(query);
-        const subjMatch = q.subject.toLowerCase().includes(query);
-        const chaptMatch = q.chapter.toLowerCase().includes(query);
-        const numMatch = String(q.question_number).includes(query);
+        const textMatch = (q.question_text || '').toLowerCase().includes(query);
+        const hiMatch = (q.question_hi || '').toLowerCase().includes(query);
+        const subjMatch = (q.subject || '').toLowerCase().includes(query);
+        const chaptMatch = (q.chapter || '').toLowerCase().includes(query);
+        const numMatch = String(q.question_number || '').includes(query);
         return textMatch || hiMatch || subjMatch || chaptMatch || numMatch;
       }
       return true;
