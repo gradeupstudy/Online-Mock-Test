@@ -600,10 +600,12 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
     if (showOnlyDuplicates && !duplicateIdsSet.has(q.id)) {
       return false;
     }
-    const matchesSearch = q.question_text.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.subject?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.chapter?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          q.topic?.toLowerCase().includes(searchQuery.toLowerCase());
+    const query = (searchQuery || '').toLowerCase();
+    const matchesSearch = !query ||
+                          (q.question_text || '').toLowerCase().includes(query) ||
+                          (q.subject || '').toLowerCase().includes(query) ||
+                          (q.chapter || '').toLowerCase().includes(query) ||
+                          (q.topic || '').toLowerCase().includes(query);
     const matchesSubject = selectedSubject === 'all' || q.subject === selectedSubject;
     return matchesSearch && matchesSubject;
   });

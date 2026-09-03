@@ -97,6 +97,30 @@ export const PRIMARY_PRACTICE_MODES: PracticeModeConfig[] = [
   }
 ];
 
+export interface TargetExam {
+  id: string;
+  title: string;
+  hindiTitle?: string;
+  slug: string;
+  category: string;
+  icon?: string;
+  description?: string;
+  badgeText?: string;
+  is_active: boolean;
+  is_popular?: boolean;
+  order_index?: number;
+  created_at?: string;
+  updated_at?: string;
+  // Explicit mapping of which mock tests show in which practice mode for this target exam
+  mode_test_map?: {
+    topic_wise?: string[];
+    subject_wise?: string[];
+    full_mock?: string[];
+    pyq?: string[];
+  };
+  assigned_test_ids?: string[];
+}
+
 export interface Test {
   id: string;
   test_code: string;
@@ -108,6 +132,7 @@ export interface Test {
   subject: string;
   topic?: string;
   practice_mode?: PracticeMode;
+  target_exam_ids?: string[];
   total_questions: number;
   total_marks: number;
   marks_per_question: number;

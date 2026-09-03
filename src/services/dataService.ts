@@ -1,5 +1,6 @@
-import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus, QuestionReport, ReportStatus, PracticeMode, PRIMARY_PRACTICE_MODES, PracticeModeConfig } from '../types';
+import { Test, Question, Student, Attempt, Answer, SocialPlatform, AdminSettings, PublicLeaderboardEntry, SubmitAttemptResult, TestStatus, QuestionReport, ReportStatus, PracticeMode, PRIMARY_PRACTICE_MODES, PracticeModeConfig, TargetExam } from '../types';
 import { DEMO_TESTS, DEMO_QUESTIONS, DEMO_ATTEMPTS, DEMO_SOCIAL_PLATFORMS, DEMO_ADMIN_SETTINGS } from '../data/demoData';
+import { DEFAULT_TARGET_EXAMS } from '../data/defaultTargetExams';
 import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabase';
 import { idbStorage } from '../utils/idbStorage';
 
@@ -228,7 +229,9 @@ const STORAGE_KEYS = {
   REPORTS: 'gradeup_question_reports',
   MASTER_CATEGORIES: 'gradeup_master_categories',
   MASTER_SUBJECTS: 'gradeup_master_subjects',
-  MASTER_SECTIONS: 'gradeup_master_sections'
+  MASTER_SECTIONS: 'gradeup_master_sections',
+  TARGET_EXAMS: 'gradeup_target_exams',
+  SELECTED_TARGET_EXAM: 'gradeup_selected_target_exam_id'
 };
 
 export const DEFAULT_MASTER_CATEGORIES: string[] = [
@@ -539,6 +542,9 @@ const initLocalStorage = () => {
   }
   if (!localStorage.getItem(STORAGE_KEYS.REPORTS)) {
     localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify([]));
+  }
+  if (!localStorage.getItem(STORAGE_KEYS.TARGET_EXAMS)) {
+    localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(DEFAULT_TARGET_EXAMS));
   }
 };
 
@@ -3519,7 +3525,7 @@ export const dataService = {
 
     const idx = platforms.findIndex(p => 
       p.id === cleanId || 
-      p.platform_name.toLowerCase().trim() === sanitizedPlatform.platform_name.toLowerCase().trim()
+      (p.platform_name || '').toLowerCase().trim() === (sanitizedPlatform.platform_name || '').toLowerCase().trim()
     );
     if (idx >= 0) {
       platforms[idx] = sanitizedPlatform;
@@ -3627,7 +3633,7 @@ export const dataService = {
         p.id === id || 
         p.id === cleanId || 
         normalizePlatformId(p.id, p.platform_name) === cleanId ||
-        (target && p.platform_name.toLowerCase().trim() === target.platform_name.toLowerCase().trim())
+        (target && (p.platform_name || '').toLowerCase().trim() === (target.platform_name || '').toLowerCase().trim())
       ) {
         return { ...p, id: cleanId, is_active: isActive };
       }
@@ -3677,7 +3683,7 @@ export const dataService = {
       p.id !== id && 
       p.id !== cleanId && 
       normalizePlatformId(p.id, p.platform_name) !== cleanId &&
-      (!targetPlatform || p.platform_name.toLowerCase().trim() !== targetPlatform.platform_name.toLowerCase().trim())
+      (!targetPlatform || (p.platform_name || '').toLowerCase().trim() !== (targetPlatform.platform_name || '').toLowerCase().trim())
     );
     localStorage.setItem(STORAGE_KEYS.SOCIAL, JSON.stringify(filtered));
 
@@ -4861,5 +4867,401 @@ export const dataService = {
       bucketsBreakdown,
       lastCalculatedAt: new Date().toISOString()
     };
+  },
+
+  // ------------------------------------
+  // TARGET EXAMS MANAGEMENT & MAPPINGS
+  // ------------------------------------
+
+  getTargetExams: async (includeInactive = false): Promise<TargetExam[]> => {
+    let list: TargetExam[] = [];
+    const supabase = getSupabaseClient();
+
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        const query = supabase.from('target_exams').select('*').order('order_index', { ascending: true });
+        if (!includeInactive) {
+          query.eq('is_active', true);
+        }
+        const { data, error } = await query;
+        if (!error && Array.isArray(data) && data.length > 0) {
+          list = data.map((item: any) => ({
+            ...item,
+            mode_test_map: item.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] }
+          }));
+          localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(list));
+          return list;
+        }
+      } catch (err) {
+        console.warn('Failed to fetch target exams from Supabase, using local fallback', err);
+      }
+    }
+
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.TARGET_EXAMS);
+      if (raw) {
+        list = JSON.parse(raw);
+      }
+      if (!Array.isArray(list) || list.length === 0) {
+        list = [...DEFAULT_TARGET_EXAMS];
+        localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(list));
+      }
+    } catch {
+      list = [...DEFAULT_TARGET_EXAMS];
+    }
+
+    // Merge with any missing default target exams to ensure smooth out of the box experience
+    const existingIds = new Set(list.map(t => t.id));
+    DEFAULT_TARGET_EXAMS.forEach(defExam => {
+      if (!existingIds.has(defExam.id)) {
+        list.push(defExam);
+        existingIds.add(defExam.id);
+      }
+    });
+
+    list.sort((a, b) => (a.order_index ?? 999) - (b.order_index ?? 999));
+
+    if (!includeInactive) {
+      list = list.filter(e => e.is_active !== false);
+    }
+
+    return list;
+  },
+
+  getTargetExamById: async (idOrSlug: string): Promise<TargetExam | null> => {
+    if (!idOrSlug) return null;
+    const exams = await dataService.getTargetExams(true);
+    const target = exams.find(e => e.id === idOrSlug || e.slug === idOrSlug);
+    return target || null;
+  },
+
+  saveTargetExam: async (exam: Partial<TargetExam>): Promise<TargetExam> => {
+    const existingList = await dataService.getTargetExams(true);
+    const now = new Date().toISOString();
+
+    const id = exam.id || generateUUID();
+    const slug = exam.slug || (exam.title || 'target-exam').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    const completeExam: TargetExam = {
+      id,
+      title: (exam.title || 'New Target Exam').trim(),
+      hindiTitle: exam.hindiTitle?.trim() || '',
+      slug,
+      category: exam.category || 'General & Mixed',
+      icon: exam.icon || 'Target',
+      description: exam.description || '',
+      badgeText: exam.badgeText || '',
+      is_active: exam.is_active !== undefined ? exam.is_active : true,
+      is_popular: Boolean(exam.is_popular),
+      order_index: exam.order_index !== undefined ? exam.order_index : (existingList.length + 1),
+      mode_test_map: exam.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] },
+      assigned_test_ids: exam.assigned_test_ids || [],
+      created_at: exam.created_at || now,
+      updated_at: now
+    };
+
+    const idx = existingList.findIndex(e => e.id === id);
+    if (idx >= 0) {
+      existingList[idx] = completeExam;
+    } else {
+      existingList.push(completeExam);
+    }
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(existingList));
+    } catch (lsErr) {
+      console.warn('localStorage quota warning for target exams:', lsErr);
+    }
+    idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, existingList);
+
+    // Sync to Supabase if configured
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase.from('target_exams').upsert({
+          id: completeExam.id,
+          title: completeExam.title,
+          hindi_title: completeExam.hindiTitle,
+          slug: completeExam.slug,
+          category: completeExam.category,
+          icon: completeExam.icon,
+          description: completeExam.description,
+          badge_text: completeExam.badgeText,
+          is_active: completeExam.is_active,
+          is_popular: completeExam.is_popular,
+          order_index: completeExam.order_index,
+          mode_test_map: completeExam.mode_test_map,
+          assigned_test_ids: completeExam.assigned_test_ids,
+          updated_at: now
+        });
+      } catch (sbErr) {
+        console.warn('Supabase target exams upsert warning (table might be optional/schema-agnostic):', sbErr);
+      }
+    }
+
+    // Dispatch local event
+    window.dispatchEvent(new CustomEvent('gradeup_target_exams_updated', { detail: completeExam }));
+
+    return completeExam;
+  },
+
+  deleteTargetExam: async (id: string): Promise<boolean> => {
+    const existingList = await dataService.getTargetExams(true);
+    const filtered = existingList.filter(e => e.id !== id);
+
+    try {
+      localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(filtered));
+    } catch {}
+    idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, filtered);
+
+    // If active selected target exam was deleted, reset it
+    const activeSelectedId = dataService.getSelectedTargetExamId();
+    if (activeSelectedId === id) {
+      dataService.setSelectedTargetExamId(null);
+    }
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase.from('target_exams').delete().eq('id', id);
+      } catch {}
+    }
+
+    window.dispatchEvent(new CustomEvent('gradeup_target_exams_updated', { detail: { deletedId: id } }));
+    return true;
+  },
+
+  getSelectedTargetExamId: (): string | null => {
+    try {
+      const val = localStorage.getItem(STORAGE_KEYS.SELECTED_TARGET_EXAM);
+      return val && val !== 'null' && val !== 'undefined' ? val : null;
+    } catch {
+      return null;
+    }
+  },
+
+  setSelectedTargetExamId: (id: string | null): void => {
+    try {
+      if (id) {
+        localStorage.setItem(STORAGE_KEYS.SELECTED_TARGET_EXAM, id);
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.SELECTED_TARGET_EXAM);
+      }
+    } catch {}
+    window.dispatchEvent(new CustomEvent('gradeup_selected_target_exam_changed', { detail: { id } }));
+  },
+
+  getEffectiveTargetExam: async (): Promise<TargetExam | null> => {
+    const selectedId = dataService.getSelectedTargetExamId();
+    const exams = await dataService.getTargetExams(false);
+    if (!selectedId) {
+      return null;
+    }
+    const match = exams.find(e => e.id === selectedId || e.slug === selectedId);
+    return match || null;
+  },
+
+  updateTargetExamModeMappings: async (
+    targetExamId: string,
+    modeTestMap: TargetExam['mode_test_map']
+  ): Promise<TargetExam | null> => {
+    const exam = await dataService.getTargetExamById(targetExamId);
+    if (!exam) return null;
+
+    // Collect all assigned test IDs across the 4 modes
+    const allAssigned = new Set<string>();
+    if (modeTestMap) {
+      (Object.values(modeTestMap) as string[][]).forEach(list => {
+        if (Array.isArray(list)) {
+          list.forEach(id => allAssigned.add(id));
+        }
+      });
+    }
+
+    const updated = await dataService.saveTargetExam({
+      ...exam,
+      mode_test_map: modeTestMap,
+      assigned_test_ids: Array.from(allAssigned)
+    });
+
+    return updated;
+  },
+
+  /**
+   * Intelligently auto-maps existing mock tests to a target exam based on:
+   * 1. Category name match
+   * 2. Title & Exam code keywords match
+   * 3. Inferred Practice Mode
+   */
+  autoMapTestsToTargetExam: async (targetExamId: string): Promise<TargetExam | null> => {
+    const [exam, allTests] = await Promise.all([
+      dataService.getTargetExamById(targetExamId),
+      dataService.getTests(true)
+    ]);
+
+    if (!exam) return null;
+
+    const newModeMap: {
+      topic_wise: string[];
+      subject_wise: string[];
+      full_mock: string[];
+      pyq: string[];
+    } = {
+      topic_wise: [],
+      subject_wise: [],
+      full_mock: [],
+      pyq: []
+    };
+
+    const examTitleLower = (exam?.title || '').toLowerCase();
+    const examCatLower = (exam?.category || '').toLowerCase();
+    const examSlugLower = (exam?.slug || '').toLowerCase();
+
+    // Check key search terms (e.g. ['police', 'constable', 'hp police'] or ['patwari'] or ['ssc', 'cgl'])
+    const keywords: string[] = [];
+    if (examSlugLower.includes('police')) keywords.push('police', 'constable', 'si');
+    if (examSlugLower.includes('patwari')) keywords.push('patwari', 'revenue');
+    if (examSlugLower.includes('court')) keywords.push('court', 'clerk', 'process server');
+    if (examSlugLower.includes('ssc')) keywords.push('ssc', 'cgl', 'chsl', 'mts', 'gd');
+    if (examSlugLower.includes('railway') || examSlugLower.includes('ntpc')) keywords.push('railway', 'rrb', 'ntpc', 'group d');
+    if (examSlugLower.includes('bank')) keywords.push('bank', 'ibps', 'sbi', 'po', 'clerk');
+    if (examSlugLower.includes('hpas') || examSlugLower.includes('allied')) keywords.push('hpas', 'allied', 'naib', 'hppsc');
+    if (examSlugLower.includes('tet') || examSlugLower.includes('tgt')) keywords.push('tet', 'tgt', 'jbt', 'teaching');
+
+    allTests.forEach(test => {
+      const tMode = inferPracticeMode(test);
+      const testTitleLower = (test.title || '').toLowerCase();
+      const testCatLower = (test.category || '').toLowerCase();
+      const testCodeLower = (test.test_code || test.exam_code || '').toLowerCase();
+
+      let isMatch = false;
+
+      // Check direct tag
+      if (Array.isArray(test.target_exam_ids) && test.target_exam_ids.includes(exam.id)) {
+        isMatch = true;
+      }
+      // Check universal exam or general test
+      else if (exam.id === 'general-competitive-all') {
+        isMatch = true;
+      }
+      // Check category match
+      else if (testCatLower && examTitleLower.includes(testCatLower)) {
+        isMatch = true;
+      }
+      // Check keyword matches
+      else if (keywords.some(kw => testTitleLower.includes(kw) || testCatLower.includes(kw) || testCodeLower.includes(kw))) {
+        isMatch = true;
+      }
+
+      if (isMatch) {
+        if (newModeMap[tMode] && !newModeMap[tMode].includes(test.id)) {
+          newModeMap[tMode].push(test.id);
+        }
+      }
+    });
+
+    return dataService.updateTargetExamModeMappings(exam.id, newModeMap);
+  },
+
+  /**
+   * Filters tests for a Target Exam and optional Practice Mode:
+   * If targetExam has an explicit mode_test_map, tests mapped to that mode (or all modes) are returned.
+   * If mode_test_map is empty or unconfigured for this exam, falls back to intelligent category/keyword matching.
+   */
+  getTestsForTargetExam: (
+    targetExam: TargetExam | null | undefined,
+    practiceMode?: PracticeMode | 'All',
+    testsToFilter?: Test[]
+  ): Test[] => {
+    const tests = testsToFilter || [];
+    if (!targetExam) {
+      if (!practiceMode || practiceMode === 'All') return tests;
+      return tests.filter(t => inferPracticeMode(t) === practiceMode);
+    }
+
+    const modeMap = targetExam.mode_test_map || {};
+    const assignedIds = new Set(targetExam.assigned_test_ids || []);
+
+    // Check if exam has any explicit mappings configured
+    const hasExplicitMappings =
+      (modeMap.topic_wise && modeMap.topic_wise.length > 0) ||
+      (modeMap.subject_wise && modeMap.subject_wise.length > 0) ||
+      (modeMap.full_mock && modeMap.full_mock.length > 0) ||
+      (modeMap.pyq && modeMap.pyq.length > 0) ||
+      assignedIds.size > 0;
+
+    if (hasExplicitMappings) {
+      if (practiceMode && practiceMode !== 'All') {
+        const allowedIds = new Set(modeMap[practiceMode] || []);
+        // Also include any tests tagged to this target exam whose inferred mode is practiceMode
+        return tests.filter(t => {
+          if (allowedIds.has(t.id)) return true;
+          if (Array.isArray(t.target_exam_ids) && t.target_exam_ids.includes(targetExam.id) && inferPracticeMode(t) === practiceMode) {
+            return true;
+          }
+          return false;
+        });
+      } else {
+        // All modes for this target exam
+        const allAllowed = new Set<string>();
+        if (modeMap.topic_wise) modeMap.topic_wise.forEach(id => allAllowed.add(id));
+        if (modeMap.subject_wise) modeMap.subject_wise.forEach(id => allAllowed.add(id));
+        if (modeMap.full_mock) modeMap.full_mock.forEach(id => allAllowed.add(id));
+        if (modeMap.pyq) modeMap.pyq.forEach(id => allAllowed.add(id));
+        assignedIds.forEach(id => allAllowed.add(id));
+
+        return tests.filter(t => {
+          if (allAllowed.has(t.id)) return true;
+          if (Array.isArray(t.target_exam_ids) && t.target_exam_ids.includes(targetExam.id)) return true;
+          return false;
+        });
+      }
+    }
+
+    // Fallback: Smart keyword & category matching for default / unmapped exams
+    const examTitleLower = (targetExam?.title || '').toLowerCase();
+    const examCatLower = (targetExam?.category || '').toLowerCase();
+    const examSlugLower = (targetExam?.slug || '').toLowerCase();
+
+    const keywords: string[] = [];
+    if (examSlugLower.includes('police')) keywords.push('police', 'constable', 'si');
+    if (examSlugLower.includes('patwari')) keywords.push('patwari', 'revenue');
+    if (examSlugLower.includes('court')) keywords.push('court', 'clerk', 'process server');
+    if (examSlugLower.includes('ssc')) keywords.push('ssc', 'cgl', 'chsl', 'mts', 'gd');
+    if (examSlugLower.includes('railway') || examSlugLower.includes('ntpc')) keywords.push('railway', 'rrb', 'ntpc', 'group d');
+    if (examSlugLower.includes('bank')) keywords.push('bank', 'ibps', 'sbi', 'po', 'clerk');
+    if (examSlugLower.includes('hpas') || examSlugLower.includes('allied')) keywords.push('hpas', 'allied', 'naib', 'hppsc');
+    if (examSlugLower.includes('tet') || examSlugLower.includes('tgt')) keywords.push('tet', 'tgt', 'jbt', 'teaching');
+
+    return tests.filter(test => {
+      const tMode = inferPracticeMode(test);
+      if (practiceMode && practiceMode !== 'All' && tMode !== practiceMode) {
+        return false;
+      }
+
+      if (targetExam.id === 'general-competitive-all') {
+        return true;
+      }
+
+      if (Array.isArray(test.target_exam_ids) && test.target_exam_ids.includes(targetExam.id)) {
+        return true;
+      }
+
+      const tTitle = (test.title || '').toLowerCase();
+      const tCat = (test.category || '').toLowerCase();
+      const tCode = (test.test_code || test.exam_code || '').toLowerCase();
+
+      if (tCat && examTitleLower.includes(tCat)) return true;
+      if (keywords.length > 0 && keywords.some(kw => tTitle.includes(kw) || tCat.includes(kw) || tCode.includes(kw))) {
+        return true;
+      }
+
+      // If test is a general subject/topic test (e.g. Science, GK, English, Maths, Reasoning), it is also useful for this exam
+      if (tCat === 'Section / Subject Practice' || tCat === 'Topic Wise Practice' || tCat === 'All Competitive Exams') {
+        return true;
+      }
+
+      return false;
+    });
   }
 };

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { GraduationCap, ShieldCheck, Sun, Moon, Database, Award, Lock } from 'lucide-react';
+import { GraduationCap, ShieldCheck, Sun, Moon, Database, Award, Lock, Target } from 'lucide-react';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { dataService } from '../../services/dataService';
 import { GULogo, BrandLogo } from './GULogo';
+import { TargetExam } from '../../types';
 
 interface HeaderProps {
   currentView?: 'student' | 'admin' | 'test' | 'result';
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   const [logoClicks, setLogoClicks] = useState(0);
   const [logoUrl, setLogoUrl] = useState<string | null>('/logo.png');
   const [imgError, setImgError] = useState(false);
+  const [selectedTargetExam, setSelectedTargetExam] = useState<TargetExam | null>(null);
   const [isAdminUnlocked, setIsAdminUnlocked] = useState(() => {
     return sessionStorage.getItem('gradeup_admin_unlocked') === 'true';
   });
@@ -51,7 +53,19 @@ export const Header: React.FC<HeaderProps> = ({
       }).catch(err => console.warn('Failed to fetch settings in Header', err));
     };
 
+    const fetchTargetExam = () => {
+      const activeId = dataService.getSelectedTargetExamId();
+      if (activeId) {
+        dataService.getTargetExams().then(exams => {
+          setSelectedTargetExam(exams.find(ex => ex.id === activeId) || null);
+        });
+      } else {
+        setSelectedTargetExam(null);
+      }
+    };
+
     fetchLogo();
+    fetchTargetExam();
 
     const handleSettingsUpdated = (e: any) => {
       if (e.detail?.logo_url !== undefined) {
@@ -59,11 +73,19 @@ export const Header: React.FC<HeaderProps> = ({
       }
     };
 
+    const handleTargetExamChanged = () => {
+      fetchTargetExam();
+    };
+
     window.addEventListener('gradeup_settings_updated', handleSettingsUpdated);
+    window.addEventListener('gradeup_selected_target_exam_changed', handleTargetExamChanged);
+    window.addEventListener('gradeup_target_exams_updated', handleTargetExamChanged);
     window.addEventListener('storage', fetchLogo);
 
     return () => {
       window.removeEventListener('gradeup_settings_updated', handleSettingsUpdated);
+      window.removeEventListener('gradeup_selected_target_exam_changed', handleTargetExamChanged);
+      window.removeEventListener('gradeup_target_exams_updated', handleTargetExamChanged);
       window.removeEventListener('storage', fetchLogo);
     };
   }, [currentView]);
@@ -140,6 +162,24 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Right Navigation & Status Controls */}
           <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
             
+            {/* Target Exam Quick Switcher (Student View) */}
+            {currentView !== 'admin' && (
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('gradeup_open_target_exam_modal'));
+                }}
+                className="flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:hover:bg-blue-900/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800/80 transition-all cursor-pointer shadow-2xs"
+                title="Click to select or change your Target Exam"
+              >
+                <Target className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                <span className="hidden sm:inline font-bold text-slate-500 dark:text-slate-400">Target:</span>
+                <span className="max-w-[85px] sm:max-w-[130px] truncate font-black">
+                  {selectedTargetExam ? (selectedTargetExam.short_name || selectedTargetExam.title) : 'Select Exam'}
+                </span>
+                <span className="text-[10px] text-blue-500 font-mono">▾</span>
+              </button>
+            )}
+
             {/* Supabase Connection Status Badge (ONLY visible inside Admin Panel) */}
             {currentView === 'admin' && (
               <button
