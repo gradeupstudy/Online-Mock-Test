@@ -1276,7 +1276,7 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
                 className="px-6 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-black shadow-md shadow-blue-500/25 transition-all cursor-pointer flex items-center gap-1.5"
               >
                 <Save className="w-3.5 h-3.5" />
-                <span>{isSaving ? 'Saving...' : 'Save Target Exam & Mappings'}</span>
+                <span>{isSaving ? 'Saving & Syncing to Cloud...' : 'Save Target Exam & Mappings'}</span>
               </button>
             </div>
           </div>

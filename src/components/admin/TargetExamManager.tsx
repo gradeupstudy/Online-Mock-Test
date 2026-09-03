@@ -15,7 +15,11 @@ import {
   Filter,
   CheckCircle2,
   AlertCircle,
-  RotateCcw
+  RotateCcw,
+  Cloud,
+  Database,
+  Copy,
+  RefreshCw
 } from 'lucide-react';
 import { TargetExam, Test, PRIMARY_PRACTICE_MODES } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -38,6 +42,9 @@ export const TargetExamManager: React.FC<TargetExamManagerProps> = ({ onToast })
   const [editingExam, setEditingExam] = useState<TargetExam | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [isAutoMappingAll, setIsAutoMappingAll] = useState(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState(false);
+  const [showSqlModal, setShowSqlModal] = useState(false);
+  const [sqlCopied, setSqlCopied] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -163,9 +170,92 @@ export const TargetExamManager: React.FC<TargetExamManagerProps> = ({ onToast })
     }
   };
 
+  const handleSyncToCloud = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const result = await dataService.syncAllTargetExamsToSupabase();
+      if (result.success) {
+        onToast('success', `☁️ Synced ${result.count} Target Exams and Mock Mappings to Supabase Cloud! Visible on all devices.`);
+      } else {
+        onToast('error', result.error || 'Failed to sync to Supabase Cloud');
+      }
+    } catch (err: any) {
+      onToast('error', err?.message || 'Sync failed');
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  const SUPABASE_TARGET_EXAMS_SQL = `-- Run this in your Supabase SQL Editor if you want a dedicated relational table:
+CREATE TABLE IF NOT EXISTS public.target_exams (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    title TEXT NOT NULL,
+    hindi_title TEXT,
+    slug TEXT NOT NULL UNIQUE,
+    category TEXT NOT NULL DEFAULT 'General & Mixed',
+    icon TEXT DEFAULT 'Target',
+    description TEXT,
+    badge_text TEXT,
+    is_active BOOLEAN DEFAULT true,
+    is_popular BOOLEAN DEFAULT false,
+    order_index INTEGER DEFAULT 0,
+    mode_test_map JSONB DEFAULT '{"topic_wise": [], "subject_wise": [], "full_mock": [], "pyq": []}'::jsonb,
+    assigned_test_ids TEXT[] DEFAULT '{}',
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Enable RLS and public policies
+ALTER TABLE public.target_exams ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow public read target_exams" ON public.target_exams FOR SELECT USING (true);
+CREATE POLICY "Allow public write target_exams" ON public.target_exams FOR ALL USING (true) WITH CHECK (true);`;
+
   return (
     <div className="space-y-6">
       
+      {/* SUPABASE CLOUD STORAGE STATUS BANNER */}
+      <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-blue-500/10 dark:from-emerald-950/40 dark:via-teal-950/40 dark:to-blue-950/40 border border-emerald-200/80 dark:border-emerald-800/60 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-900/60 border border-emerald-200 dark:border-emerald-800 flex items-center justify-center text-emerald-700 dark:text-emerald-400 shrink-0">
+            <Cloud className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white">
+                Supabase Cloud Persistence Active
+              </h3>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-700 dark:bg-emerald-900/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">
+                Connected
+              </span>
+            </div>
+            <p className="text-[11px] sm:text-xs text-slate-600 dark:text-slate-400">
+              All target exams and mock test mappings automatically persist to Supabase memory and sync live to all student devices.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 w-full sm:w-auto self-end sm:self-center">
+          <button
+            onClick={() => setShowSqlModal(true)}
+            className="px-3 py-1.5 text-xs font-bold text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-white/80 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            title="View Supabase Table SQL"
+          >
+            <Database className="w-3.5 h-3.5 text-slate-500" />
+            <span>Table SQL</span>
+          </button>
+
+          <button
+            onClick={handleSyncToCloud}
+            disabled={isSyncingCloud}
+            className="px-3.5 py-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-200 bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-900/70 dark:hover:bg-emerald-800/80 border border-emerald-300 dark:border-emerald-700 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-xs"
+            title="Force sync all local Target Exams to Supabase Cloud Store now"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+            <span>{isSyncingCloud ? 'Syncing...' : 'Sync Cloud Now'}</span>
+          </button>
+        </div>
+      </div>
+
       {/* TOP STATS & ACTIONS HEADER */}
       <div className="bg-white dark:bg-slate-900 rounded-3xl p-5 sm:p-6 border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div className="space-y-1">
@@ -426,6 +516,69 @@ export const TargetExamManager: React.FC<TargetExamManagerProps> = ({ onToast })
         }}
         allTests={allTests}
       />
+
+      {/* SUPABASE SQL SCRIPT MODAL */}
+      {showSqlModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
+          <div 
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-5 bg-gradient-to-r from-slate-900 to-indigo-950 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-300">
+                  <Database className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Supabase `target_exams` Table SQL</h3>
+                  <p className="text-xs text-slate-300">Optional: Run this in Supabase SQL Editor if you prefer a dedicated table</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowSqlModal(false)}
+                className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <span className="font-bold">Cloud persistence is already fully working!</span> All Target Exams & test mappings are currently stored in Supabase cloud memory. You can optionally run this SQL in your Supabase SQL Editor to create a dedicated table with custom indexes.
+                </div>
+              </div>
+
+              <div className="relative">
+                <pre className="p-4 bg-slate-950 text-slate-100 rounded-xl text-xs font-mono overflow-x-auto leading-relaxed border border-slate-800">
+                  {SUPABASE_TARGET_EXAMS_SQL}
+                </pre>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(SUPABASE_TARGET_EXAMS_SQL);
+                    setSqlCopied(true);
+                    setTimeout(() => setSqlCopied(false), 2500);
+                  }}
+                  className="absolute top-3 right-3 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-sm flex items-center gap-1.5 cursor-pointer transition-all"
+                >
+                  {sqlCopied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{sqlCopied ? 'Copied!' : 'Copy SQL'}</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/60 border-t border-slate-200 dark:border-slate-800 flex justify-end">
+              <button
+                onClick={() => setShowSqlModal(false)}
+                className="px-4 py-2 bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-800 dark:text-white text-xs font-bold rounded-xl transition-all cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

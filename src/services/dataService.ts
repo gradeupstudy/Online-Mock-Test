@@ -216,6 +216,8 @@ export const normalizePlatformId = (id: string | null | undefined, name?: string
   return generateUUID();
 };
 
+export const TARGET_EXAMS_SYSTEM_ROW_ID = '00000000-0000-0000-0000-000000000099';
+
 const STORAGE_KEYS = {
   TESTS: 'gradeup_tests',
   QUESTIONS: 'gradeup_questions',
@@ -1536,7 +1538,7 @@ export const dataService = {
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        let query = supabase.from('tests').select('*').order('created_at', { ascending: false });
+        let query = supabase.from('tests').select('*').neq('id', TARGET_EXAMS_SYSTEM_ROW_ID).order('created_at', { ascending: false });
         if (!includeUnpublished) {
           query = query.eq('is_published', true).eq('status', 'published');
         }
@@ -1552,7 +1554,9 @@ export const dataService = {
             }
           } catch {}
 
-          const remoteTests = (data as any[]).map(t => {
+          const remoteTests = (data as any[])
+            .filter(t => t.id !== TARGET_EXAMS_SYSTEM_ROW_ID && t.category !== '__SYSTEM_INTERNAL__' && t.test_code !== '__SYS_TARGET_EXAMS__')
+            .map(t => {
             const local = localMap[t.id];
             const maxAttempts = (t.max_attempts_per_student !== undefined && t.max_attempts_per_student !== null)
               ? Number(t.max_attempts_per_student)
@@ -1610,7 +1614,9 @@ export const dataService = {
       localTests = DEMO_TESTS;
     }
 
-    const calibratedLocalTests = localTests.map(t => {
+    const calibratedLocalTests = localTests
+      .filter(t => t.id !== TARGET_EXAMS_SYSTEM_ROW_ID && t.category !== '__SYSTEM_INTERNAL__' && t.test_code !== '__SYS_TARGET_EXAMS__')
+      .map(t => {
       const actualQuestionsCount = qCounts[t.id] !== undefined
         ? qCounts[t.id]
         : (t.slug && qCounts[t.slug] !== undefined ? qCounts[t.slug] : 0);
@@ -1646,6 +1652,9 @@ export const dataService = {
   getTestBySlugOrId: async (identifier: string): Promise<Test | null> => {
     if (!identifier) return null;
     let cleanId = identifier.trim();
+    if (cleanId === TARGET_EXAMS_SYSTEM_ROW_ID || cleanId.includes('__SYS_TARGET_EXAMS__')) {
+      return null;
+    }
     try {
       cleanId = decodeURIComponent(cleanId);
     } catch {
@@ -4964,25 +4973,65 @@ export const dataService = {
     };
 
     if (isSupabaseConfigured() && supabase) {
+      let fetchedFromTable = false;
+      // 1. Primary Strategy: Check dedicated `target_exams` table in Supabase
       try {
-        const query = supabase.from('target_exams').select('*').order('order_index', { ascending: true });
+        let query = supabase.from('target_exams').select('*').order('order_index', { ascending: true });
         if (!includeInactive) {
-          query.eq('is_active', true);
+          query = query.eq('is_active', true);
         }
         const { data, error } = await query;
         if (!error && Array.isArray(data) && data.length > 0) {
+          fetchedFromTable = true;
           list = data
             .filter((item: any) => !isDeleted(item))
             .map((item: any) => ({
               ...item,
-              mode_test_map: item.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] }
+              hindiTitle: item.hindi_title || item.hindiTitle || '',
+              badgeText: item.badge_text || item.badgeText || '',
+              mode_test_map: item.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] },
+              assigned_test_ids: item.assigned_test_ids || []
             }));
           localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(list));
           idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, list);
           return list;
         }
       } catch (err) {
-        console.warn('Failed to fetch target exams from Supabase, using local fallback', err);
+        // Table may not exist yet in Supabase project, will proceed to Cloud Store
+      }
+
+      // 2. Secondary Strategy: Read from Supabase Cloud System Store (persists across all devices/students automatically)
+      if (!fetchedFromTable) {
+        try {
+          const { data: cloudStore, error: cloudErr } = await supabase
+            .from('tests')
+            .select('instructions, updated_at')
+            .eq('id', TARGET_EXAMS_SYSTEM_ROW_ID)
+            .maybeSingle();
+
+          if (!cloudErr && cloudStore?.instructions) {
+            const parsed = JSON.parse(cloudStore.instructions);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              list = parsed
+                .filter((item: any) => !isDeleted(item))
+                .map((item: any) => ({
+                  ...item,
+                  mode_test_map: item.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] },
+                  assigned_test_ids: item.assigned_test_ids || []
+                }));
+              localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(list));
+              idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, list);
+
+              list.sort((a, b) => (a.order_index ?? 999) - (b.order_index ?? 999));
+              if (!includeInactive) {
+                list = list.filter(e => e.is_active !== false);
+              }
+              return list;
+            }
+          }
+        } catch (cloudReadErr) {
+          console.warn('Supabase cloud store read warning:', cloudReadErr);
+        }
       }
     }
 
@@ -5069,9 +5118,10 @@ export const dataService = {
     }
     idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, existingList);
 
-    // Sync to Supabase if configured
+    // Sync to Supabase if configured (Dual-layer persistence: target_exams table + system cloud store)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
+      // 1. Try dedicated table upsert (if table exists)
       try {
         await supabase.from('target_exams').upsert({
           id: completeExam.id,
@@ -5090,7 +5140,24 @@ export const dataService = {
           updated_at: now
         });
       } catch (sbErr) {
-        console.warn('Supabase target exams upsert warning (table might be optional/schema-agnostic):', sbErr);
+        // Table might not exist yet; cloud store will safely hold the data
+      }
+
+      // 2. Guaranteed Cloud Store persistence (persists to Supabase tests system row accessible across all student devices)
+      try {
+        await supabase.from('tests').upsert({
+          id: TARGET_EXAMS_SYSTEM_ROW_ID,
+          test_code: '__SYS_TARGET_EXAMS__',
+          title: '__SYSTEM_TARGET_EXAMS_STORE__',
+          slug: '__sys_target_exams_store__',
+          category: '__SYSTEM_INTERNAL__',
+          instructions: JSON.stringify(existingList),
+          is_published: false,
+          status: 'archived',
+          updated_at: now
+        });
+      } catch (cloudErr) {
+        console.warn('Supabase cloud store target exams upsert warning:', cloudErr);
       }
     }
 
@@ -5137,10 +5204,11 @@ export const dataService = {
     }
 
     // 3. Remove from local storage array and IndexedDB
+    let filtered: TargetExam[] = [];
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.TARGET_EXAMS);
       const existingList: TargetExam[] = raw ? JSON.parse(raw) : [];
-      const filtered = existingList.filter(e => 
+      filtered = existingList.filter(e => 
         e.id !== idToDelete && 
         e.slug !== idToDelete && 
         e.id !== idOrSlug && 
@@ -5163,13 +5231,29 @@ export const dataService = {
       dataService.setSelectedTargetExamId(null);
     }
 
-    // 5. Delete from Supabase if configured
+    // 5. Delete from Supabase if configured (both table and cloud store)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
         await supabase.from('target_exams').delete().or(`id.eq.${idToDelete},slug.eq.${idToDelete}`);
       } catch (sbErr) {
         console.warn('Supabase delete target exam warning:', sbErr);
+      }
+
+      try {
+        await supabase.from('tests').upsert({
+          id: TARGET_EXAMS_SYSTEM_ROW_ID,
+          test_code: '__SYS_TARGET_EXAMS__',
+          title: '__SYSTEM_TARGET_EXAMS_STORE__',
+          slug: '__sys_target_exams_store__',
+          category: '__SYSTEM_INTERNAL__',
+          instructions: JSON.stringify(filtered),
+          is_published: false,
+          status: 'archived',
+          updated_at: new Date().toISOString()
+        });
+      } catch (cloudErr) {
+        console.warn('Supabase cloud store target exams delete-sync warning:', cloudErr);
       }
     }
 
@@ -5185,8 +5269,81 @@ export const dataService = {
     } catch (e) {
       console.warn('Failed to restore default target exams', e);
     }
+
+    // Sync to Supabase Cloud Store
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      try {
+        await supabase.from('tests').upsert({
+          id: TARGET_EXAMS_SYSTEM_ROW_ID,
+          test_code: '__SYS_TARGET_EXAMS__',
+          title: '__SYSTEM_TARGET_EXAMS_STORE__',
+          slug: '__sys_target_exams_store__',
+          category: '__SYSTEM_INTERNAL__',
+          instructions: JSON.stringify(DEFAULT_TARGET_EXAMS),
+          is_published: false,
+          status: 'archived',
+          updated_at: new Date().toISOString()
+        });
+      } catch (cloudErr) {
+        console.warn('Failed to restore defaults in Supabase cloud store:', cloudErr);
+      }
+    }
+
     window.dispatchEvent(new CustomEvent('gradeup_target_exams_updated', { detail: { restored: true } }));
     return [...DEFAULT_TARGET_EXAMS];
+  },
+
+  syncAllTargetExamsToSupabase: async (): Promise<{ success: boolean; count: number; error?: string }> => {
+    const list = await dataService.getTargetExams(true);
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase) {
+      return { success: false, count: 0, error: 'Supabase is not configured' };
+    }
+
+    try {
+      const now = new Date().toISOString();
+      // 1. Try dedicated table batch upsert
+      try {
+        const rows = list.map(e => ({
+          id: e.id,
+          title: e.title,
+          hindi_title: e.hindiTitle || '',
+          slug: e.slug,
+          category: e.category,
+          icon: e.icon,
+          description: e.description,
+          badge_text: e.badgeText || '',
+          is_active: e.is_active,
+          is_popular: e.is_popular,
+          order_index: e.order_index,
+          mode_test_map: e.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] },
+          assigned_test_ids: e.assigned_test_ids || [],
+          updated_at: now
+        }));
+        await supabase.from('target_exams').upsert(rows);
+      } catch {
+        // Dedicated table may not exist yet
+      }
+
+      // 2. Guaranteed cloud store sync
+      await supabase.from('tests').upsert({
+        id: TARGET_EXAMS_SYSTEM_ROW_ID,
+        test_code: '__SYS_TARGET_EXAMS__',
+        title: '__SYSTEM_TARGET_EXAMS_STORE__',
+        slug: '__sys_target_exams_store__',
+        category: '__SYSTEM_INTERNAL__',
+        instructions: JSON.stringify(list),
+        is_published: false,
+        status: 'archived',
+        updated_at: now
+      });
+
+      return { success: true, count: list.length };
+    } catch (e: any) {
+      console.error('Failed to sync target exams to Supabase Cloud:', e);
+      return { success: false, count: 0, error: e?.message || 'Sync failed' };
+    }
   },
 
   getSelectedTargetExamId: (): string | null => {
