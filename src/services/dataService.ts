@@ -1082,6 +1082,15 @@ export const dataService = {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   },
 
+  getAllSectionsAndSubjects: (): string[] => {
+    const subs = dataService.getMasterSubjects();
+    const secs = dataService.getMasterSections();
+    const set = new Set<string>();
+    subs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    secs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  },
+
   saveMasterCategory: async (categoryName: string): Promise<string[]> => {
     const name = categoryName.trim();
     if (!name) return dataService.getMasterCategories();
@@ -1093,6 +1102,21 @@ export const dataService = {
       } catch {}
       idbStorage.set(STORAGE_KEYS.MASTER_CATEGORIES, existing);
     }
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_taxonomy_updated', { detail: { type: 'category', name } }));
+    } catch {}
+    // Background sync to Supabase admin_settings if available
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      (async () => {
+        try {
+          await supabase.from('admin_settings').update({
+            master_categories: existing,
+            updated_at: new Date().toISOString()
+          }).neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch {}
+      })();
+    }
     return existing;
   },
 
@@ -1103,6 +1127,20 @@ export const dataService = {
       localStorage.setItem(STORAGE_KEYS.MASTER_CATEGORIES, JSON.stringify(updated));
     } catch {}
     idbStorage.set(STORAGE_KEYS.MASTER_CATEGORIES, updated);
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_taxonomy_updated', { detail: { type: 'category', name: categoryName } }));
+    } catch {}
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      (async () => {
+        try {
+          await supabase.from('admin_settings').update({
+            master_categories: updated,
+            updated_at: new Date().toISOString()
+          }).neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch {}
+      })();
+    }
     return updated;
   },
 
@@ -1138,10 +1176,23 @@ export const dataService = {
       }
     } catch {}
 
+    // Also include saved master sections so taxonomy stays tightly bridged
+    let savedSections: string[] = [];
+    try {
+      const rawSecs = localStorage.getItem(STORAGE_KEYS.MASTER_SECTIONS);
+      if (rawSecs) {
+        const parsedSecs = JSON.parse(rawSecs);
+        if (Array.isArray(parsedSecs)) savedSections = parsedSecs;
+      }
+    } catch {}
+
     const set = new Set<string>();
     DEFAULT_MASTER_SUBJECTS.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
     if (Array.isArray(savedSubs)) {
       savedSubs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
+    if (Array.isArray(savedSections)) {
+      savedSections.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
     }
     if (Array.isArray(bankSubs)) {
       bankSubs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
@@ -1164,6 +1215,31 @@ export const dataService = {
       } catch {}
       idbStorage.set(STORAGE_KEYS.MASTER_SUBJECTS, existing);
     }
+    // Also mirror to master sections
+    try {
+      const secExisting = [...dataService.getMasterSections()];
+      if (!secExisting.some(s => s.toLowerCase() === name.toLowerCase())) {
+        secExisting.unshift(name);
+        localStorage.setItem(STORAGE_KEYS.MASTER_SECTIONS, JSON.stringify(secExisting));
+        idbStorage.set(STORAGE_KEYS.MASTER_SECTIONS, secExisting);
+      }
+    } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_taxonomy_updated', { detail: { type: 'subject', name } }));
+    } catch {}
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      (async () => {
+        try {
+          await supabase.from('admin_settings').update({
+            master_subjects: existing,
+            updated_at: new Date().toISOString()
+          }).neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch {}
+      })();
+    }
     return existing;
   },
 
@@ -1174,6 +1250,30 @@ export const dataService = {
       localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(updated));
     } catch {}
     idbStorage.set(STORAGE_KEYS.MASTER_SUBJECTS, updated);
+
+    // Also update sections
+    try {
+      const secCurrent = dataService.getMasterSections();
+      const secUpdated = secCurrent.filter(s => s.toLowerCase() !== subjectName.toLowerCase());
+      localStorage.setItem(STORAGE_KEYS.MASTER_SECTIONS, JSON.stringify(secUpdated));
+      idbStorage.set(STORAGE_KEYS.MASTER_SECTIONS, secUpdated);
+    } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_taxonomy_updated', { detail: { type: 'subject', name: subjectName } }));
+    } catch {}
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      (async () => {
+        try {
+          await supabase.from('admin_settings').update({
+            master_subjects: updated,
+            updated_at: new Date().toISOString()
+          }).neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch {}
+      })();
+    }
     return updated;
   },
 
@@ -1216,10 +1316,23 @@ export const dataService = {
       }
     } catch {}
 
+    // Also include saved master subjects
+    let savedSubs: string[] = [];
+    try {
+      const rawSubs = localStorage.getItem(STORAGE_KEYS.MASTER_SUBJECTS);
+      if (rawSubs) {
+        const parsed = JSON.parse(rawSubs);
+        if (Array.isArray(parsed)) savedSubs = parsed;
+      }
+    } catch {}
+
     const set = new Set<string>();
     DEFAULT_MASTER_SECTIONS.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
     if (Array.isArray(savedSections)) {
       savedSections.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    }
+    if (Array.isArray(savedSubs)) {
+      savedSubs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
     }
     if (Array.isArray(testSections)) {
       testSections.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
@@ -1242,6 +1355,31 @@ export const dataService = {
       } catch {}
       idbStorage.set(STORAGE_KEYS.MASTER_SECTIONS, existing);
     }
+    // Also save into subjects so they are 100% in sync
+    try {
+      const subExisting = [...dataService.getMasterSubjects()];
+      if (!subExisting.some(s => s.toLowerCase() === name.toLowerCase())) {
+        subExisting.unshift(name);
+        localStorage.setItem(STORAGE_KEYS.MASTER_SUBJECTS, JSON.stringify(subExisting));
+        idbStorage.set(STORAGE_KEYS.MASTER_SUBJECTS, subExisting);
+      }
+    } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_taxonomy_updated', { detail: { type: 'section', name } }));
+    } catch {}
+
+    const supabase = getSupabaseClient();
+    if (isSupabaseConfigured() && supabase) {
+      (async () => {
+        try {
+          await supabase.from('admin_settings').update({
+            master_sections: existing,
+            updated_at: new Date().toISOString()
+          }).neq('id', '00000000-0000-0000-0000-000000000000');
+        } catch {}
+      })();
+    }
     return existing;
   },
 
@@ -1252,6 +1390,9 @@ export const dataService = {
       localStorage.setItem(STORAGE_KEYS.MASTER_SECTIONS, JSON.stringify(updated));
     } catch {}
     idbStorage.set(STORAGE_KEYS.MASTER_SECTIONS, updated);
+    try {
+      window.dispatchEvent(new CustomEvent('gradeup_taxonomy_updated', { detail: { type: 'section', name: sectionName } }));
+    } catch {}
     return updated;
   },
 

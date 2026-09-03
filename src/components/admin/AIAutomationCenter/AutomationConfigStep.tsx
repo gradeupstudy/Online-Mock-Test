@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   FileText,
   Upload,
@@ -16,7 +16,8 @@ import {
   Check,
   Plus,
   HelpCircle,
-  FileCheck
+  FileCheck,
+  FolderPlus
 } from 'lucide-react';
 import { AIAutomationConfig } from '../../../types/aiAutomation';
 import { PRIMARY_PRACTICE_MODES, PracticeMode } from '../../../types';
@@ -43,8 +44,80 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
   onToast
 }) => {
   const [isDragOver, setIsDragOver] = useState(false);
-  const canonicalSubjects = getAllCanonicalSubjectNames();
-  const existingCategories = dataService.getMasterCategories();
+
+  // Dynamic Unified Taxonomy State
+  const [categories, setCategories] = useState<string[]>(() => dataService.getMasterCategories());
+  const [sectionsAndSubjects, setSectionsAndSubjects] = useState<string[]>(() => {
+    const subs = dataService.getMasterSubjects();
+    const secs = dataService.getMasterSections();
+    const canon = getAllCanonicalSubjectNames();
+    const set = new Set<string>();
+    canon.forEach(c => { if (c && c.trim()) set.add(c.trim()); });
+    subs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    secs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  });
+
+  // Inline creation states
+  const [showAddCategoryInput, setShowAddCategoryInput] = useState(false);
+  const [newCategoryInput, setNewCategoryInput] = useState('');
+  const [showAddSectionInput, setShowAddSectionInput] = useState(false);
+  const [newSectionInput, setNewSectionInput] = useState('');
+
+  // Sync with global taxonomy updates
+  useEffect(() => {
+    const refreshTaxonomy = () => {
+      setCategories(dataService.getMasterCategories());
+      const subs = dataService.getMasterSubjects();
+      const secs = dataService.getMasterSections();
+      const canon = getAllCanonicalSubjectNames();
+      const set = new Set<string>();
+      canon.forEach(c => { if (c && c.trim()) set.add(c.trim()); });
+      subs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+      secs.forEach(s => { if (s && s.trim()) set.add(s.trim()); });
+      setSectionsAndSubjects(Array.from(set).sort((a, b) => a.localeCompare(b)));
+    };
+
+    window.addEventListener('gradeup_taxonomy_updated', refreshTaxonomy);
+    return () => {
+      window.removeEventListener('gradeup_taxonomy_updated', refreshTaxonomy);
+    };
+  }, []);
+
+  const handleQuickAddCategory = async () => {
+    const trimmed = newCategoryInput.trim();
+    if (!trimmed) {
+      setShowAddCategoryInput(false);
+      return;
+    }
+    try {
+      await dataService.saveMasterCategory(trimmed);
+      onChangeConfig({ category: trimmed });
+      setNewCategoryInput('');
+      setShowAddCategoryInput(false);
+      onToast?.('success', `Category "${trimmed}" created and selected!`);
+    } catch {
+      onToast?.('error', 'Failed to save category');
+    }
+  };
+
+  const handleQuickAddSection = async () => {
+    const trimmed = newSectionInput.trim();
+    if (!trimmed) {
+      setShowAddSectionInput(false);
+      return;
+    }
+    try {
+      await dataService.saveMasterSection(trimmed);
+      await dataService.saveMasterSubject(trimmed);
+      onChangeConfig({ subject: trimmed });
+      setNewSectionInput('');
+      setShowAddSectionInput(false);
+      onToast?.('success', `Section/Subject "${trimmed}" created and selected!`);
+    } catch {
+      onToast?.('error', 'Failed to save section');
+    }
+  };
 
   const handleProcessUploadedFile = (file: File) => {
     onPdfFileChange(file);
@@ -325,33 +398,102 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
             {/* Category / Exam Path */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2">
               <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Path / Exam Category <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
+                    Path / Exam Category <span className="text-rose-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCategoryInput(!showAddCategoryInput)}
+                    className="text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{showAddCategoryInput ? 'Cancel' : '+ New Category'}</span>
+                  </button>
+                </div>
+
+                {showAddCategoryInput ? (
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <input
+                      type="text"
+                      value={newCategoryInput}
+                      onChange={(e) => setNewCategoryInput(e.target.value)}
+                      placeholder="e.g. HP Police Constable 2026..."
+                      className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-white dark:bg-slate-800 border border-blue-500 font-bold"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleQuickAddCategory();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleQuickAddCategory}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-xl text-xs font-black hover:bg-blue-700 cursor-pointer"
+                    >
+                      Save
+                    </button>
+                  </div>
+                ) : null}
+
                 <select
                   value={config.category}
                   onChange={(e) => onChangeConfig({ category: e.target.value })}
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white"
                 >
-                  <option value="Section / Subject Practice">Section / Subject Practice</option>
-                  <option value="Topic Wise Practice">Topic Wise Practice</option>
-                  <option value="All Competitive Exams">All Competitive Exams</option>
-                  <option value="HP Police Constable">HP Police Constable</option>
-                  <option value="HP Patwari Exam">HP Patwari Exam</option>
-                  <option value="HP High Court Clerk">HP High Court Clerk</option>
-                  <option value="Himachal Pradesh GK">Himachal Pradesh GK</option>
-                  {existingCategories
-                    .filter(c => !['Section / Subject Practice', 'Topic Wise Practice', 'All Competitive Exams', 'HP Police Constable', 'HP Patwari Exam', 'HP High Court Clerk', 'Himachal Pradesh GK'].includes(c))
-                    .map(c => (
-                      <option key={c} value={c}>{c}</option>
-                    ))}
+                  {/* If current value is not yet in categories list, render it */}
+                  {config.category && !categories.includes(config.category) && (
+                    <option value={config.category}>{config.category}</option>
+                  )}
+                  {categories.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-600 dark:text-slate-400 mb-1">
-                  Section / Subject <span className="text-rose-500">*</span>
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-bold text-slate-600 dark:text-slate-400">
+                    Section / Subject <span className="text-rose-500">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddSectionInput(!showAddSectionInput)}
+                    className="text-[11px] font-bold text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{showAddSectionInput ? 'Cancel' : '+ New Section/Subject'}</span>
+                  </button>
+                </div>
+
+                {showAddSectionInput ? (
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <input
+                      type="text"
+                      value={newSectionInput}
+                      onChange={(e) => setNewSectionInput(e.target.value)}
+                      placeholder="e.g. General Science, Reasoning, Section A..."
+                      className="flex-1 px-3 py-1.5 text-xs rounded-xl bg-white dark:bg-slate-800 border border-purple-500 font-bold"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleQuickAddSection();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleQuickAddSection}
+                      className="px-3 py-1.5 bg-purple-600 text-white rounded-xl text-xs font-black hover:bg-purple-700 cursor-pointer"
+                    >
+                      Save
+                    </button>
+                  </div>
+                ) : null}
+
                 <select
                   value={config.subject}
                   onChange={(e) => {
@@ -369,21 +511,13 @@ export const AutomationConfigStep: React.FC<AutomationConfigStepProps> = ({
                   }}
                   className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 font-bold text-slate-900 dark:text-white"
                 >
-                  <option value="General Science">General Science (सामान्य विज्ञान)</option>
-                  <option value="Hindi Grammar">Hindi Grammar (हिंदी व्याकरण - Hindi Only)</option>
-                  <option value="Hindi Vocab">Hindi Vocab (हिंदी शब्दावली - Hindi Only)</option>
-                  <option value="English Grammar">English Grammar (English Only)</option>
-                  <option value="English Vocab">English Vocab (English Only)</option>
-                  <option value="Mathematics">Mathematics (गणित)</option>
-                  <option value="Reasoning Ability">Reasoning Ability (तर्कशक्ति)</option>
-                  <option value="HP General Knowledge">HP General Knowledge (हिमाचल सामान्य ज्ञान)</option>
-                  <option value="General Studies">General Studies (सामान्य अध्ययन)</option>
-                  <option value="Current Affairs">Current Affairs (समसामयिकी)</option>
-                  {canonicalSubjects
-                    .filter(s => !['General Science', 'Hindi Grammar', 'Hindi Vocab', 'English Grammar', 'English Vocab', 'Mathematics', 'Reasoning Ability', 'HP General Knowledge', 'General Studies', 'Current Affairs'].includes(s))
-                    .map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
+                  {/* If current value is not in sections/subjects, keep it selectable */}
+                  {config.subject && !sectionsAndSubjects.includes(config.subject) && (
+                    <option value={config.subject}>{config.subject}</option>
+                  )}
+                  {sectionsAndSubjects.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
                 </select>
               </div>
             </div>

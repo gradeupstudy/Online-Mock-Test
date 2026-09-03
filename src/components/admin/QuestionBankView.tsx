@@ -115,17 +115,21 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   const [isTaxonomyManagerOpen, setIsTaxonomyManagerOpen] = useState(false);
   const [masterCategories, setMasterCategories] = useState<string[]>([]);
   const [masterSubjects, setMasterSubjects] = useState<string[]>([]);
+  const [masterSections, setMasterSections] = useState<string[]>([]);
   const [questionsToShift, setQuestionsToShift] = useState<Question[]>([]);
 
   const refreshMasterTaxonomies = () => {
     try {
       const cats = dataService.getMasterCategories();
       const subs = dataService.getMasterSubjects();
+      const secs = dataService.getMasterSections();
       setMasterCategories(Array.isArray(cats) ? cats : []);
       setMasterSubjects(Array.isArray(subs) ? subs : []);
+      setMasterSections(Array.isArray(secs) ? secs : []);
     } catch {
       setMasterCategories([]);
       setMasterSubjects([]);
+      setMasterSections([]);
     }
   };
 
@@ -150,6 +154,14 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   useEffect(() => {
     refreshMasterTaxonomies();
     loadBankData();
+
+    const handleTaxonomyUpdated = () => {
+      refreshMasterTaxonomies();
+    };
+    window.addEventListener('gradeup_taxonomy_updated', handleTaxonomyUpdated);
+    return () => {
+      window.removeEventListener('gradeup_taxonomy_updated', handleTaxonomyUpdated);
+    };
   }, []);
 
   const loadBankData = async (forceCloudSync = false) => {
@@ -221,7 +233,7 @@ export const QuestionBankView: React.FC<QuestionBankViewProps> = ({
   };
 
   // Distinct Filter options (merged with Predefined Master Taxonomy)
-  const safeMasterSubjects = Array.isArray(masterSubjects) ? masterSubjects : [];
+  const safeMasterSubjects = Array.from(new Set([...(Array.isArray(masterSubjects) ? masterSubjects : []), ...(Array.isArray(masterSections) ? masterSections : [])]));
   const safeMasterCategories = Array.isArray(masterCategories) ? masterCategories : [];
   const distinctSubjects = Array.from(new Set([...safeMasterSubjects, ...questions.map((q) => q.subject).filter(Boolean)])).filter(Boolean);
   const distinctCategories = Array.from(new Set([...safeMasterCategories, ...tests.map((t) => t.category).filter(Boolean)])).filter(Boolean);

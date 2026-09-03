@@ -86,6 +86,7 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
   const [isTaxonomyManagerOpen, setIsTaxonomyManagerOpen] = useState(false);
   const [masterCategories, setMasterCategories] = useState<string[]>([]);
   const [masterSubjects, setMasterSubjects] = useState<string[]>([]);
+  const [masterSections, setMasterSections] = useState<string[]>([]);
   const [usageReport, setUsageReport] = useState<any>(null);
   
   // Bulk negative marking and marks controls
@@ -111,17 +112,33 @@ export const QuestionManager: React.FC<QuestionManagerProps> = ({
 
   useEffect(() => {
     loadTestAndQuestions();
+
+    const handleTaxonomyUpdated = () => {
+      const cats = dataService.getMasterCategories();
+      const subs = dataService.getMasterSubjects();
+      const secs = dataService.getMasterSections();
+      setMasterCategories(Array.isArray(cats) ? cats : []);
+      setMasterSubjects(Array.isArray(subs) ? subs : []);
+      setMasterSections(Array.isArray(secs) ? secs : []);
+    };
+    window.addEventListener('gradeup_taxonomy_updated', handleTaxonomyUpdated);
+    return () => {
+      window.removeEventListener('gradeup_taxonomy_updated', handleTaxonomyUpdated);
+    };
   }, [testId]);
 
   const loadTestAndQuestions = async () => {
     try {
       const cats = dataService.getMasterCategories();
       const subs = dataService.getMasterSubjects();
+      const secs = dataService.getMasterSections();
       setMasterCategories(Array.isArray(cats) ? cats : []);
       setMasterSubjects(Array.isArray(subs) ? subs : []);
+      setMasterSections(Array.isArray(secs) ? secs : []);
     } catch {
       setMasterCategories([]);
       setMasterSubjects([]);
+      setMasterSections([]);
     }
     const [t, qList, report] = await Promise.all([
       dataService.getTestBySlugOrId(testId),

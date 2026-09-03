@@ -20,7 +20,8 @@ import {
   Zap,
   FolderPlus,
   Flag,
-  Cpu
+  Cpu,
+  Archive
 } from 'lucide-react';
 import { Test, Attempt, QuestionReport } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -36,8 +37,9 @@ import { ReportedMCQsManager } from './ReportedMCQsManager';
 import { BulkAITestGeneratorModal } from './BulkAITestGeneratorModal';
 import { SupabaseStorageIndicator } from './SupabaseStorageIndicator';
 import { AIAutomationCenter } from './AIAutomationCenter/AIAutomationCenter';
+import { ProjectBackupManager } from './ProjectBackupManager';
 
-export type AdminTab = 'dashboard' | 'ai_automation' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
+export type AdminTab = 'dashboard' | 'ai_automation' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings' | 'backup';
 
 interface AdminDashboardProps {
   onNavigateTab?: (tab: AdminTab, testId?: string) => void;
@@ -268,6 +270,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <Share2 className="w-4 h-4" />
             <span>Social Gate</span>
+          </button>
+
+          <button
+            onClick={() => handleTabChange('backup')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === 'backup'
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Archive className="w-4 h-4 text-emerald-500" />
+            <span>Backup & Restore</span>
+            <span className={`text-[10px] px-1.5 py-0.2 rounded-md font-black ${
+              activeTab === 'backup' ? 'bg-white/20 text-white' : 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+            }`}>
+              ZIP
+            </span>
           </button>
 
           <button
@@ -688,6 +707,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {activeTab === 'social' && (
         <SocialGateManager onToast={safeToast} />
+      )}
+
+      {activeTab === 'backup' && (
+        <ProjectBackupManager
+          onToast={safeToast}
+          onOpenSupabaseModal={onOpenSupabaseModal}
+        />
       )}
 
       {activeTab === 'settings' && (

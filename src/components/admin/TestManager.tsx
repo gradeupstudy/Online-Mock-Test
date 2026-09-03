@@ -320,20 +320,38 @@ export const TestManager: React.FC<TestManagerProps> = ({
     notify('info', 'Loaded global channels as editable custom channels!');
   };
 
-  // Unique categories derived dynamically from all available tests
+  // Dynamic master taxonomy state synchronized across app
+  const [masterCategories, setMasterCategories] = useState<string[]>(() => dataService.getMasterCategories());
+  const [masterSubjects, setMasterSubjects] = useState<string[]>(() => dataService.getMasterSubjects());
+  const [masterSections, setMasterSections] = useState<string[]>(() => dataService.getMasterSections());
+
+  useEffect(() => {
+    const handleTaxonomy = () => {
+      setMasterCategories(dataService.getMasterCategories());
+      setMasterSubjects(dataService.getMasterSubjects());
+      setMasterSections(dataService.getMasterSections());
+    };
+    window.addEventListener('gradeup_taxonomy_updated', handleTaxonomy);
+    return () => window.removeEventListener('gradeup_taxonomy_updated', handleTaxonomy);
+  }, []);
+
+  // Unique categories derived dynamically from all available tests and master taxonomy
   const dynamicCategories = Array.from(
     new Set([
       'Police Exam',
       'Revenue Exam',
       'Teacher Exam',
       'General Exam',
+      ...masterCategories,
       ...tests.map((t) => t.category).filter(Boolean)
     ])
   ) as string[];
 
-  // Unique subjects derived dynamically from all available tests
+  // Unique subjects derived dynamically from all available tests and master taxonomy
   const dynamicSubjects = Array.from(
     new Set([
+      ...masterSubjects,
+      ...masterSections,
       ...tests.map((t) => t.subject).filter(Boolean)
     ])
   ) as string[];
@@ -1268,11 +1286,17 @@ export const TestManager: React.FC<TestManagerProps> = ({
                 <input
                   type="text"
                   required
+                  list="test-categories-datalist"
                   value={editingTest.category || ''}
                   onChange={(e) => setEditingTest({ ...editingTest, category: e.target.value })}
                   placeholder="e.g. Police Exam, HP Forest Guard, Patwari, HPAS"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
+                <datalist id="test-categories-datalist">
+                  {dynamicCategories.map((cat) => (
+                    <option key={cat} value={cat} />
+                  ))}
+                </datalist>
               </div>
 
               <div>
@@ -1281,11 +1305,17 @@ export const TestManager: React.FC<TestManagerProps> = ({
                 </label>
                 <input
                   type="text"
+                  list="test-subjects-datalist"
                   value={editingTest.subject || ''}
                   onChange={(e) => setEditingTest({ ...editingTest, subject: e.target.value })}
                   placeholder="e.g. Full Syllabus Mock Test, Hindi & English, GK"
                   className="w-full px-3.5 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm focus:ring-2 focus:ring-blue-500 outline-hidden"
                 />
+                <datalist id="test-subjects-datalist">
+                  {dynamicSubjects.map((sub) => (
+                    <option key={sub} value={sub} />
+                  ))}
+                </datalist>
               </div>
             </div>
 

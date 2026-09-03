@@ -11,9 +11,6 @@ import {
   Search,
   Layers,
   Sparkles,
-  RefreshCw,
-  FolderPlus,
-  FileQuestion,
   GraduationCap
 } from 'lucide-react';
 import { dataService } from '../../services/dataService';
@@ -22,7 +19,7 @@ import { Question, Test } from '../../types';
 interface CategorySubjectManagerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'categories' | 'subjects';
+  initialTab?: 'categories' | 'subjects' | 'sections';
   onUpdated?: () => void;
   onToast?: (type: 'success' | 'error' | 'info', msg: string) => void;
 }
@@ -34,46 +31,60 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
   onUpdated,
   onToast
 }) => {
-  const [activeTab, setActiveTab] = useState<'categories' | 'subjects'>(initialTab);
-  const [categories, setCategories] = useState<string[]>([]);
-  const [subjects, setSubjects] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'categories' | 'subjects' | 'sections'>(initialTab);
+  const [categories, setCategories] = useState<string[]>(() => dataService.getMasterCategories());
+  const [subjects, setSubjects] = useState<string[]>(() => dataService.getMasterSubjects());
+  const [sections, setSections] = useState<string[]>(() => dataService.getMasterSections());
   const [tests, setTests] = useState<Test[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // New item inputs
   const [newCategoryName, setNewCategoryName] = useState('');
   const [newSubjectName, setNewSubjectName] = useState('');
+  const [newSectionName, setNewSectionName] = useState('');
 
   // Editing state
   const [editingItem, setEditingItem] = useState<{ original: string; current: string } | null>(null);
 
+  const refreshSyncState = () => {
+    setCategories(dataService.getMasterCategories());
+    setSubjects(dataService.getMasterSubjects());
+    setSections(dataService.getMasterSections());
+  };
+
   const loadData = async () => {
     try {
-      setIsLoading(true);
-      const [allCats, allSubs, allTests, allBankQs] = await Promise.all([
-        dataService.getMasterCategories(),
-        dataService.getMasterSubjects(),
+      refreshSyncState();
+      // Load background test and bank counts without blocking UI
+      const [allTests, allBankQs] = await Promise.all([
         dataService.getTests(),
         dataService.getAllQuestionBank()
       ]);
-      setCategories(Array.isArray(allCats) ? allCats : []);
-      setSubjects(Array.isArray(allSubs) ? allSubs : []);
-      setTests(allTests);
-      setQuestions(allBankQs);
+      setTests(allTests || []);
+      setQuestions(allBankQs || []);
     } catch (err: any) {
       console.error('Failed to load master taxonomy data:', err);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     if (isOpen) {
+      setActiveTab(initialTab);
+      refreshSyncState();
       loadData();
     }
-  }, [isOpen]);
+  }, [isOpen, initialTab]);
+
+  useEffect(() => {
+    const handleTaxonomyUpdate = () => {
+      refreshSyncState();
+    };
+    window.addEventListener('gradeup_taxonomy_updated', handleTaxonomyUpdate);
+    return () => {
+      window.removeEventListener('gradeup_taxonomy_updated', handleTaxonomyUpdate);
+    };
+  }, []);
 
   if (!isOpen) return null;
 
@@ -91,7 +102,7 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
       await dataService.saveMasterCategory(name);
       setNewCategoryName('');
       onToast?.('success', `Category "${name}" added successfully!`);
-      await loadData();
+      refreshSyncState();
       onUpdated?.();
     } catch (err: any) {
       onToast?.('error', 'Failed to add category');
@@ -112,10 +123,31 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
       await dataService.saveMasterSubject(name);
       setNewSubjectName('');
       onToast?.('success', `Subject "${name}" added successfully!`);
-      await loadData();
+      refreshSyncState();
       onUpdated?.();
     } catch (err: any) {
       onToast?.('error', 'Failed to add subject');
+    }
+  };
+
+  // Add Section
+  const handleAddSection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newSectionName.trim();
+    if (!name) return;
+    if (sections.some(s => s.toLowerCase() === name.toLowerCase())) {
+      onToast?.('info', `Section "${name}" already exists.`);
+      return;
+    }
+
+    try {
+      await dataService.saveMasterSection(name);
+      setNewSectionName('');
+      onToast?.('success', `Section "${name}" added successfully!`);
+      refreshSyncState();
+      onUpdated?.();
+    } catch (err: any) {
+      onToast?.('error', 'Failed to add section');
     }
   };
 
@@ -125,7 +157,7 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
       try {
         await dataService.deleteMasterCategory(categoryName);
         onToast?.('success', `Category "${categoryName}" removed.`);
-        await loadData();
+        refreshSyncState();
         onUpdated?.();
       } catch (err: any) {
         onToast?.('error', 'Failed to delete category');
@@ -139,10 +171,24 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
       try {
         await dataService.deleteMasterSubject(subjectName);
         onToast?.('success', `Subject "${subjectName}" removed.`);
-        await loadData();
+        refreshSyncState();
         onUpdated?.();
       } catch (err: any) {
         onToast?.('error', 'Failed to delete subject');
+      }
+    }
+  };
+
+  // Delete Section
+  const handleDeleteSection = async (sectionName: string) => {
+    if (window.confirm(`Are you sure you want to remove section "${sectionName}" from the master list?`)) {
+      try {
+        await dataService.deleteMasterSection(sectionName);
+        onToast?.('success', `Section "${sectionName}" removed.`);
+        refreshSyncState();
+        onUpdated?.();
+      } catch (err: any) {
+        onToast?.('error', 'Failed to delete section');
       }
     }
   };
@@ -163,13 +209,17 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
         await dataService.deleteMasterCategory(oldName);
         await dataService.saveMasterCategory(newName);
         onToast?.('success', `Category renamed to "${newName}"!`);
-      } else {
+      } else if (activeTab === 'subjects') {
         await dataService.deleteMasterSubject(oldName);
         await dataService.saveMasterSubject(newName);
         onToast?.('success', `Subject renamed to "${newName}"!`);
+      } else {
+        await dataService.deleteMasterSection(oldName);
+        await dataService.saveMasterSection(newName);
+        onToast?.('success', `Section renamed to "${newName}"!`);
       }
       setEditingItem(null);
-      await loadData();
+      refreshSyncState();
       onUpdated?.();
     } catch (err: any) {
       onToast?.('error', 'Failed to update name');
@@ -185,6 +235,10 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
     return questions.filter(q => (q.subject || '').toLowerCase() === subName.toLowerCase()).length;
   };
 
+  const getSectionMCQCount = (secName: string) => {
+    return questions.filter(q => (q.section || '').toLowerCase() === secName.toLowerCase()).length;
+  };
+
   const filteredCategories = categories.filter(c =>
     c.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -193,11 +247,15 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
     s.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const filteredSections = sections.filter(s =>
+    s.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Master Categories & Subjects Manager"
+      title="Master Categories, Subjects & Sections Pipeline"
       maxWidth="3xl"
     >
       <div className="space-y-6">
@@ -205,10 +263,10 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
         <div className="p-4 bg-gradient-to-r from-blue-900/20 via-indigo-900/20 to-purple-900/20 border border-blue-500/30 rounded-2xl text-xs space-y-1">
           <div className="flex items-center gap-2 font-black text-blue-700 dark:text-blue-300 text-sm">
             <GraduationCap className="w-4 h-4 text-blue-500" />
-            <span>Pre-defined Exam Categories & Subjects System</span>
+            <span>Unified Taxonomy & Section Pipeline</span>
           </div>
           <p className="text-slate-600 dark:text-slate-300 leading-relaxed">
-            Yaha par pre-created categories aur subjects add kijiye. Ye sabhi category aur subject names mock test banate waqt, question add/edit karte waqt, question bank aur filters me automatically dropdown aur suggestions me show honge.
+            Yaha par create ki gayi sabhi Categories, Subjects aur Sections har jagah reflect honge: <strong>AI Automation (PDF OCR)</strong>, Mock Test Creator, MCQ Bank, aur Filters me.
           </p>
         </div>
 
@@ -221,7 +279,7 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
                 setActiveTab('categories');
                 setEditingItem(null);
               }}
-              className={`px-4 py-2 rounded-xl font-black text-xs transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl font-black text-xs transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'categories'
                   ? 'bg-blue-600 text-white shadow-md'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
@@ -237,7 +295,7 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
                 setActiveTab('subjects');
                 setEditingItem(null);
               }}
-              className={`px-4 py-2 rounded-xl font-black text-xs transition-all flex items-center gap-2 cursor-pointer ${
+              className={`px-3.5 py-2 rounded-xl font-black text-xs transition-all flex items-center gap-2 cursor-pointer ${
                 activeTab === 'subjects'
                   ? 'bg-purple-600 text-white shadow-md'
                   : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
@@ -246,10 +304,26 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
               <BookOpen className="w-4 h-4" />
               <span>Subjects & Topics ({subjects.length})</span>
             </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('sections');
+                setEditingItem(null);
+              }}
+              className={`px-3.5 py-2 rounded-xl font-black text-xs transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'sections'
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span>Exam Sections ({sections.length})</span>
+            </button>
           </div>
 
           {/* SEARCH BAR */}
-          <div className="relative w-full sm:w-56">
+          <div className="relative w-full sm:w-52">
             <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
             <input
               type="text"
@@ -280,7 +354,7 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
               <span>Add Category</span>
             </button>
           </form>
-        ) : (
+        ) : activeTab === 'subjects' ? (
           <form onSubmit={handleAddSubject} className="flex gap-2">
             <input
               type="text"
@@ -298,16 +372,29 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
               <span>Add Subject</span>
             </button>
           </form>
+        ) : (
+          <form onSubmit={handleAddSection} className="flex gap-2">
+            <input
+              type="text"
+              required
+              value={newSectionName}
+              onChange={(e) => setNewSectionName(e.target.value)}
+              placeholder="e.g. Section A: General Science, Section B: Reasoning, General Studies..."
+              className="flex-1 px-4 py-2.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-xl text-xs font-bold"
+            />
+            <button
+              type="submit"
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Section</span>
+            </button>
+          </form>
         )}
 
         {/* LIST VIEW */}
         <div className="max-h-[420px] overflow-y-auto space-y-2 pr-1">
-          {isLoading ? (
-            <div className="py-12 text-center text-slate-400 space-y-2">
-              <RefreshCw className="w-6 h-6 animate-spin mx-auto text-blue-500" />
-              <p className="text-xs font-bold">Loading master taxonomy...</p>
-            </div>
-          ) : activeTab === 'categories' ? (
+          {activeTab === 'categories' ? (
             filteredCategories.length === 0 ? (
               <div className="py-10 text-center text-slate-400 text-xs">
                 No categories found matching your search. Add one above!
@@ -390,7 +477,7 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
                 })}
               </div>
             )
-          ) : (
+          ) : activeTab === 'subjects' ? (
             filteredSubjects.length === 0 ? (
               <div className="py-10 text-center text-slate-400 text-xs">
                 No subjects found matching your search. Add one above!
@@ -473,13 +560,96 @@ export const CategorySubjectManagerModal: React.FC<CategorySubjectManagerModalPr
                 })}
               </div>
             )
+          ) : (
+            filteredSections.length === 0 ? (
+              <div className="py-10 text-center text-slate-400 text-xs">
+                No sections found matching your search. Add one above!
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {filteredSections.map((sec) => {
+                  const qCount = getSectionMCQCount(sec);
+                  const isEditing = editingItem?.original === sec;
+
+                  return (
+                    <div
+                      key={sec}
+                      className="p-3 bg-white dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-700/80 flex items-center justify-between gap-2 shadow-xs group hover:border-emerald-300 dark:hover:border-emerald-700 transition-all"
+                    >
+                      {isEditing ? (
+                        <div className="flex items-center gap-1.5 flex-1">
+                          <input
+                            type="text"
+                            value={editingItem.current}
+                            onChange={(e) => setEditingItem({ ...editingItem, current: e.target.value })}
+                            className="flex-1 px-2 py-1 bg-slate-50 dark:bg-slate-900 border border-emerald-500 rounded-lg text-xs font-bold"
+                            autoFocus
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSaveEdit}
+                            className="p-1 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 cursor-pointer"
+                            title="Save"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingItem(null)}
+                            className="p-1 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded-lg hover:bg-slate-300 cursor-pointer"
+                            title="Cancel"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-7 h-7 rounded-lg bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                              <Layers className="w-3.5 h-3.5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                                {sec}
+                              </p>
+                              <span className="text-[10px] text-slate-400 font-medium">
+                                {qCount} MCQs in Section
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1 opacity-80 group-hover:opacity-100 transition-opacity">
+                            <button
+                              type="button"
+                              onClick={() => setEditingItem({ original: sec, current: sec })}
+                              className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded-lg transition-colors cursor-pointer"
+                              title="Edit Section Name"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSection(sec)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg transition-colors cursor-pointer"
+                              title="Delete Section"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )
           )}
         </div>
 
         {/* FOOTER */}
         <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800">
           <span className="text-[11px] text-slate-500 dark:text-slate-400">
-            Changes are automatically synchronized across all mock tests and question bank.
+            Changes are automatically synchronized across all mock tests, PDF OCR automation, and question bank.
           </span>
           <button
             type="button"

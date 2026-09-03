@@ -28,10 +28,14 @@ import {
   Link as LinkIcon,
   CheckCircle,
   FileImage,
-  Layers
+  Layers,
+  Archive,
+  CloudLightning,
+  Download
 } from 'lucide-react';
 import { AdminSettings } from '../../types';
 import { dataService } from '../../services/dataService';
+import { backupService } from '../../services/backupService';
 import { getSupabaseClient, isSupabaseConfigured } from '../../lib/supabase';
 import { GULogo, BrandLogo } from '../common/GULogo';
 import { SupabaseStorageIndicator } from './SupabaseStorageIndicator';
@@ -80,6 +84,23 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
       onToast?.('error', err?.message || 'Sync failed');
     } finally {
       setSyncingCloud(false);
+    }
+  };
+
+  const [quickBackingUp, setQuickBackingUp] = useState(false);
+  const handleQuickBackup = async () => {
+    setQuickBackingUp(true);
+    try {
+      const res = await backupService.createProjectBackupZip({
+        backupName: 'Admin Settings Quick Snapshot',
+        description: 'Complete snapshot of all mock tests, MCQs, taxonomy, and settings'
+      });
+      backupService.downloadBackupZip(res.blob, res.filename);
+      onToast?.('success', `✓ Full ZIP Backup downloaded (${res.sizeFormatted})!`);
+    } catch (err: any) {
+      onToast?.('error', `Backup failed: ${err.message}`);
+    } finally {
+      setQuickBackingUp(false);
     }
   };
 
@@ -442,6 +463,47 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({ onToast })
               </p>
             )}
           </div>
+        </div>
+
+        {/* FULL PROJECT BACKUP & RESTORE BANNER */}
+        <div className="bg-gradient-to-r from-slate-900 to-indigo-950 rounded-2xl p-5 text-white border border-indigo-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
+          <div className="flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-400/30 flex items-center justify-center text-indigo-300 shrink-0">
+              <Archive className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-white">
+                  Full Project Backup & Restore
+                </h3>
+                <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded-md">
+                  ZIP + Supabase Cloud
+                </span>
+              </div>
+              <p className="text-xs text-slate-300 mt-0.5">
+                Download a space-efficient ZIP archive of all mocks, MCQs, sections, and settings, or restore anytime.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleQuickBackup}
+            disabled={quickBackingUp}
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer shrink-0"
+          >
+            {quickBackingUp ? (
+              <>
+                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                <span>Generating ZIP...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" />
+                <span>Download Complete Backup (.ZIP)</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
