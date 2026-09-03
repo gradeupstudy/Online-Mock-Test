@@ -20,8 +20,7 @@ import {
   Zap,
   FolderPlus,
   Flag,
-  Cpu,
-  Target
+  Cpu
 } from 'lucide-react';
 import { Test, Attempt, QuestionReport } from '../../types';
 import { dataService } from '../../services/dataService';
@@ -37,9 +36,8 @@ import { ReportedMCQsManager } from './ReportedMCQsManager';
 import { BulkAITestGeneratorModal } from './BulkAITestGeneratorModal';
 import { SupabaseStorageIndicator } from './SupabaseStorageIndicator';
 import { AIAutomationCenter } from './AIAutomationCenter/AIAutomationCenter';
-import { TargetExamManager } from './TargetExamManager';
 
-export type AdminTab = 'dashboard' | 'ai_automation' | 'target_exams' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
+export type AdminTab = 'dashboard' | 'ai_automation' | 'tests' | 'bank' | 'questions' | 'attempts' | 'analytics' | 'reports' | 'social' | 'settings';
 
 interface AdminDashboardProps {
   onNavigateTab?: (tab: AdminTab, testId?: string) => void;
@@ -191,18 +189,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span className="px-1.5 py-0.2 rounded-full bg-amber-400 text-slate-950 text-[9px] font-black uppercase">
               NEW
             </span>
-          </button>
-
-          <button
-            onClick={() => handleTabChange('target_exams')}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap cursor-pointer ${
-              activeTab === 'target_exams'
-                ? 'bg-blue-600 text-white shadow-md shadow-blue-500/20'
-                : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'
-            }`}
-          >
-            <Target className="w-4 h-4 text-amber-500" />
-            <span>Target Exams</span>
           </button>
 
           <button
@@ -656,10 +642,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           onToast={safeToast}
           onNavigateToTests={() => handleTabChange('tests')}
         />
-      )}
-
-      {activeTab === 'target_exams' && (
-        <TargetExamManager onToast={safeToast} />
       )}
 
       {activeTab === 'tests' && (
