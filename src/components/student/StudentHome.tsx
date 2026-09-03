@@ -266,7 +266,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800">
-                  🎯 Target Exam / लक्ष्य परीक्षा
+                  🎯 Target Exam
                 </span>
                 {selectedTargetExam && (
                   <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
@@ -276,7 +276,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onSelectTest, onOpenAd
               </div>
 
               <h2 className="text-base sm:text-lg font-black text-slate-900 dark:text-white mt-0.5 flex items-center gap-2">
-                <span>{selectedTargetExam ? selectedTargetExam.title : 'All Competitive Exams (सभी परीक्षाएं)'}</span>
+                <span>{selectedTargetExam ? selectedTargetExam.title : 'All Competitive Exams'}</span>
                 {selectedTargetExam?.short_name && (
                   <span className="text-xs font-bold text-blue-600 dark:text-blue-400 font-mono">
                     ({selectedTargetExam.short_name})

@@ -203,9 +203,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           >
             <Target className="w-4 h-4 text-amber-500" />
             <span>Target Exams</span>
-            <span className="px-1.5 py-0.2 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200 text-[9px] font-black">
-              लक्ष्य
-            </span>
           </button>
 
           <button

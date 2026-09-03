@@ -13,17 +13,28 @@ import {
   Info,
   CheckSquare,
   Square,
-  Filter
+  MinusSquare,
+  Filter,
+  BookOpen,
+  History,
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderCheck,
+  CheckCheck,
+  ListFilter
 } from 'lucide-react';
 import { TargetExam, Test, PracticeMode, PRIMARY_PRACTICE_MODES } from '../../types';
 import { dataService, inferPracticeMode } from '../../services/dataService';
 import { TargetExamIcon } from '../common/TargetExamIcon';
+import { PracticeModeIcon } from '../common/PracticeModeIcon';
 
 interface TargetExamEditModalProps {
   isOpen: boolean;
   exam: TargetExam | null;
   onClose: () => void;
   onSaved: (savedExam: TargetExam) => void;
+  onDeleted?: (deletedId: string) => void;
   allTests: Test[];
 }
 
@@ -60,6 +71,7 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
   exam,
   onClose,
   onSaved,
+  onDeleted,
   allTests = []
 }) => {
   const [formData, setFormData] = useState<Partial<TargetExam>>({
@@ -85,8 +97,31 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
   const [selectedPracticeMode, setSelectedPracticeMode] = useState<PracticeMode>('full_mock');
   const [testSearchQuery, setTestSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
+  const [subjectFilter, setSubjectFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unmapped' | 'mapped'>('all');
+  const [viewMode, setViewMode] = useState<'subject_grouped' | 'flat'>('subject_grouped');
+  const [collapsedSubjects, setCollapsedSubjects] = useState<Record<string, boolean>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [autoMapStatus, setAutoMapStatus] = useState<string | null>(null);
+
+  const handleDeleteExam = async () => {
+    if (!exam?.id) return;
+    setIsDeleting(true);
+    try {
+      await dataService.deleteTargetExam(exam.id);
+      if (onDeleted) {
+        onDeleted(exam.id);
+      }
+      onClose();
+    } catch (err) {
+      console.error('Failed to delete target exam', err);
+    } finally {
+      setIsDeleting(false);
+      setShowDeleteConfirm(false);
+    }
+  };
 
   useEffect(() => {
     if (exam) {
@@ -130,7 +165,25 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
     return ['All', ...cats];
   }, [allTests]);
 
-  // Filter tests list based on search and category
+  // Available unique subjects in all tests for Subject-Wise grouping and picking
+  const testSubjects = useMemo(() => {
+    const subs = Array.from(
+      new Set(
+        allTests
+          .map(t => (t.subject || 'General Studies').trim())
+          .filter(Boolean)
+      )
+    );
+    subs.sort((a, b) => a.localeCompare(b));
+    return ['All', ...subs];
+  }, [allTests]);
+
+  // Current mapped tests for the selected practice mode
+  const currentModeMappedIds = useMemo(() => {
+    return new Set(formData.mode_test_map?.[selectedPracticeMode] || []);
+  }, [formData.mode_test_map, selectedPracticeMode]);
+
+  // Filter tests list based on search, category, subject, and status
   const filteredTests = useMemo(() => {
     return allTests.filter(t => {
       const q = (testSearchQuery || '').toLowerCase().trim();
@@ -142,17 +195,49 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
         (t.subject || '').toLowerCase().includes(q);
 
       const matchesCategory = categoryFilter === 'All' || t.category === categoryFilter;
+      const testSubject = (t.subject || 'General Studies').trim();
+      const matchesSubject = subjectFilter === 'All' || testSubject === subjectFilter;
 
-      return matchesQuery && matchesCategory;
+      const isMapped = currentModeMappedIds.has(t.id);
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'unmapped' && !isMapped) ||
+        (statusFilter === 'mapped' && isMapped);
+
+      return matchesQuery && matchesCategory && matchesSubject && matchesStatus;
     });
-  }, [allTests, testSearchQuery, categoryFilter]);
+  }, [allTests, testSearchQuery, categoryFilter, subjectFilter, statusFilter, currentModeMappedIds]);
 
-  // Current mapped tests for the selected practice mode
-  const currentModeMappedIds = useMemo(() => {
-    return new Set(formData.mode_test_map?.[selectedPracticeMode] || []);
-  }, [formData.mode_test_map, selectedPracticeMode]);
+  // Group filtered tests by Subject for organized subject-wise picking & select-all
+  const subjectGroups = useMemo(() => {
+    const groups: Record<string, Test[]> = {};
+    filteredTests.forEach(t => {
+      const subj = (t.subject || 'General Studies').trim();
+      if (!groups[subj]) {
+        groups[subj] = [];
+      }
+      groups[subj].push(t);
+    });
 
-  // Handler to toggle a test in current practice mode
+    return Object.entries(groups)
+      .map(([subjectName, tests]) => {
+        const mappedCount = tests.filter(t => currentModeMappedIds.has(t.id)).length;
+        const allMapped = tests.length > 0 && mappedCount === tests.length;
+        const someMapped = mappedCount > 0 && mappedCount < tests.length;
+        return {
+          subjectName,
+          tests,
+          totalCount: tests.length,
+          mappedCount,
+          unmappedCount: tests.length - mappedCount,
+          allMapped,
+          someMapped
+        };
+      })
+      .sort((a, b) => a.subjectName.localeCompare(b.subjectName));
+  }, [filteredTests, currentModeMappedIds]);
+
+  // Handler to toggle an individual test in current practice mode
   const handleToggleTestMapping = (testId: string) => {
     setFormData(prev => {
       const currentMap = prev.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] };
@@ -169,6 +254,51 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
         }
       };
     });
+  };
+
+  // Select and Add all tests of a specific subject ("Select Add" for Subject)
+  const handleAddSubjectTests = (subjectTests: Test[]) => {
+    setFormData(prev => {
+      const currentMap = prev.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] };
+      const currentSet = new Set(currentMap[selectedPracticeMode] || []);
+      subjectTests.forEach(t => currentSet.add(t.id));
+
+      return {
+        ...prev,
+        mode_test_map: {
+          ...currentMap,
+          [selectedPracticeMode]: Array.from(currentSet)
+        }
+      };
+    });
+  };
+
+  // Remove all tests of a specific subject from current practice mode
+  const handleRemoveSubjectTests = (subjectTests: Test[]) => {
+    setFormData(prev => {
+      const currentMap = prev.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] };
+      const toRemoveIds = new Set(subjectTests.map(t => t.id));
+      const currentList = currentMap[selectedPracticeMode] || [];
+      const updatedList = currentList.filter(id => !toRemoveIds.has(id));
+
+      return {
+        ...prev,
+        mode_test_map: {
+          ...currentMap,
+          [selectedPracticeMode]: updatedList
+        }
+      };
+    });
+  };
+
+  // Toggle all tests of a subject (if not all mapped -> Add All; if all mapped -> Remove All)
+  const handleToggleSubjectTests = (subjectTests: Test[]) => {
+    const allMapped = subjectTests.length > 0 && subjectTests.every(t => currentModeMappedIds.has(t.id));
+    if (allMapped) {
+      handleRemoveSubjectTests(subjectTests);
+    } else {
+      handleAddSubjectTests(subjectTests);
+    }
   };
 
   // Select all visible filtered tests for current practice mode
@@ -200,6 +330,26 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
         }
       };
     });
+  };
+
+  // Expand / Collapse subject accordions
+  const toggleSubjectCollapse = (subjectName: string) => {
+    setCollapsedSubjects(prev => ({
+      ...prev,
+      [subjectName]: !prev[subjectName]
+    }));
+  };
+
+  const handleExpandAllSubjects = () => {
+    setCollapsedSubjects({});
+  };
+
+  const handleCollapseAllSubjects = () => {
+    const collapsed: Record<string, boolean> = {};
+    subjectGroups.forEach(g => {
+      collapsed[g.subjectName] = true;
+    });
+    setCollapsedSubjects(collapsed);
   };
 
   // 1-Click Auto Map Intelligence
@@ -297,7 +447,7 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
             </div>
             <div>
               <h2 className="text-lg sm:text-xl font-black text-white">
-                {exam ? 'Edit Target Exam & Mappings' : 'Create New Target Exam (नया लक्ष्य परीक्षा)'}
+                {exam ? 'Edit Target Exam & Mappings' : 'Create New Target Exam'}
               </h2>
               <p className="text-xs text-slate-300">
                 Configure exam info and map which mock tests appear in each Practice Mode for students.
@@ -516,7 +666,7 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
             <div className="space-y-4">
               
               {/* PRACTICE MODES SUB-TABS */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 {PRIMARY_PRACTICE_MODES.map(mode => {
                   const isSelected = selectedPracticeMode === mode.id;
                   const count = formData.mode_test_map?.[mode.id]?.length || 0;
@@ -528,25 +678,25 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
                       onClick={() => setSelectedPracticeMode(mode.id)}
                       className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
                         isSelected
-                          ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-500 ring-2 ring-blue-500/30'
+                          ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-500 ring-2 ring-blue-500/30 shadow-xs'
                           : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-blue-200'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="text-base">{mode.icon}</span>
+                        <PracticeModeIcon mode={mode.id} size="sm" variant={isSelected ? 'gradient' : 'subtle'} />
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                           count > 0 
-                            ? 'bg-blue-600 text-white' 
+                            ? 'bg-blue-600 text-white shadow-xs' 
                             : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
                         }`}>
                           {count} Mapped
                         </span>
                       </div>
-                      <div className="mt-2">
+                      <div className="mt-2.5">
                         <h4 className="text-xs font-black text-slate-900 dark:text-white leading-tight">
                           {mode.title}
                         </h4>
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate">
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
                           {mode.hindiTitle}
                         </p>
                       </div>
@@ -587,8 +737,10 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
                 </div>
               )}
 
-              {/* TEST PICKER SECTION */}
-              <div className="space-y-3 pt-2">
+              {/* SUBJECT-WISE TEST PICKER SECTION */}
+              <div className="space-y-3 pt-1">
+                
+                {/* Search & Multi-Filters Toolbar */}
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
                   
                   {/* Search Tests */}
@@ -596,54 +748,391 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                     <input
                       type="text"
-                      placeholder={`Search mock tests to assign to ${PRIMARY_PRACTICE_MODES.find(m => m.id === selectedPracticeMode)?.title}...`}
+                      placeholder={`Search mock tests in ${PRIMARY_PRACTICE_MODES.find(m => m.id === selectedPracticeMode)?.title}...`}
                       value={testSearchQuery}
                       onChange={(e) => setTestSearchQuery(e.target.value)}
-                      className="w-full pl-9 pr-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-blue-500"
+                      className="w-full pl-9 pr-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs text-slate-900 dark:text-white outline-hidden focus:ring-2 focus:ring-blue-500"
                     />
+                    {testSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setTestSearchQuery('')}
+                        className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 text-xs"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
 
-                  {/* Category Filter */}
-                  {testCategories.length > 2 && (
+                  {/* Subject Dropdown Filter */}
+                  <div className="flex items-center gap-1.5">
                     <select
-                      value={categoryFilter}
-                      onChange={(e) => setCategoryFilter(e.target.value)}
-                      className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 outline-hidden"
+                      value={subjectFilter}
+                      onChange={(e) => setSubjectFilter(e.target.value)}
+                      className="px-3 py-2 bg-blue-50/70 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900 rounded-xl text-xs font-bold text-blue-900 dark:text-blue-200 outline-hidden cursor-pointer max-w-[170px] truncate"
+                      title="Filter by Subject (विषय अनुसार फ़िल्टर)"
                     >
-                      {testCategories.map(cat => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
+                      <option value="All">All Subjects ({allTests.length})</option>
+                      {testSubjects.filter(s => s !== 'All').map(sub => {
+                        const count = allTests.filter(t => (t.subject || 'General Studies').trim() === sub).length;
+                        return (
+                          <option key={sub} value={sub}>
+                            {sub} ({count})
+                          </option>
+                        );
+                      })}
                     </select>
-                  )}
 
-                  {/* Bulk Select / Deselect */}
-                  <div className="flex items-center gap-1.5 shrink-0">
+                    {/* Category Filter */}
+                    {testCategories.length > 2 && (
+                      <select
+                        value={categoryFilter}
+                        onChange={(e) => setCategoryFilter(e.target.value)}
+                        className="px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 outline-hidden max-w-[140px] truncate cursor-pointer"
+                        title="Filter by Category"
+                      >
+                        {testCategories.map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    )}
+
+                    {/* Status Filter */}
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as any)}
+                      className="px-2.5 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-300 outline-hidden cursor-pointer"
+                      title="Filter by Mapping Status"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="unmapped">Unmapped Only</option>
+                      <option value="mapped">Mapped Only</option>
+                    </select>
+                  </div>
+
+                  {/* View Mode Toggle: Subject-Grouped vs Flat */}
+                  <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-1 rounded-xl border border-slate-200 dark:border-slate-700 shrink-0">
                     <button
                       type="button"
-                      onClick={handleSelectAllVisible}
-                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
+                      onClick={() => setViewMode('subject_grouped')}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                        viewMode === 'subject_grouped'
+                          ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      }`}
+                      title="Group tests by Subject (विषय-वार सूची)"
                     >
-                      Select All Visible
+                      <Layers className="w-3 h-3" />
+                      <span>Subject-Wise</span>
                     </button>
                     <button
                       type="button"
-                      onClick={handleClearCurrentMode}
-                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-700 hover:text-rose-700 dark:text-slate-300 dark:hover:text-rose-300 text-[11px] font-bold rounded-lg transition-colors cursor-pointer"
+                      onClick={() => setViewMode('flat')}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1 ${
+                        viewMode === 'flat'
+                          ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                      }`}
+                      title="Flat List View"
                     >
-                      Clear Mode
+                      <ListFilter className="w-3 h-3" />
+                      <span>Flat List</span>
                     </button>
                   </div>
 
                 </div>
 
-                {/* TEST LIST CHECKBOX MATRIX */}
-                <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden max-h-[320px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
-                  {filteredTests.length === 0 ? (
-                    <div className="p-8 text-center text-slate-400 text-xs font-semibold">
-                      No mock tests available matching filter.
-                    </div>
-                  ) : (
-                    filteredTests.map((test) => {
+                {/* Quick Subject Chips Bar */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none text-xs">
+                  <span className="text-[11px] font-bold text-slate-400 shrink-0 flex items-center gap-1">
+                    <BookOpen className="w-3 h-3" />
+                    <span>Subjects:</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setSubjectFilter('All')}
+                    className={`px-2.5 py-1 rounded-lg font-bold text-[11px] shrink-0 transition-all cursor-pointer ${
+                      subjectFilter === 'All'
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    All ({allTests.length})
+                  </button>
+                  {testSubjects.filter(s => s !== 'All').map(sub => {
+                    const isSelected = subjectFilter === sub;
+                    const count = allTests.filter(t => (t.subject || 'General Studies').trim() === sub).length;
+                    const mappedInSub = allTests.filter(
+                      t => (t.subject || 'General Studies').trim() === sub && currentModeMappedIds.has(t.id)
+                    ).length;
+
+                    return (
+                      <button
+                        key={sub}
+                        type="button"
+                        onClick={() => setSubjectFilter(isSelected ? 'All' : sub)}
+                        className={`px-2.5 py-1 rounded-lg font-bold text-[11px] shrink-0 transition-all cursor-pointer flex items-center gap-1.5 border ${
+                          isSelected
+                            ? 'bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border-blue-500 ring-1 ring-blue-500/30'
+                            : 'bg-white dark:bg-slate-800/80 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-slate-300'
+                        }`}
+                      >
+                        <span>{sub}</span>
+                        <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                          mappedInSub > 0
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-500'
+                        }`}>
+                          {mappedInSub > 0 ? `${mappedInSub}/${count}` : count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Bulk Actions Header & Summary */}
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1 py-1 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-700 dark:text-slate-300 text-[11px]">
+                      Showing <strong className="text-blue-600 dark:text-blue-400 font-black">{filteredTests.length}</strong> tests
+                      {viewMode === 'subject_grouped' && ` in ${subjectGroups.length} subjects`}
+                    </span>
+                    {viewMode === 'subject_grouped' && subjectGroups.length > 1 && (
+                      <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                        <span>•</span>
+                        <button
+                          type="button"
+                          onClick={handleExpandAllSubjects}
+                          className="text-blue-600 hover:underline font-semibold cursor-pointer"
+                        >
+                          Expand All
+                        </button>
+                        <span>/</span>
+                        <button
+                          type="button"
+                          onClick={handleCollapseAllSubjects}
+                          className="text-slate-500 hover:underline font-semibold cursor-pointer"
+                        >
+                          Collapse All
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {/* Add All Visible Button */}
+                    <button
+                      type="button"
+                      onClick={handleSelectAllVisible}
+                      disabled={filteredTests.length === 0}
+                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white text-[11px] font-bold rounded-xl transition-all shadow-xs cursor-pointer flex items-center gap-1"
+                      title="Select and add all currently visible tests into this practice mode"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Select & Add All Visible ({filteredTests.length})</span>
+                    </button>
+
+                    {/* Clear Current Mode Button */}
+                    <button
+                      type="button"
+                      onClick={handleClearCurrentMode}
+                      disabled={currentModeMappedIds.size === 0}
+                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-rose-100 dark:bg-slate-800 dark:hover:bg-rose-950/40 text-slate-600 hover:text-rose-700 dark:text-slate-400 dark:hover:text-rose-300 disabled:opacity-40 text-[11px] font-bold rounded-xl transition-colors cursor-pointer"
+                      title="Remove all mapped tests from this practice mode"
+                    >
+                      Clear Mode
+                    </button>
+                  </div>
+                </div>
+
+                {/* TEST LIST CONTAINER */}
+                {filteredTests.length === 0 ? (
+                  <div className="border border-dashed border-slate-200 dark:border-slate-800 rounded-2xl p-10 text-center space-y-2 bg-white dark:bg-slate-900">
+                    <p className="text-xs font-bold text-slate-500">
+                      No mock tests found matching the selected filters.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTestSearchQuery('');
+                        setSubjectFilter('All');
+                        setCategoryFilter('All');
+                        setStatusFilter('all');
+                      }}
+                      className="text-xs text-blue-600 hover:underline font-bold cursor-pointer"
+                    >
+                      Reset All Filters (फ़िल्टर रीसेट करें)
+                    </button>
+                  </div>
+                ) : viewMode === 'subject_grouped' ? (
+                  /* SUBJECT-WISE GROUPED VIEW */
+                  <div className="space-y-3 max-h-[380px] overflow-y-auto pr-1">
+                    {subjectGroups.map(group => {
+                      const isCollapsed = Boolean(collapsedSubjects[group.subjectName]);
+
+                      return (
+                        <div
+                          key={group.subjectName}
+                          className="border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden bg-white dark:bg-slate-900 shadow-xs transition-all"
+                        >
+                          {/* Subject Header Bar */}
+                          <div
+                            onClick={() => toggleSubjectCollapse(group.subjectName)}
+                            className="p-3 bg-slate-50/90 hover:bg-slate-100/80 dark:bg-slate-800/60 dark:hover:bg-slate-800 cursor-pointer select-none flex flex-wrap items-center justify-between gap-2.5 transition-colors border-b border-slate-100 dark:border-slate-800/80"
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <button
+                                type="button"
+                                className="p-0.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                              >
+                                {isCollapsed ? (
+                                  <ChevronRight className="w-4 h-4" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4" />
+                                )}
+                              </button>
+
+                              <div className="w-7 h-7 rounded-xl bg-blue-100 dark:bg-blue-950/80 text-blue-700 dark:text-blue-300 flex items-center justify-center shrink-0">
+                                <BookOpen className="w-3.5 h-3.5" />
+                              </div>
+
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <h4 className="text-xs font-black text-slate-900 dark:text-white truncate">
+                                    {group.subjectName}
+                                  </h4>
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-slate-200/80 dark:bg-slate-700 text-slate-700 dark:text-slate-300 shrink-0">
+                                    {group.totalCount} Tests
+                                  </span>
+                                </div>
+                                <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.2">
+                                  {group.mappedCount > 0 ? (
+                                    <span className="text-blue-600 dark:text-blue-400 font-bold">
+                                      ✓ {group.mappedCount} of {group.totalCount} Assigned to {PRIMARY_PRACTICE_MODES.find(m => m.id === selectedPracticeMode)?.title}
+                                    </span>
+                                  ) : (
+                                    <span>0 assigned to this mode</span>
+                                  )}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Subject Quick Actions ("Select Add") */}
+                            <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
+                              {/* Subject Master Checkbox */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleSubjectTests(group.tests)}
+                                className="p-1 hover:bg-slate-200/60 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                                title={group.allMapped ? 'Deselect all tests in this subject' : 'Select all tests in this subject'}
+                              >
+                                {group.allMapped ? (
+                                  <CheckSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                ) : group.someMapped ? (
+                                  <MinusSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-slate-400" />
+                                )}
+                              </button>
+
+                              {/* Direct "Select Add Subject" Button */}
+                              {group.unmappedCount > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAddSubjectTests(group.tests)}
+                                  className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-bold rounded-xl transition-all shadow-xs flex items-center gap-1 cursor-pointer"
+                                  title={`Add all ${group.unmappedCount} unmapped tests of ${group.subjectName}`}
+                                >
+                                  <Plus className="w-3 h-3" />
+                                  <span>+ Add Subject ({group.unmappedCount})</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveSubjectTests(group.tests)}
+                                  className="px-2.5 py-1 bg-emerald-50 hover:bg-rose-50 dark:bg-emerald-950/40 dark:hover:bg-rose-950/40 text-emerald-700 hover:text-rose-700 dark:text-emerald-300 dark:hover:text-rose-300 border border-emerald-200 dark:border-emerald-800 hover:border-rose-300 text-[11px] font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                                  title="All tests of this subject are assigned. Click to remove all."
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>All Added (Remove)</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Tests List inside Subject Accordion */}
+                          {!isCollapsed && (
+                            <div className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                              {group.tests.map(test => {
+                                const isMapped = currentModeMappedIds.has(test.id);
+                                const inferred = inferPracticeMode(test);
+
+                                return (
+                                  <div
+                                    key={test.id}
+                                    onClick={() => handleToggleTestMapping(test.id)}
+                                    className={`p-3 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors ${
+                                      isMapped
+                                        ? 'bg-blue-50/60 dark:bg-blue-950/30'
+                                        : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                                    }`}
+                                  >
+                                    <div className="flex items-center gap-3 min-w-0">
+                                      <div className="shrink-0">
+                                        {isMapped ? (
+                                          <CheckSquare className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                        ) : (
+                                          <Square className="w-4 h-4 text-slate-400" />
+                                        )}
+                                      </div>
+
+                                      <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <h4 className={`text-xs font-bold truncate ${
+                                            isMapped ? 'text-blue-900 dark:text-blue-200' : 'text-slate-800 dark:text-slate-200'
+                                          }`}>
+                                            {test.title}
+                                          </h4>
+                                          <span className="text-[10px] font-mono px-1.5 py-0.2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded shrink-0">
+                                            {test.test_code}
+                                          </span>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
+                                          <span>{test.category}</span>
+                                          <span>•</span>
+                                          <span>{test.total_questions || 0} Questions</span>
+                                          <span>•</span>
+                                          <span>{test.duration_minutes || 0} Mins</span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      {inferred === selectedPracticeMode && (
+                                        <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                          Native Match
+                                        </span>
+                                      )}
+                                      <span className={`text-xs font-bold ${
+                                        isMapped ? 'text-blue-600 dark:text-blue-400' : 'text-slate-400'
+                                      }`}>
+                                        {isMapped ? 'Assigned ✓' : 'Add +'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* FLAT LIST VIEW */
+                  <div className="border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden max-h-[380px] overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800 bg-white dark:bg-slate-900">
+                    {filteredTests.map((test) => {
                       const isMapped = currentModeMappedIds.has(test.id);
                       const inferred = inferPracticeMode(test);
 
@@ -679,9 +1168,9 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
                               </div>
 
                               <div className="flex items-center gap-2 mt-0.5 text-[10px] text-slate-500">
-                                <span>{test.category}</span>
+                                <span className="font-semibold text-blue-600 dark:text-blue-400">{test.subject}</span>
                                 <span>•</span>
-                                <span>{test.subject}</span>
+                                <span>{test.category}</span>
                                 <span>•</span>
                                 <span>{test.total_questions} Questions</span>
                                 <span>•</span>
@@ -704,9 +1193,9 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
                           </div>
                         </div>
                       );
-                    })
-                  )}
-                </div>
+                    })}
+                  </div>
+                )}
 
               </div>
 
@@ -714,25 +1203,62 @@ export const TargetExamEditModal: React.FC<TargetExamEditModalProps> = ({
           )}
 
           {/* MODAL FOOTER */}
-          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3">
-            <div className="text-xs text-slate-500">
-              {activeTab === 'details' ? (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('mappings')}
-                  className="text-blue-600 hover:underline font-bold cursor-pointer"
-                >
-                  Next: Configure Practice Mode Mappings →
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('details')}
-                  className="text-slate-600 dark:text-slate-400 hover:underline font-bold cursor-pointer"
-                >
-                  ← Back to Basic Details
-                </button>
+          <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              {exam && exam.id && (
+                <div>
+                  {showDeleteConfirm ? (
+                    <div className="flex items-center gap-1.5 bg-rose-50 dark:bg-rose-950/50 p-1 rounded-xl border border-rose-200 dark:border-rose-900 animate-in fade-in">
+                      <span className="text-[11px] font-bold text-rose-700 dark:text-rose-300 px-1">Delete this exam?</span>
+                      <button
+                        type="button"
+                        onClick={handleDeleteExam}
+                        disabled={isDeleting}
+                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-lg cursor-pointer flex items-center gap-1 shadow-xs"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>{isDeleting ? 'Deleting...' : 'Yes, Delete'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowDeleteConfirm(false)}
+                        className="px-2 py-1 text-slate-500 hover:text-slate-700 dark:text-slate-400 text-xs rounded-lg cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowDeleteConfirm(true)}
+                      className="px-3 py-1.5 text-rose-600 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 border border-rose-200 dark:border-rose-900"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Delete Exam</span>
+                    </button>
+                  )}
+                </div>
               )}
+
+              <div className="text-xs text-slate-500">
+                {activeTab === 'details' ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('mappings')}
+                    className="text-blue-600 hover:underline font-bold cursor-pointer"
+                  >
+                    Next: Configure Practice Mode Mappings →
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('details')}
+                    className="text-slate-600 dark:text-slate-400 hover:underline font-bold cursor-pointer"
+                  >
+                    ← Back to Basic Details
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-2">

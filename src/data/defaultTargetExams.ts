@@ -4,7 +4,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'hp-police-constable',
     title: 'HP Police Constable & SI',
-    hindiTitle: 'हिमाचल पुलिस कांस्टेबल एवं सब-इंस्पेक्टर',
     slug: 'hp-police-constable',
     category: 'Himachal State Exams',
     icon: 'Shield',
@@ -24,7 +23,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'hp-patwari',
     title: 'HP Patwari & Revenue Exam',
-    hindiTitle: 'हिमाचल पटवारी भर्ती परीक्षा',
     slug: 'hp-patwari',
     category: 'Himachal State Exams',
     icon: 'Landmark',
@@ -44,7 +42,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'hp-high-court',
     title: 'HP High Court Clerk & Process Server',
-    hindiTitle: 'एचपी हाई कोर्ट क्लर्क / प्रोसेस सर्वर',
     slug: 'hp-high-court',
     category: 'Himachal State Exams',
     icon: 'Briefcase',
@@ -64,7 +61,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'ssc-cgl-chsl',
     title: 'SSC CGL / CHSL / MTS / GD',
-    hindiTitle: 'एसएससी सीजीएल / सीएचएसएल / जीडी / एमटीएस',
     slug: 'ssc-cgl-chsl',
     category: 'Staff Selection Commission',
     icon: 'Award',
@@ -84,7 +80,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'railway-rrb-ntpc',
     title: 'Railways RRB NTPC & Group D',
-    hindiTitle: 'रेलवे आरआरबी एनटीपीसी एवं ग्रुप डी',
     slug: 'railway-rrb-ntpc',
     category: 'Railways',
     icon: 'Train',
@@ -104,7 +99,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'banking-ibps-sbi',
     title: 'Banking IBPS / SBI PO & Clerk',
-    hindiTitle: 'बैंकिंग आईबीपीएस / एसबीआई पीओ एवं क्लर्क',
     slug: 'banking-ibps-sbi',
     category: 'Banking & Insurance',
     icon: 'Landmark',
@@ -124,7 +118,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'hppsc-hpas-allied',
     title: 'HPPSC HPAS & Allied Services',
-    hindiTitle: 'एचपीपीएससी एचपीएएस एवं अलाइड सर्विसेज',
     slug: 'hppsc-hpas-allied',
     category: 'Himachal State Exams',
     icon: 'Compass',
@@ -144,7 +137,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'hp-tet-tgt',
     title: 'HP TET & TGT Commission',
-    hindiTitle: 'एचपी टीईटी एवं टीजीटी कमीशन',
     slug: 'hp-tet-tgt',
     category: 'Teaching Exams',
     icon: 'GraduationCap',
@@ -164,7 +156,6 @@ export const DEFAULT_TARGET_EXAMS: TargetExam[] = [
   {
     id: 'general-competitive-all',
     title: 'All Competitive Exams & General GK',
-    hindiTitle: 'सभी सामान्य प्रतियोगी परीक्षाएं एवं सामान्य ज्ञान',
     slug: 'general-competitive-all',
     category: 'General & Mixed',
     icon: 'BookOpen',

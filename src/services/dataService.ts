@@ -231,6 +231,7 @@ const STORAGE_KEYS = {
   MASTER_SUBJECTS: 'gradeup_master_subjects',
   MASTER_SECTIONS: 'gradeup_master_sections',
   TARGET_EXAMS: 'gradeup_target_exams',
+  DELETED_TARGET_EXAMS: 'gradeup_deleted_target_exams',
   SELECTED_TARGET_EXAM: 'gradeup_selected_target_exam_id'
 };
 
@@ -544,7 +545,14 @@ const initLocalStorage = () => {
     localStorage.setItem(STORAGE_KEYS.REPORTS, JSON.stringify([]));
   }
   if (!localStorage.getItem(STORAGE_KEYS.TARGET_EXAMS)) {
-    localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(DEFAULT_TARGET_EXAMS));
+    try {
+      const rawDeleted = localStorage.getItem(STORAGE_KEYS.DELETED_TARGET_EXAMS);
+      const deletedIds = new Set(rawDeleted ? JSON.parse(rawDeleted) : []);
+      const initial = DEFAULT_TARGET_EXAMS.filter(e => !deletedIds.has(e.id));
+      localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(initial));
+    } catch {
+      localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(DEFAULT_TARGET_EXAMS));
+    }
   }
 };
 
@@ -2171,23 +2179,35 @@ export const dataService = {
 
   // For Admin / Results: Fetch full question dataset
   getQuestions: async (testId: string, includeAnswers = true): Promise<Question[]> => {
+    let resolvedTestId = testId;
+    if (!isValidUUID(resolvedTestId)) {
+      const foundTest = await dataService.getTestBySlugOrId(testId);
+      if (foundTest && isValidUUID(foundTest.id)) {
+        resolvedTestId = foundTest.id;
+      }
+    }
+
     const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase && isValidUUID(testId)) {
+    if (isSupabaseConfigured() && supabase && isValidUUID(resolvedTestId)) {
       try {
         const { data, error } = await supabase
           .from('questions')
           .select('*')
-          .eq('test_id', testId)
+          .eq('test_id', resolvedTestId)
           .order('question_number', { ascending: true });
-        if (!error && Array.isArray(data)) {
+        if (!error && Array.isArray(data) && data.length > 0) {
           // Update local cache for this test
           const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
           let questionsMap: Record<string, Question[]> = {};
           try {
             questionsMap = raw ? JSON.parse(raw) : {};
           } catch {}
-          questionsMap[testId] = data as Question[];
+          questionsMap[resolvedTestId] = data as Question[];
+          if (testId && testId !== resolvedTestId) {
+            questionsMap[testId] = data as Question[];
+          }
           localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+          idbStorage.set(STORAGE_KEYS.QUESTIONS, questionsMap);
 
           if (!includeAnswers) {
             return (data as Question[]).map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
@@ -2199,16 +2219,108 @@ export const dataService = {
       }
     }
 
+    // Local / IndexedDB Fallback
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
     let questionsMap: Record<string, Question[]> = {};
     try {
       questionsMap = raw ? JSON.parse(raw) : {};
     } catch {}
-    const questions = questionsMap[testId] || [];
+
+    let questions = questionsMap[resolvedTestId] || questionsMap[testId] || [];
+
+    // If localStorage was empty, try reading from IndexedDB
+    if (questions.length === 0) {
+      try {
+        const idbMap = await idbStorage.get<Record<string, Question[]>>(STORAGE_KEYS.QUESTIONS);
+        if (idbMap) {
+          questions = idbMap[resolvedTestId] || idbMap[testId] || [];
+          if (questions.length > 0) {
+            questionsMap[resolvedTestId] = questions;
+            questionsMap[testId] = questions;
+            localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+          }
+        }
+      } catch {}
+    }
+
+    // If we have local questions but Supabase had none, attempt background sync to Supabase
+    if (questions.length > 0 && isSupabaseConfigured() && supabase && isValidUUID(resolvedTestId)) {
+      setTimeout(() => {
+        dataService.syncQuestionsToRemote(resolvedTestId, questions).catch(() => {});
+      }, 500);
+    }
+
     if (!includeAnswers) {
       return questions.map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
     }
     return questions;
+  },
+
+  // Helper to safely push questions to Supabase without blocking local UI
+  syncQuestionsToRemote: async (targetTestId: string, questions: Question[]): Promise<void> => {
+    const supabase = getSupabaseClient();
+    if (!isSupabaseConfigured() || !supabase || !isValidUUID(targetTestId)) return;
+
+    try {
+      // 1. Ensure test exists in Supabase tests table to satisfy foreign key constraint
+      const test = await dataService.getTestBySlugOrId(targetTestId);
+      if (test) {
+        await supabase.from('tests').upsert({
+          id: targetTestId,
+          test_code: test.test_code || `TEST-${Math.floor(1000 + Math.random() * 9000)}`,
+          title: test.title,
+          slug: test.slug || targetTestId,
+          description: test.description || '',
+          category: test.category || 'Competitive Exam',
+          subject: test.subject || 'General Paper',
+          total_questions: questions.length,
+          total_marks: questions.reduce((sum, q) => sum + (Number(q.marks) || 1), 0),
+          marks_per_question: test.marks_per_question || 1,
+          negative_marking: test.negative_marking || 0,
+          duration_minutes: test.duration_minutes || 15,
+          passing_marks: test.passing_marks || 0,
+          instructions: test.instructions || '',
+          status: test.status || 'published',
+          is_published: test.is_published !== false,
+          created_at: test.created_at || new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'id' });
+      }
+
+      // 2. Delete existing questions and insert clean rows
+      await supabase.from('questions').delete().eq('test_id', targetTestId);
+      if (questions.length > 0) {
+        const cleanRows = questions.map((q, idx) => ({
+          id: isValidUUID(q.id) ? q.id : generateUUID(),
+          test_id: targetTestId,
+          question_number: idx + 1,
+          question_text: q.question_text || '',
+          question_image: q.question_image || null,
+          option_a: q.option_a || '',
+          option_b: q.option_b || '',
+          option_c: q.option_c || '',
+          option_d: q.option_d || '',
+          correct_answer: (q.correct_answer || 'A').toString().toUpperCase().trim().slice(0, 1),
+          explanation: q.explanation || null,
+          marks: parseSafeNumber(q.marks, 1),
+          negative_marks: parseSafeNumber(q.negative_marks, 0),
+          subject: q.subject || 'General Studies',
+          chapter: q.chapter || 'General',
+          created_at: q.created_at || new Date().toISOString()
+        }));
+
+        // Insert in batches of 50 to avoid payload limits
+        for (let i = 0; i < cleanRows.length; i += 50) {
+          const batch = cleanRows.slice(i, i + 50);
+          const { error: insErr } = await supabase.from('questions').insert(batch);
+          if (insErr) {
+            console.warn('Supabase questions batch insert warning:', insErr);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('syncQuestionsToRemote exception:', e);
+    }
   },
 
   saveQuestions: async (testId: string, questions: Question[]): Promise<void> => {
@@ -2221,6 +2333,8 @@ export const dataService = {
         targetTestId = generateUUID();
       }
     }
+
+    // Strictly re-index questions from 1 to N to prevent any unique constraint violations
     const sanitizedQuestions: Question[] = questions.map((q, idx) => {
       const qId = isValidUUID(q.id) ? q.id : generateUUID();
       const ans = (q.correct_answer || 'A').toString().toUpperCase().trim().slice(0, 1);
@@ -2228,7 +2342,7 @@ export const dataService = {
       return {
         id: qId,
         test_id: targetTestId,
-        question_number: Number(q.question_number) || (idx + 1),
+        question_number: idx + 1,
         question_text: q.question_text || '',
         question_image: q.question_image || null,
         option_a: q.option_a || '',
@@ -2256,7 +2370,20 @@ export const dataService = {
       };
     });
 
-    // 1. Ensure test metadata exists and update totals
+    // 1. Update local cache immediately (both LocalStorage and IndexedDB)
+    const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+    let questionsMap: Record<string, Question[]> = {};
+    try {
+      questionsMap = raw ? JSON.parse(raw) : {};
+    } catch {}
+    questionsMap[targetTestId] = sanitizedQuestions;
+    if (testId && testId !== targetTestId) {
+      questionsMap[testId] = sanitizedQuestions;
+    }
+    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+    idbStorage.set(STORAGE_KEYS.QUESTIONS, questionsMap);
+
+    // 2. Ensure test metadata exists and update totals in local cache & database
     const test = await dataService.getTestBySlugOrId(targetTestId);
     if (test) {
       const updatedTest: Test = {
@@ -2267,77 +2394,19 @@ export const dataService = {
       await dataService.saveTest(updatedTest);
     }
 
-    // 2. Persist questions in Supabase (with graceful column fallback)
-    const supabase = getSupabaseClient();
-    if (isSupabaseConfigured() && supabase && isValidUUID(targetTestId)) {
-      try {
-        await supabase.from('questions').delete().eq('test_id', targetTestId);
-        if (sanitizedQuestions.length > 0) {
-          // Prepare DB safe questions to include topic, difficulty, section
-          const dbRows = sanitizedQuestions.map(q => ({
-            id: q.id,
-            test_id: q.test_id,
-            question_number: q.question_number,
-            question_text: q.question_text,
-            question_image: q.question_image,
-            option_a: q.option_a,
-            option_b: q.option_b,
-            option_c: q.option_c,
-            option_d: q.option_d,
-            correct_answer: q.correct_answer,
-            explanation: q.explanation,
-            marks: q.marks,
-            negative_marks: q.negative_marks,
-            subject: q.subject,
-            chapter: q.chapter,
-            topic: q.topic || 'General Topic',
-            difficulty: q.difficulty || 'Medium',
-            section: q.section || 'General',
-            created_at: q.created_at
-          }));
-          const { error } = await supabase.from('questions').insert(dbRows);
-          if (error) {
-            console.warn('Supabase save questions with topic/difficulty error, falling back to core columns:', error);
-            // Fallback for legacy Supabase tables without topic/difficulty columns
-            const legacyRows = sanitizedQuestions.map(q => ({
-              id: q.id,
-              test_id: q.test_id,
-              question_number: q.question_number,
-              question_text: q.question_text,
-              question_image: q.question_image,
-              option_a: q.option_a,
-              option_b: q.option_b,
-              option_c: q.option_c,
-              option_d: q.option_d,
-              correct_answer: q.correct_answer,
-              explanation: q.explanation,
-              marks: q.marks,
-              negative_marks: q.negative_marks,
-              subject: q.subject,
-              chapter: q.chapter,
-              created_at: q.created_at
-            }));
-            await supabase.from('questions').insert(legacyRows);
-          }
-        }
-      } catch (e) {
-        console.error('Supabase save questions exception', e);
-      }
-    }
-
-    // 3. Update local cache with complete rich dataset
-    const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    let questionsMap: Record<string, Question[]> = {};
-    try {
-      questionsMap = raw ? JSON.parse(raw) : {};
-    } catch {}
-    questionsMap[targetTestId] = sanitizedQuestions;
-    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
-
-    // 4. Automatically sync and safeguard all questions in Question Bank Master
+    // 3. Automatically sync to Question Bank Master
     if (sanitizedQuestions.length > 0) {
       syncToQuestionBankMaster(sanitizedQuestions);
     }
+
+    // 4. Safely persist questions in Supabase (with test parent record creation)
+    await dataService.syncQuestionsToRemote(targetTestId, sanitizedQuestions);
+
+    // 5. Dispatch update events
+    window.dispatchEvent(new CustomEvent('gradeup_questions_updated', {
+      detail: { testId: targetTestId, count: sanitizedQuestions.length }
+    }));
+    window.dispatchEvent(new CustomEvent('gradeup_tests_updated'));
   },
 
   saveQuestion: async (testId: string, question: Question): Promise<Question> => {
@@ -4877,6 +4946,23 @@ export const dataService = {
     let list: TargetExam[] = [];
     const supabase = getSupabaseClient();
 
+    // Get list of permanently deleted target exam IDs/slugs
+    const getDeletedIds = (): Set<string> => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEYS.DELETED_TARGET_EXAMS);
+        return new Set(raw ? JSON.parse(raw) : []);
+      } catch {
+        return new Set();
+      }
+    };
+    const deletedIds = getDeletedIds();
+    const isDeleted = (e: TargetExam | null | undefined): boolean => {
+      if (!e) return true;
+      if (e.id && deletedIds.has(e.id)) return true;
+      if (e.slug && deletedIds.has(e.slug)) return true;
+      return false;
+    };
+
     if (isSupabaseConfigured() && supabase) {
       try {
         const query = supabase.from('target_exams').select('*').order('order_index', { ascending: true });
@@ -4885,11 +4971,14 @@ export const dataService = {
         }
         const { data, error } = await query;
         if (!error && Array.isArray(data) && data.length > 0) {
-          list = data.map((item: any) => ({
-            ...item,
-            mode_test_map: item.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] }
-          }));
+          list = data
+            .filter((item: any) => !isDeleted(item))
+            .map((item: any) => ({
+              ...item,
+              mode_test_map: item.mode_test_map || { topic_wise: [], subject_wise: [], full_mock: [], pyq: [] }
+            }));
           localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(list));
+          idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, list);
           return list;
         }
       } catch (err) {
@@ -4899,25 +4988,21 @@ export const dataService = {
 
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.TARGET_EXAMS);
-      if (raw) {
-        list = JSON.parse(raw);
-      }
-      if (!Array.isArray(list) || list.length === 0) {
-        list = [...DEFAULT_TARGET_EXAMS];
+      if (raw !== null) {
+        const parsed = JSON.parse(raw);
+        list = Array.isArray(parsed) ? parsed : [];
+      } else {
+        // First-time setup only: populate with default target exams
+        list = DEFAULT_TARGET_EXAMS.filter(def => !isDeleted(def));
         localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(list));
+        idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, list);
       }
     } catch {
-      list = [...DEFAULT_TARGET_EXAMS];
+      list = DEFAULT_TARGET_EXAMS.filter(def => !isDeleted(def));
     }
 
-    // Merge with any missing default target exams to ensure smooth out of the box experience
-    const existingIds = new Set(list.map(t => t.id));
-    DEFAULT_TARGET_EXAMS.forEach(defExam => {
-      if (!existingIds.has(defExam.id)) {
-        list.push(defExam);
-        existingIds.add(defExam.id);
-      }
-    });
+    // Always filter out any exam that the admin has explicitly deleted
+    list = (Array.isArray(list) ? list : []).filter(e => e && !isDeleted(e));
 
     list.sort((a, b) => (a.order_index ?? 999) - (b.order_index ?? 999));
 
@@ -4941,6 +5026,16 @@ export const dataService = {
 
     const id = exam.id || generateUUID();
     const slug = exam.slug || (exam.title || 'target-exam').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+
+    // Unmark as deleted if it was previously deleted
+    try {
+      const rawDeleted = localStorage.getItem(STORAGE_KEYS.DELETED_TARGET_EXAMS);
+      if (rawDeleted) {
+        const delArr: string[] = JSON.parse(rawDeleted);
+        const updated = delArr.filter(d => d !== id);
+        localStorage.setItem(STORAGE_KEYS.DELETED_TARGET_EXAMS, JSON.stringify(updated));
+      }
+    } catch {}
 
     const completeExam: TargetExam = {
       id,
@@ -5005,30 +5100,93 @@ export const dataService = {
     return completeExam;
   },
 
-  deleteTargetExam: async (id: string): Promise<boolean> => {
-    const existingList = await dataService.getTargetExams(true);
-    const filtered = existingList.filter(e => e.id !== id);
+  deleteTargetExam: async (idOrSlug: string): Promise<boolean> => {
+    if (!idOrSlug) return false;
 
+    // 1. Identify all identifiers (id and slug) for the target exam
+    let idToDelete = idOrSlug;
+    let slugToDelete: string | null = null;
     try {
-      localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(filtered));
+      const raw = localStorage.getItem(STORAGE_KEYS.TARGET_EXAMS);
+      const existingList: TargetExam[] = raw ? JSON.parse(raw) : [];
+      const found = existingList.find(e => e.id === idOrSlug || e.slug === idOrSlug) ||
+                    DEFAULT_TARGET_EXAMS.find(e => e.id === idOrSlug || e.slug === idOrSlug);
+      if (found) {
+        idToDelete = found.id;
+        slugToDelete = found.slug || null;
+      }
     } catch {}
-    idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, filtered);
 
-    // If active selected target exam was deleted, reset it
+    // 2. Record in permanently deleted exams set (in both LocalStorage and IndexedDB)
+    try {
+      const rawDeleted = localStorage.getItem(STORAGE_KEYS.DELETED_TARGET_EXAMS);
+      const deletedList: string[] = rawDeleted ? JSON.parse(rawDeleted) : [];
+      if (!deletedList.includes(idToDelete)) {
+        deletedList.push(idToDelete);
+      }
+      if (slugToDelete && !deletedList.includes(slugToDelete)) {
+        deletedList.push(slugToDelete);
+      }
+      if (idOrSlug && !deletedList.includes(idOrSlug)) {
+        deletedList.push(idOrSlug);
+      }
+      localStorage.setItem(STORAGE_KEYS.DELETED_TARGET_EXAMS, JSON.stringify(deletedList));
+      idbStorage.set(STORAGE_KEYS.DELETED_TARGET_EXAMS, deletedList);
+    } catch (e) {
+      console.warn('Failed to record deleted target exam id', e);
+    }
+
+    // 3. Remove from local storage array and IndexedDB
+    try {
+      const raw = localStorage.getItem(STORAGE_KEYS.TARGET_EXAMS);
+      const existingList: TargetExam[] = raw ? JSON.parse(raw) : [];
+      const filtered = existingList.filter(e => 
+        e.id !== idToDelete && 
+        e.slug !== idToDelete && 
+        e.id !== idOrSlug && 
+        e.slug !== idOrSlug &&
+        (!slugToDelete || (e.id !== slugToDelete && e.slug !== slugToDelete))
+      );
+      localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(filtered));
+      idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, filtered);
+    } catch (e) {
+      console.warn('Failed to remove from local storage on delete', e);
+    }
+
+    // 4. If active selected target exam was deleted, reset it
     const activeSelectedId = dataService.getSelectedTargetExamId();
-    if (activeSelectedId === id) {
+    if (
+      activeSelectedId === idToDelete || 
+      activeSelectedId === idOrSlug || 
+      (slugToDelete && activeSelectedId === slugToDelete)
+    ) {
       dataService.setSelectedTargetExamId(null);
     }
 
+    // 5. Delete from Supabase if configured
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
-        await supabase.from('target_exams').delete().eq('id', id);
-      } catch {}
+        await supabase.from('target_exams').delete().or(`id.eq.${idToDelete},slug.eq.${idToDelete}`);
+      } catch (sbErr) {
+        console.warn('Supabase delete target exam warning:', sbErr);
+      }
     }
 
-    window.dispatchEvent(new CustomEvent('gradeup_target_exams_updated', { detail: { deletedId: id } }));
+    window.dispatchEvent(new CustomEvent('gradeup_target_exams_updated', { detail: { deletedId: idToDelete, slug: slugToDelete } }));
     return true;
+  },
+
+  restoreDefaultTargetExams: async (): Promise<TargetExam[]> => {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.DELETED_TARGET_EXAMS);
+      localStorage.setItem(STORAGE_KEYS.TARGET_EXAMS, JSON.stringify(DEFAULT_TARGET_EXAMS));
+      idbStorage.set(STORAGE_KEYS.TARGET_EXAMS, DEFAULT_TARGET_EXAMS);
+    } catch (e) {
+      console.warn('Failed to restore default target exams', e);
+    }
+    window.dispatchEvent(new CustomEvent('gradeup_target_exams_updated', { detail: { restored: true } }));
+    return [...DEFAULT_TARGET_EXAMS];
   },
 
   getSelectedTargetExamId: (): string | null => {
