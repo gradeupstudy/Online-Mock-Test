@@ -1623,22 +1623,98 @@ export const dataService = {
         const parsed = JSON.parse(raw);
         if (parsed && typeof parsed === 'object') {
           Object.entries(parsed).forEach(([tId, list]) => {
-            if (Array.isArray(list)) {
-              counts[tId] = list.length;
+            if (Array.isArray(list) && list.length > 0) {
+              counts[tId] = Math.max(counts[tId] || 0, list.length);
             }
           });
         }
       }
     } catch {}
 
-    // 3. Query Supabase questions table if configured
+    // 3. Check per-test localStorage keys (e.g. gradeup_test_questions_${testId})
+    try {
+      if (typeof localStorage !== 'undefined') {
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('gradeup_test_questions_')) {
+            const tId = k.replace('gradeup_test_questions_', '');
+            try {
+              const val = localStorage.getItem(k);
+              if (val) {
+                const parsed = JSON.parse(val);
+                if (Array.isArray(parsed) && parsed.length > 0) {
+                  counts[tId] = Math.max(counts[tId] || 0, parsed.length);
+                }
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch {}
+
+    // 4. Read from IndexedDB questions map
+    try {
+      const idbMap = await idbStorage.get<Record<string, Question[]>>(STORAGE_KEYS.QUESTIONS);
+      if (idbMap && typeof idbMap === 'object') {
+        Object.entries(idbMap).forEach(([tId, list]) => {
+          if (Array.isArray(list) && list.length > 0) {
+            counts[tId] = Math.max(counts[tId] || 0, list.length);
+          }
+        });
+      }
+    } catch {}
+
+    // 5. Read from active / saved AI Automation session
+    try {
+      let session: any = null;
+      const rawSession = localStorage.getItem('gradeup_ai_automation_current_session');
+      if (rawSession) {
+        try { session = JSON.parse(rawSession); } catch {}
+      }
+      if (!session) {
+        session = await idbStorage.get('gradeup_ai_automation_current_session');
+      }
+      if (session && Array.isArray(session.generatedTests)) {
+        session.generatedTests.forEach((gt: any) => {
+          if (gt?.test?.id && Array.isArray(gt.questions) && gt.questions.length > 0) {
+            counts[gt.test.id] = Math.max(counts[gt.test.id] || 0, gt.questions.length);
+          }
+        });
+      }
+    } catch {}
+
+    // 6. Read from Question Bank Master in IndexedDB and localStorage
+    try {
+      let bank: Question[] = [];
+      const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+      if (rawBank) {
+        try { bank = JSON.parse(rawBank); } catch {}
+      }
+      if (!Array.isArray(bank) || bank.length === 0) {
+        const idbBank = await idbStorage.get<Question[]>(STORAGE_KEYS.QUESTION_BANK);
+        if (Array.isArray(idbBank)) bank = idbBank;
+      }
+      if (Array.isArray(bank) && bank.length > 0) {
+        const bankCounts: Record<string, number> = {};
+        bank.forEach(q => {
+          if (q.test_id && q.test_id !== 'bank') {
+            bankCounts[q.test_id] = (bankCounts[q.test_id] || 0) + 1;
+          }
+        });
+        Object.entries(bankCounts).forEach(([tId, cnt]) => {
+          counts[tId] = Math.max(counts[tId] || 0, cnt);
+        });
+      }
+    } catch {}
+
+    // 7. Query Supabase questions table if configured (only merge non-zero counts)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase) {
       try {
         const { data, error } = await supabase
           .from('questions')
           .select('test_id');
-        if (!error && Array.isArray(data)) {
+        if (!error && Array.isArray(data) && data.length > 0) {
           const remoteCounts: Record<string, number> = {};
           data.forEach((q: any) => {
             if (q.test_id && q.test_id !== 'bank') {
@@ -1647,7 +1723,7 @@ export const dataService = {
           });
           // Merge remote counts
           Object.entries(remoteCounts).forEach(([tId, cnt]) => {
-            counts[tId] = cnt;
+            counts[tId] = Math.max(counts[tId] || 0, cnt);
           });
         }
       } catch (e) {
@@ -1687,9 +1763,13 @@ export const dataService = {
               ? Number(local.max_attempts_per_student)
               : 0;
 
-            const actualQuestionsCount = qCounts[t.id] !== undefined
+            const countFromMap = qCounts[t.id] !== undefined
               ? qCounts[t.id]
-              : (t.slug && qCounts[t.slug] !== undefined ? qCounts[t.slug] : 0);
+              : (t.slug && qCounts[t.slug] !== undefined ? qCounts[t.slug] : undefined);
+
+            const actualQuestionsCount = countFromMap !== undefined && countFromMap > 0
+              ? countFromMap
+              : Math.max(t.total_questions || 0, local?.total_questions || 0, 0);
 
             const marksPerQ = parseSafeNumber(t.marks_per_question, 1);
             const actualTotalMarks = actualQuestionsCount > 0 
@@ -1716,7 +1796,11 @@ export const dataService = {
             } as Test;
           });
 
-          localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(remoteTests));
+          try {
+            localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(remoteTests));
+          } catch {}
+          idbStorage.set(STORAGE_KEYS.TESTS, remoteTests);
+
           if (!includeUnpublished) {
             return remoteTests.filter(t => t.is_published && (t.status === 'published' || !t.status));
           }
@@ -1731,16 +1815,24 @@ export const dataService = {
     const rawLocal = localStorage.getItem(STORAGE_KEYS.TESTS);
     let localTests: Test[] = [];
     try {
-      localTests = rawLocal ? JSON.parse(rawLocal) : DEMO_TESTS;
-      if (!Array.isArray(localTests) || localTests.length === 0) localTests = DEMO_TESTS;
+      localTests = rawLocal ? JSON.parse(rawLocal) : [];
+      if (!Array.isArray(localTests) || localTests.length === 0) {
+        const idbTests = await idbStorage.get<Test[]>(STORAGE_KEYS.TESTS);
+        localTests = Array.isArray(idbTests) && idbTests.length > 0 ? idbTests : DEMO_TESTS;
+      }
     } catch {
       localTests = DEMO_TESTS;
     }
 
     const calibratedLocalTests = localTests.map(t => {
-      const actualQuestionsCount = qCounts[t.id] !== undefined
+      const countFromMap = qCounts[t.id] !== undefined
         ? qCounts[t.id]
-        : (t.slug && qCounts[t.slug] !== undefined ? qCounts[t.slug] : 0);
+        : (t.slug && qCounts[t.slug] !== undefined ? qCounts[t.slug] : undefined);
+
+      const actualQuestionsCount = countFromMap !== undefined && countFromMap > 0
+        ? countFromMap
+        : Math.max(t.total_questions || 0, 0);
+
       const marksPerQ = parseSafeNumber(t.marks_per_question, 1);
       const actualTotalMarks = actualQuestionsCount > 0 
         ? (actualQuestionsCount * marksPerQ)
@@ -1762,6 +1854,9 @@ export const dataService = {
 
     try {
       localStorage.setItem(STORAGE_KEYS.TESTS, JSON.stringify(calibratedLocalTests));
+    } catch {}
+    try {
+      idbStorage.set(STORAGE_KEYS.TESTS, calibratedLocalTests);
     } catch {}
 
     if (!includeUnpublished) {
@@ -1805,9 +1900,13 @@ export const dataService = {
             ? Number(localTest.max_attempts_per_student)
             : 0;
 
-          const actualCount = qCounts[data.id] !== undefined
+          const countFromMap = qCounts[data.id] !== undefined
             ? qCounts[data.id]
-            : (data.slug && qCounts[data.slug] !== undefined ? qCounts[data.slug] : 0);
+            : (data.slug && qCounts[data.slug] !== undefined ? qCounts[data.slug] : undefined);
+
+          const actualCount = countFromMap !== undefined && countFromMap > 0
+            ? countFromMap
+            : Math.max(data.total_questions || 0, localTest?.total_questions || 0, 0);
 
           const marksPerQ = parseSafeNumber(data.marks_per_question, 1);
           const actualTotalMarks = actualCount > 0 ? (actualCount * marksPerQ) : parseSafeNumber(data.total_marks, 0);
@@ -2306,6 +2405,9 @@ export const dataService = {
 
   // For Admin / Results: Fetch full question dataset
   getQuestions: async (testId: string, includeAnswers = true): Promise<Question[]> => {
+    let resolvedQuestions: Question[] = [];
+
+    // 1. Supabase Query if configured (ONLY accept if non-empty data is returned!)
     const supabase = getSupabaseClient();
     if (isSupabaseConfigured() && supabase && isValidUUID(testId)) {
       try {
@@ -2314,36 +2416,128 @@ export const dataService = {
           .select('*')
           .eq('test_id', testId)
           .order('question_number', { ascending: true });
-        if (!error && Array.isArray(data)) {
-          // Update local cache for this test
-          const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-          let questionsMap: Record<string, Question[]> = {};
+        if (!error && Array.isArray(data) && data.length > 0) {
+          resolvedQuestions = data as Question[];
+          // Update local cache
           try {
-            questionsMap = raw ? JSON.parse(raw) : {};
+            const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+            const questionsMap: Record<string, Question[]> = raw ? JSON.parse(raw) : {};
+            questionsMap[testId] = resolvedQuestions;
+            localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
           } catch {}
-          questionsMap[testId] = data as Question[];
-          localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
-
-          if (!includeAnswers) {
-            return (data as Question[]).map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
-          }
-          return data as Question[];
+          idbStorage.set(`gradeup_test_questions_${testId}`, resolvedQuestions);
         }
       } catch (e) {
         console.warn('Supabase questions fetch error', e);
       }
     }
 
-    const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
-    let questionsMap: Record<string, Question[]> = {};
-    try {
-      questionsMap = raw ? JSON.parse(raw) : {};
-    } catch {}
-    const questions = questionsMap[testId] || [];
-    if (!includeAnswers) {
-      return questions.map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
+    // 2. If Supabase did not return questions, check per-test localStorage key
+    if (resolvedQuestions.length === 0) {
+      try {
+        const rawPerTest = localStorage.getItem(`gradeup_test_questions_${testId}`);
+        if (rawPerTest) {
+          const parsed = JSON.parse(rawPerTest);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            resolvedQuestions = parsed;
+          }
+        }
+      } catch {}
     }
-    return questions;
+
+    // 3. Check monolithic localStorage questions map
+    if (resolvedQuestions.length === 0) {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed[testId]) && parsed[testId].length > 0) {
+            resolvedQuestions = parsed[testId];
+          }
+        }
+      } catch {}
+    }
+
+    // 4. Check per-test IndexedDB storage
+    if (resolvedQuestions.length === 0) {
+      try {
+        const idbPerTest = await idbStorage.get<Question[]>(`gradeup_test_questions_${testId}`);
+        if (Array.isArray(idbPerTest) && idbPerTest.length > 0) {
+          resolvedQuestions = idbPerTest;
+        }
+      } catch {}
+    }
+
+    // 5. Check monolithic IndexedDB questions map
+    if (resolvedQuestions.length === 0) {
+      try {
+        const idbMap = await idbStorage.get<Record<string, Question[]>>(STORAGE_KEYS.QUESTIONS);
+        if (idbMap && Array.isArray(idbMap[testId]) && idbMap[testId].length > 0) {
+          resolvedQuestions = idbMap[testId];
+        }
+      } catch {}
+    }
+
+    // 6. Check Active / Saved AI Automation Session in storage
+    if (resolvedQuestions.length === 0) {
+      try {
+        let session: any = null;
+        const rawSession = localStorage.getItem('gradeup_ai_automation_current_session');
+        if (rawSession) {
+          try { session = JSON.parse(rawSession); } catch {}
+        }
+        if (!session) {
+          session = await idbStorage.get('gradeup_ai_automation_current_session');
+        }
+        if (session && Array.isArray(session.generatedTests)) {
+          const matchedGen = session.generatedTests.find((gt: any) => 
+            gt?.test?.id === testId || gt?.test?.slug === testId || gt?.test?.test_code === testId
+          );
+          if (matchedGen && Array.isArray(matchedGen.questions) && matchedGen.questions.length > 0) {
+            resolvedQuestions = matchedGen.questions;
+          }
+        }
+      } catch {}
+    }
+
+    // 7. Check Question Bank Master in IndexedDB and localStorage
+    if (resolvedQuestions.length === 0) {
+      try {
+        let bank: Question[] = [];
+        const rawBank = localStorage.getItem(STORAGE_KEYS.QUESTION_BANK);
+        if (rawBank) {
+          try { bank = JSON.parse(rawBank); } catch {}
+        }
+        if (!Array.isArray(bank) || bank.length === 0) {
+          const idbBank = await idbStorage.get<Question[]>(STORAGE_KEYS.QUESTION_BANK);
+          if (Array.isArray(idbBank)) bank = idbBank;
+        }
+        if (Array.isArray(bank) && bank.length > 0) {
+          const matching = bank.filter(q => q.test_id === testId);
+          if (matching.length > 0) {
+            resolvedQuestions = matching.sort((a, b) => (a.question_number || 0) - (b.question_number || 0));
+          }
+        }
+      } catch {}
+    }
+
+    // 8. Demo questions fallback
+    if (resolvedQuestions.length === 0 && (DEMO_QUESTIONS as any)[testId]) {
+      resolvedQuestions = (DEMO_QUESTIONS as any)[testId];
+    }
+
+    // Self-healing synchronization: if questions were found in deep storage, cache them into fast storage!
+    if (resolvedQuestions.length > 0) {
+      try {
+        localStorage.setItem(`gradeup_test_questions_${testId}`, JSON.stringify(resolvedQuestions));
+      } catch {}
+      idbStorage.set(`gradeup_test_questions_${testId}`, resolvedQuestions);
+    }
+
+    if (!includeAnswers) {
+      return resolvedQuestions.map(q => ({ ...q, correct_answer: undefined, explanation: undefined }));
+    }
+    return resolvedQuestions;
   },
 
   saveQuestions: async (testId: string, questions: Question[]): Promise<void> => {
@@ -2366,17 +2560,23 @@ export const dataService = {
         question_number: Number(q.question_number) || (idx + 1),
         question_text: q.question_text || '',
         question_image: q.question_image || null,
+        question_hi: q.question_hi || null,
         option_a: q.option_a || '',
         option_a_image: q.option_a_image || null,
+        option_a_hi: q.option_a_hi || null,
         option_b: q.option_b || '',
         option_b_image: q.option_b_image || null,
+        option_b_hi: q.option_b_hi || null,
         option_c: q.option_c || '',
         option_c_image: q.option_c_image || null,
+        option_c_hi: q.option_c_hi || null,
         option_d: q.option_d || '',
         option_d_image: q.option_d_image || null,
+        option_d_hi: q.option_d_hi || null,
         correct_answer: validAns,
         explanation: q.explanation || null,
         explanation_image: q.explanation_image || null,
+        explanation_hi: q.explanation_hi || null,
         marks: parseSafeNumber(q.marks, 1),
         negative_marks: parseSafeNumber(q.negative_marks, 0),
         subject: q.subject || 'General Studies',
@@ -2460,14 +2660,22 @@ export const dataService = {
       }
     }
 
-    // 3. Update local cache with complete rich dataset
+    // 3. Update local cache with complete rich dataset across per-test & master stores
+    try {
+      localStorage.setItem(`gradeup_test_questions_${targetTestId}`, JSON.stringify(sanitizedQuestions));
+    } catch {}
+    idbStorage.set(`gradeup_test_questions_${targetTestId}`, sanitizedQuestions);
+
     const raw = localStorage.getItem(STORAGE_KEYS.QUESTIONS);
     let questionsMap: Record<string, Question[]> = {};
     try {
       questionsMap = raw ? JSON.parse(raw) : {};
     } catch {}
     questionsMap[targetTestId] = sanitizedQuestions;
-    localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+    try {
+      localStorage.setItem(STORAGE_KEYS.QUESTIONS, JSON.stringify(questionsMap));
+    } catch {}
+    idbStorage.set(STORAGE_KEYS.QUESTIONS, questionsMap);
 
     // 4. Automatically sync and safeguard all questions in Question Bank Master
     if (sanitizedQuestions.length > 0) {
